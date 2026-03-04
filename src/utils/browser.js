@@ -49,32 +49,42 @@ async function launchBrowser() {
   if (browserlessUrl) {
     log.info('connecting to remote Chrome via BROWSERLESS_URL');
     try {
-      const puppeteerCore = require('puppeteer-core');
-
-      // Pass proxy to the remote Chrome if PROXY_URL is set.
-      // Browserless supports launch args via ?launch={"args":[...]} query param.
-      // Credentials are NOT passed here — they're set per-page via page.authenticate().
+      // Build the WebSocket endpoint with:
+      //   - stealth=true → Browserless launches Chrome with anti-detection flags server-side
+      //                     (--disable-blink-features=AutomationControlled, etc.)
+      //   - proxy-server → route via residential proxy to bypass datacenter IP blocks (Cloudflare)
       let wsEndpoint = browserlessUrl;
+      const sep = () => wsEndpoint.includes('?') ? '&' : '?';
+
+      // Add server-side stealth (Browserless.io parameter)
+      wsEndpoint += `${sep()}stealth=true`;
+
+      // Add residential proxy if PROXY_URL is set
       const proxyUrl = (process.env.PROXY_URL || '').trim();
       if (proxyUrl) {
         try {
           const u = new URL(proxyUrl);
           const proxyServer = `${u.hostname}:${u.port}`;
-          const launchArgs = JSON.stringify({ args: [`--proxy-server=${proxyServer}`] });
-          const sep = wsEndpoint.includes('?') ? '&' : '?';
-          wsEndpoint = `${wsEndpoint}${sep}launch=${encodeURIComponent(launchArgs)}`;
-          log.info(`browser will proxy traffic via ${proxyServer}`);
+          const launchArgs = JSON.stringify({
+            args: [
+              `--proxy-server=${proxyServer}`,
+              '--disable-blink-features=AutomationControlled',
+            ],
+          });
+          wsEndpoint += `${sep()}launch=${encodeURIComponent(launchArgs)}`;
+          log.info(`browser: stealth=true + proxy=${proxyServer}`);
         } catch (_) { /* ignore malformed PROXY_URL */ }
       }
 
-      const browser = await puppeteerCore.connect({
+      const browser = await puppeteerExtra.connect({
         browserWSEndpoint: wsEndpoint,
         defaultViewport: { width: 1280, height: 720 },
       });
-      log.debug('connected to remote Chrome');
+      log.debug('connected to remote Chrome (server-side stealth)');
       return browser;
     } catch (err) {
       log.error(`remote Chrome connection failed: ${err.message}`);
+
       throw err;
     }
   }
