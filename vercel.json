@@ -2,8 +2,8 @@
   "version": 2,
   "functions": {
     "server.js": {
-      "memory": 3008,
-      "maxDuration": 60,
+      "memory": 1024,
+      "maxDuration": 10,
       "includeFiles": "{src/**,manifest.json}"
     }
   },
