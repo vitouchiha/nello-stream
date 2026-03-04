@@ -14,6 +14,7 @@ const cheerio = require('cheerio');
 const { fetchWithCloudscraper } = require('../utils/fetcher');
 const { TTLCache } = require('../utils/cache');
 const { extractBaseSlug } = require('../utils/titleHelper');
+const { wrapStreamUrl } = require('../utils/mediaflow');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('rama');
@@ -34,7 +35,7 @@ const streamCache  = new TTLCache({ ttl: 60 * 60_000, maxSize: 1000 });
  * @param {string} [search='']
  * @returns {Promise<Array>}
  */
-async function getCatalog(skip = 0, search = '') {
+async function getCatalog(skip = 0, search = '', config = {}) {
   const cacheKey = `catalog:${skip}:${search}`;
   const cached = catalogCache.get(cacheKey);
   if (cached) {
@@ -50,7 +51,7 @@ async function getCatalog(skip = 0, search = '') {
   while (items.length < ITEMS_PER_PAGE && pageNumber <= MAX_PAGES) {
     const url = `${BASE_URL}${CATALOG_PATH}page/${pageNumber}/`;
     log.info(`fetching catalog page ${pageNumber}`, { url });
-    const html = await fetchWithCloudscraper(url, { referer: BASE_URL + CATALOG_PATH });
+    const html = await fetchWithCloudscraper(url, { referer: BASE_URL + CATALOG_PATH, proxyUrl: config.proxyUrl });
     if (!html) break;
 
     const $ = cheerio.load(html);
@@ -98,7 +99,7 @@ async function getCatalog(skip = 0, search = '') {
  * @param {string} id  e.g. "rama_my-drama-2023"
  * @returns {Promise<{meta: object}>}
  */
-async function getMeta(id) {
+async function getMeta(id, config = {}) {
   const cached = metaCache.get(id);
   if (cached) {
     log.debug('meta from cache', { id });
@@ -109,7 +110,7 @@ async function getMeta(id) {
   const seriesUrl = `${BASE_URL}/drama/${baseId}/`;
   log.info('fetching meta', { id, seriesUrl });
 
-  const html = await fetchWithCloudscraper(seriesUrl, { referer: BASE_URL });
+  const html = await fetchWithCloudscraper(seriesUrl, { referer: BASE_URL, proxyUrl: config.proxyUrl });
   if (!html) {
     log.warn('meta fetch returned null', { id });
     return { meta: _emptyMeta(id) };
@@ -174,20 +175,22 @@ async function getMeta(id) {
  * @param {string} id  e.g. "rama_my-drama-2023"
  * @returns {Promise<Array>}
  */
-async function getStreams(id) {
+async function getStreams(id, config = {}) {
   const cached = streamCache.get(id);
   if (cached) {
     log.debug('streams from cache', { id });
-    return cached;
+    // Wrap raw cached URLs with MFP per-request
+    return cached.map(s => ({ ...s, url: wrapStreamUrl(s.url, config) }));
   }
 
-  const { meta } = await getMeta(id);
+  const { meta } = await getMeta(id, config);
   if (!meta || !meta.episodes || !meta.episodes.length) {
     log.warn('no episodes found for streams', { id });
     return [];
   }
 
-  const streams = meta.episodes.flatMap(ep =>
+  // Store raw (unwrapped) URLs in cache
+  const rawStreams = meta.episodes.flatMap(ep =>
     ep.streams.map(s => ({
       name: 'Rama',
       title: `${ep.title} — ${s.title}`,
@@ -196,8 +199,8 @@ async function getStreams(id) {
     }))
   );
 
-  streamCache.set(id, streams);
-  return streams;
+  streamCache.set(id, rawStreams);
+  return rawStreams.map(s => ({ ...s, url: wrapStreamUrl(s.url, config) }));
 }
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
@@ -238,7 +241,7 @@ async function _getStreamFromEpisodePage(episodeLink) {
   if (cached) return cached;
 
   log.debug('fetching episode page', { episodeLink });
-  const html = await fetchWithCloudscraper(episodeLink, { referer: BASE_URL, timeout: 15_000 });
+  const html = await fetchWithCloudscraper(episodeLink, { referer: BASE_URL, timeout: 15_000, proxyUrl: undefined });
   if (!html) return null;
 
   const $ = cheerio.load(html);

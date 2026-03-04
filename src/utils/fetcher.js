@@ -23,24 +23,33 @@ const log = createLogger('fetcher');
 
 // ─── Proxy support ────────────────────────────────────────────────────────────
 
-let _proxyAgent = null;
-let _proxyUrl = null;
+const _agentCache = new Map();
 
-function getProxyAgent() {
-  const proxyUrl = (process.env.PROXY_URL || '').trim();
-  if (!proxyUrl) return null;
-  if (_proxyAgent && _proxyUrl === proxyUrl) return _proxyAgent;
-
+/**
+ * Create (or retrieve cached) HttpsProxyAgent for any given proxy URL.
+ * Used for per-request proxy (from user config) or env-var proxy.
+ * @param {string} proxyUrl
+ * @returns {object|null}
+ */
+function makeProxyAgent(proxyUrl) {
+  const url = (proxyUrl || '').trim();
+  if (!url) return null;
+  if (_agentCache.has(url)) return _agentCache.get(url);
   try {
     const { HttpsProxyAgent } = require('https-proxy-agent');
-    _proxyAgent = new HttpsProxyAgent(proxyUrl);
-    _proxyUrl = proxyUrl;
-    log.info('Proxy configured', { url: proxyUrl.replace(/:[^:@]+@/, ':***@') });
-    return _proxyAgent;
+    const agent = new HttpsProxyAgent(url);
+    _agentCache.set(url, agent);
+    log.info('Proxy agent created', { url: url.replace(/:[^:@]+@/, ':***@') });
+    return agent;
   } catch (e) {
-    log.warn('https-proxy-agent not available, proxy disabled');
+    log.warn('https-proxy-agent not available');
     return null;
   }
+}
+
+/** Proxy agent from PROXY_URL env var (legacy fallback). */
+function getProxyAgent() {
+  return makeProxyAgent((process.env.PROXY_URL || '').trim());
 }
 
 // ─── User agents ─────────────────────────────────────────────────────────────
@@ -67,8 +76,9 @@ function randomUA() {
  * @param {string}  [opts.referer]
  * @returns {Promise<string|null>}
  */
-async function fetchWithCloudscraper(url, { retries = 3, timeout = 12_000, retryDelay = 2_000, referer } = {}) {
-  const proxyUrl = (process.env.PROXY_URL || '').trim() || null;
+async function fetchWithCloudscraper(url, { retries = 3, timeout = 12_000, retryDelay = 2_000, referer, proxyUrl } = {}) {
+  // Per-request proxyUrl overrides env var
+  const effectiveProxy = (proxyUrl || process.env.PROXY_URL || '').trim() || null;
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       log.debug(`Attempt ${attempt}/${retries} — ${url}`);
@@ -89,7 +99,7 @@ async function fetchWithCloudscraper(url, { retries = 3, timeout = 12_000, retry
         timeout,
         resolveWithFullResponse: true,
       };
-      if (proxyUrl) reqOpts.proxy = proxyUrl;
+      if (effectiveProxy) reqOpts.proxy = effectiveProxy;
 
       const response = await cloudscraper.get(reqOpts);
 
@@ -123,13 +133,14 @@ async function fetchWithCloudscraper(url, { retries = 3, timeout = 12_000, retry
  * @param {number} [opts.retries=2]
  * @returns {Promise<any|null>}
  */
-async function fetchWithAxios(url, { headers = {}, timeout = 10_000, responseType = 'json', retries = 2 } = {}) {
+async function fetchWithAxios(url, { headers = {}, timeout = 10_000, responseType = 'json', retries = 2, proxyUrl } = {}) {
   const mergedHeaders = {
     'User-Agent': randomUA(),
     'Accept': 'application/json, text/plain, */*',
     ...headers,
   };
-  const proxyAgent = getProxyAgent();
+  // Per-request proxyUrl overrides env var
+  const proxyAgent = proxyUrl ? makeProxyAgent(proxyUrl) : getProxyAgent();
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const { data } = await axios.get(url, {
@@ -169,4 +180,4 @@ function _sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-module.exports = { fetchWithCloudscraper, fetchWithAxios, withTimeout, randomUA, getProxyAgent };
+module.exports = { fetchWithCloudscraper, fetchWithAxios, withTimeout, randomUA, getProxyAgent, makeProxyAgent };

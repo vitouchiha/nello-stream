@@ -19,7 +19,8 @@ const { getCloudflareCookie } = require('../utils/cloudflare');
 const { decryptKisskhSubtitleFull, decryptKisskhSubtitleStatic } = require('../utils/subDecrypter');
 const { TTLCache } = require('../utils/cache');
 const { cleanTitleForSearch, titleSimilarity, extractEpisodeNumericId } = require('../utils/titleHelper');
-const { withTimeout, getProxyAgent } = require('../utils/fetcher');
+const { withTimeout, makeProxyAgent, getProxyAgent } = require('../utils/fetcher');
+const { wrapStreamUrl } = require('../utils/mediaflow');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('kisskh');
@@ -56,8 +57,8 @@ async function _headers() {
  * @param {number} [timeout=8000]
  * @returns {Promise<any|null>}
  */
-async function _apiGet(url, timeout = 8_000) {
-  const proxyAgent = getProxyAgent();
+async function _apiGet(url, timeout = 8_000, proxyUrl) {
+  const proxyAgent = proxyUrl ? makeProxyAgent(proxyUrl) : getProxyAgent();
   const proxyConfig = proxyAgent ? { httpsAgent: proxyAgent, httpAgent: proxyAgent, proxy: false } : {};
   try {
     const { data } = await axios.get(url, { headers: _baseHeaders(), timeout, ...proxyConfig });
@@ -84,7 +85,7 @@ async function _apiGet(url, timeout = 8_000) {
  * @param {string} [search='']
  * @returns {Promise<Array>}
  */
-async function getCatalog(skip = 0, search = '') {
+async function getCatalog(skip = 0, search = '', config = {}) {
   const cacheKey = `catalog:${skip}:${search}`;
   const cached = catalogCache.get(cacheKey);
   if (cached) {
@@ -94,22 +95,22 @@ async function getCatalog(skip = 0, search = '') {
 
   const page = Math.floor(skip / 20) + 1;
   const items = search.trim()
-    ? await _searchCatalog(search.trim(), 20)
-    : await _listCatalog(page, 20);
+    ? await _searchCatalog(search.trim(), 20, config.proxyUrl)
+    : await _listCatalog(page, 20, config.proxyUrl);
 
   catalogCache.set(cacheKey, items);
   return items;
 }
 
-async function _listCatalog(page, limit) {
+async function _listCatalog(page, limit, proxyUrl) {
   const url = `${API_BASE}/DramaList/List?page=${page}&type=1&sub=0&country=2&status=2&order=3&pageSize=${limit}`;
   log.info('list catalog', { url });
-  const data = await _apiGet(url);
+  const data = await _apiGet(url, 8_000, proxyUrl);
   if (!data || !data.data) return [];
   return data.data.map(_mapItem);
 }
 
-async function _searchCatalog(query, limit = 20) {
+async function _searchCatalog(query, limit = 20, proxyUrl) {
   const cleanQuery = cleanTitleForSearch(query);
   const allResults = [];
   let currentPage = 1;
@@ -119,7 +120,7 @@ async function _searchCatalog(query, limit = 20) {
   while (allResults.length < limit && currentPage <= maxPages && emptyPages < 3) {
     const url = `${API_BASE}/DramaList/List?page=${currentPage}&type=1&sub=0&country=2&status=2&order=3&pageSize=30&search=${encodeURIComponent(query)}`;
     try {
-      const data = await _apiGet(url);
+      const data = await _apiGet(url, 8_000, proxyUrl);
       if (!data || !data.data || !data.data.length) { emptyPages++; currentPage++; continue; }
 
       const pageItems = data.data
@@ -160,7 +161,7 @@ function _mapItem(item) {
  * @param {string} id  e.g. "kisskh_1234"
  * @returns {Promise<{meta: object}>}
  */
-async function getMeta(id) {
+async function getMeta(id, config = {}) {
   const cached = metaCache.get(id);
   if (cached) {
     log.debug('meta from cache', { id });
@@ -172,7 +173,7 @@ async function getMeta(id) {
   log.info('fetching meta', { id, url });
 
   try {
-    const data = await _apiGet(url);
+    const data = await _apiGet(url, 8_000, config.proxyUrl);
     if (!data) return { meta: null };
 
     const meta = {
@@ -208,7 +209,7 @@ async function getMeta(id) {
  * @param {string} stremioId  e.g. "kisskh_1234:5678"
  * @returns {Promise<Array>}
  */
-async function getStreams(stremioId) {
+async function getStreams(stremioId, config = {}) {
   const [seriesPart, episodePart] = stremioId.split(':');
   const serieId = seriesPart.replace(/^kisskh_/, '');
   const episodeId = episodePart ? extractEpisodeNumericId(episodePart) : null;
@@ -220,27 +221,35 @@ async function getStreams(stremioId) {
 
   const cacheKey = `stream:${serieId}:${episodeId}`;
   const cached = streamCache.get(cacheKey);
+
+  // Cache stores { url, subtitles } (raw, unwrapped) so MFP wrapping is per-request
+  let rawUrl, subtitles;
   if (cached) {
     log.debug('stream from cache', { cacheKey });
-    return cached;
+    rawUrl = cached.url;
+    subtitles = cached.subtitles;
+  } else {
+    log.info('extracting stream via puppeteer', { serieId, episodeId });
+    rawUrl = await _extractStream(serieId, episodeId);
+    if (!rawUrl) {
+      log.warn('no stream found', { serieId, episodeId });
+      return [];
+    }
+    subtitles = await _getSubtitles(serieId, episodeId);
+    streamCache.set(cacheKey, { url: rawUrl, subtitles });
   }
 
-  log.info('extracting stream via puppeteer', { serieId, episodeId });
-  const streamUrl = await _extractStream(serieId, episodeId);
+  // Wrap stream URL through MediaFlow Proxy if configured
+  const finalUrl = wrapStreamUrl(rawUrl, config, {
+    'Referer': SITE_BASE + '/',
+    'Origin': SITE_BASE,
+  });
 
-  if (!streamUrl) {
-    log.warn('no stream found', { serieId, episodeId });
-    return [];
-  }
-
-  // Attempt to get Italian subtitles
-  const subtitles = await _getSubtitles(serieId, episodeId);
-
-  const streams = [
+  return [
     {
       name: 'KissKH',
       title: `Episode ${episodeId}`,
-      url: streamUrl,
+      url: finalUrl,
       subtitles,
       behaviorHints: {
         notWebReady: false,
@@ -248,9 +257,6 @@ async function getStreams(stremioId) {
       },
     },
   ];
-
-  streamCache.set(cacheKey, streams);
-  return streams;
 }
 
 // ─── Puppeteer stream extraction ──────────────────────────────────────────────

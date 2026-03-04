@@ -34,9 +34,10 @@ const STREAM_TIMEOUT  = Number(process.env.STREAM_TIMEOUT)  || 45_000;
  * @param {'series'|'kdrama'} type
  * @param {string} catalogId
  * @param {object} extra  { search?, skip? }
+ * @param {object} [config]
  * @returns {Promise<{metas: Array}>}
  */
-async function handleCatalog(type, catalogId, extra = {}) {
+async function handleCatalog(type, catalogId, extra = {}, config = {}) {
   const skip   = Number(extra.skip)   || 0;
   const search = String(extra.search  || '').trim();
 
@@ -44,12 +45,12 @@ async function handleCatalog(type, catalogId, extra = {}) {
 
   try {
     if (catalogId === 'kisskh_catalog' || type === 'series') {
-      const metas = await withTimeout(kisskh.getCatalog(skip, search), CATALOG_TIMEOUT, 'kisskh.getCatalog');
+      const metas = await withTimeout(kisskh.getCatalog(skip, search, config), CATALOG_TIMEOUT, 'kisskh.getCatalog');
       return { metas };
     }
 
     if (catalogId === 'rama_catalog' || type === 'kdrama') {
-      const metas = await withTimeout(rama.getCatalog(skip, search), CATALOG_TIMEOUT, 'rama.getCatalog');
+      const metas = await withTimeout(rama.getCatalog(skip, search, config), CATALOG_TIMEOUT, 'rama.getCatalog');
       return { metas };
     }
   } catch (err) {
@@ -64,19 +65,20 @@ async function handleCatalog(type, catalogId, extra = {}) {
 /**
  * @param {'series'|'kdrama'} type
  * @param {string} id
+ * @param {object} [config]
  * @returns {Promise<{meta: object|null}>}
  */
-async function handleMeta(type, id) {
+async function handleMeta(type, id, config = {}) {
   log.info('meta request', { type, id });
 
   try {
     if (id.startsWith('kisskh_')) {
-      const result = await withTimeout(kisskh.getMeta(id), META_TIMEOUT, 'kisskh.getMeta');
+      const result = await withTimeout(kisskh.getMeta(id, config), META_TIMEOUT, 'kisskh.getMeta');
       return result || { meta: null };
     }
 
     if (id.startsWith('rama_')) {
-      const result = await withTimeout(rama.getMeta(id), META_TIMEOUT, 'rama.getMeta');
+      const result = await withTimeout(rama.getMeta(id, config), META_TIMEOUT, 'rama.getMeta');
       return result || { meta: null };
     }
   } catch (err) {
@@ -91,13 +93,14 @@ async function handleMeta(type, id) {
 /**
  * @param {'series'|'kdrama'} type
  * @param {string} id   May be composite: "kisskh_123:456"
+ * @param {object} [config]
  * @returns {Promise<{streams: Array}>}
  */
-async function handleStream(type, id) {
+async function handleStream(type, id, config = {}) {
   log.info('stream request', { type, id });
 
   const results = await Promise.allSettled([
-    _fetchFromProvider(id, type),
+    _fetchFromProvider(id, type, config),
   ]);
 
   const streams = results
@@ -116,20 +119,20 @@ async function handleStream(type, id) {
   return { streams: unique };
 }
 
-async function _fetchFromProvider(id, type) {
+async function _fetchFromProvider(id, type, config = {}) {
   // Determine provider by ID prefix
   if (id.startsWith('kisskh_')) {
-    return withTimeout(kisskh.getStreams(id), STREAM_TIMEOUT, 'kisskh.getStreams');
+    return withTimeout(kisskh.getStreams(id, config), STREAM_TIMEOUT, 'kisskh.getStreams');
   }
   if (id.startsWith('rama_')) {
-    return withTimeout(rama.getStreams(id), STREAM_TIMEOUT, 'rama.getStreams');
+    return withTimeout(rama.getStreams(id, config), STREAM_TIMEOUT, 'rama.getStreams');
   }
 
   // Unknown prefix — try both providers in parallel and merge
   log.warn('unknown id prefix, trying all providers', { id });
   const [kisskhResult, ramaResult] = await Promise.allSettled([
-    withTimeout(kisskh.getStreams(`kisskh_${id}`), STREAM_TIMEOUT, 'kisskh.getStreams.fallback'),
-    withTimeout(rama.getStreams(`rama_${id}`), STREAM_TIMEOUT, 'rama.getStreams.fallback'),
+    withTimeout(kisskh.getStreams(`kisskh_${id}`, config), STREAM_TIMEOUT, 'kisskh.getStreams.fallback'),
+    withTimeout(rama.getStreams(`rama_${id}`, config), STREAM_TIMEOUT, 'rama.getStreams.fallback'),
   ]);
 
   return [
