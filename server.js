@@ -151,9 +151,12 @@ app.get('/debug/providers', async (req, res) => {
 
 app.get('/debug/browser', async (req, res) => {
   const { launchBrowser } = require('./src/utils/browser');
+  const cfClearance = (process.env.CF_CLEARANCE_KISSKH || '').trim();
   const result = {
     BROWSERLESS_URL: (process.env.BROWSERLESS_URL || '').trim().slice(0, 60) || null,
     PROXY_URL: (process.env.PROXY_URL || '').trim().slice(0, 40) || null,
+    CF_CLEARANCE_SET: !!cfClearance,
+    CF_CLEARANCE_PREVIEW: cfClearance ? cfClearance.slice(0, 20) + '...' : null,
   };
   const t0 = Date.now();
   try {
@@ -163,7 +166,7 @@ app.get('/debug/browser', async (req, res) => {
     result.version = version;
     result.connectMs = Date.now() - t0;
 
-    // Try navigating to kisskh
+    // Try navigating to kisskh — inject CF cookie if available
     const page = await browser.newPage();
     const proxyUrl = (process.env.PROXY_URL || '').trim();
     if (proxyUrl) {
@@ -172,9 +175,15 @@ app.get('/debug/browser', async (req, res) => {
         if (u.username) await page.authenticate({ username: u.username, password: u.password });
       } catch (_) {}
     }
-    await page.goto('https://kisskh.co/', { waitUntil: 'load', timeout: 15000 }).catch(() => {});
+    // Inject CF clearance cookie before navigation
+    if (cfClearance) {
+      const cfVal = cfClearance.replace(/^cf_clearance=/, '');
+      await page.setCookie({ name: 'cf_clearance', value: cfVal, domain: 'kisskh.co', path: '/', httpOnly: true, secure: true }).catch(() => {});
+    }
+    await page.goto('https://kisskh.co/', { waitUntil: 'load', timeout: 20000 }).catch(() => {});
     result.kisskhUrl = page.url();
     result.kisskhTitle = await page.title().catch(() => '?');
+    result.cfChallenge = result.kisskhTitle.toLowerCase().includes('moment');
     await browser.close();
     result.totalMs = Date.now() - t0;
     res.json(result);

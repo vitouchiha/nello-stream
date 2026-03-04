@@ -28,10 +28,38 @@ const _memCache = new Map();
 /**
  * Returns "cf_clearance=<value>" string for kisskh.co.
  * Falls back to empty string (not all kisskh endpoints require it).
+ *
+ * Priority:
+ *   1. CF_CLEARANCE_KISSKH env var (set manually from a real browser session)
+ *   2. Memory cache
+ *   3. Disk cache
+ *   4. Puppeteer fetch (may fail if CF blocks Browserless datacenter IP)
+ *
+ * To get a valid cookie:
+ *   - Open https://kisskh.co in your real browser
+ *   - Open DevTools → Application → Cookies → kisskh.co
+ *   - Copy the value of the "cf_clearance" cookie
+ *   - Set it as CF_CLEARANCE_KISSKH env var on Vercel
+ *   - CF clearance cookies typically last 30+ days
+ *
  * @param {boolean} [forceRefresh=false]
  * @returns {Promise<string>}
  */
 async function getCloudflareCookie(forceRefresh = false) {
+  // 0. Manual env var — use directly, skip all browser logic
+  const manualClearance = (process.env.CF_CLEARANCE_KISSKH || '').trim();
+  if (manualClearance && !forceRefresh) {
+    const cookieStr = manualClearance.startsWith('cf_clearance=')
+      ? manualClearance
+      : `cf_clearance=${manualClearance}`;
+    log.debug('using CF_CLEARANCE_KISSKH from env');
+    // Warm the memory cache so repeated calls are instant
+    if (!_isCachedValid()) {
+      _memCache.set('cf', { value: cookieStr, ts: Date.now() });
+    }
+    return cookieStr;
+  }
+
   // 1. Memory cache
   if (!forceRefresh && _isCachedValid()) {
     log.debug('cookie from memory cache');
