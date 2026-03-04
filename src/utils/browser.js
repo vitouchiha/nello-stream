@@ -51,16 +51,20 @@ async function launchBrowser() {
     try {
       const puppeteerCore = require('puppeteer-core');
 
-      // Pass residential proxy to the remote Chrome if PROXY_URL is set.
+      // Pass proxy to the remote Chrome if PROXY_URL is set.
       // Browserless supports launch args via ?launch={"args":[...]} query param.
-      // This routes all browser traffic through the proxy to bypass datacenter IP blocks.
+      // Credentials are NOT passed here — they're set per-page via page.authenticate().
       let wsEndpoint = browserlessUrl;
       const proxyUrl = (process.env.PROXY_URL || '').trim();
       if (proxyUrl) {
-        const launchArgs = JSON.stringify({ args: [`--proxy-server=${proxyUrl}`] });
-        const sep = wsEndpoint.includes('?') ? '&' : '?';
-        wsEndpoint = `${wsEndpoint}${sep}launch=${encodeURIComponent(launchArgs)}`;
-        log.info('browser will use residential proxy via --proxy-server');
+        try {
+          const u = new URL(proxyUrl);
+          const proxyServer = `${u.hostname}:${u.port}`;
+          const launchArgs = JSON.stringify({ args: [`--proxy-server=${proxyServer}`] });
+          const sep = wsEndpoint.includes('?') ? '&' : '?';
+          wsEndpoint = `${wsEndpoint}${sep}launch=${encodeURIComponent(launchArgs)}`;
+          log.info(`browser will proxy traffic via ${proxyServer}`);
+        } catch (_) { /* ignore malformed PROXY_URL */ }
       }
 
       const browser = await puppeteerCore.connect({

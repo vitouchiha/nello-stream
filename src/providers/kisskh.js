@@ -284,6 +284,18 @@ async function _extractStreamAndSubs(serieId, episodeId) {
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
     );
 
+    // Authenticate with proxy if PROXY_URL is set (credential from URL like http://user:pass@host:port)
+    const proxyUrl = (process.env.PROXY_URL || '').trim();
+    if (proxyUrl) {
+      try {
+        const u = new URL(proxyUrl);
+        if (u.username && u.password) {
+          await page.authenticate({ username: u.username, password: u.password });
+          log.debug('proxy authentication set for page');
+        }
+      } catch (_) { /* ignore parse errors */ }
+    }
+
     // Inject CF clearance cookie
     const cfCookieStr = await getCloudflareCookie().catch(() => '');
     if (cfCookieStr) {
