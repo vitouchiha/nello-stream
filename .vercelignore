@@ -1,0 +1,15 @@
+# Exclude from Vercel deployment bundle
+
+# Dev / local artifacts
+.env
+data/
+cache/
+*.log
+
+# Test / docs
+README.md
+CHANGELOG.md
+
+# OS junk
+.DS_Store
+Thumbs.db
