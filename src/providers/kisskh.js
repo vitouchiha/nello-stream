@@ -443,19 +443,17 @@ async function _fetchStreamViaApi(serieId, episodeId, proxyUrl) {
             return null;
           }
 
-          // Step B: visit drama episode page (establishes Referer context + drama cookies)
+          // Step B: episode API — use drama page URL as Referer without visiting it
+          // (saves 8-15 s within the 25 s cap; CF primer cookie is sufficient)
           const dramaPageUrl = `${SITE_BASE}/Drama/Any/Episode-Any?id=${serieId}&ep=${episodeId}`;
-          log.info('FS stream: visiting drama page', { dramaPageUrl });
-          await sessionGet(dramaPageUrl, sessionId).catch(() => null);  // best-effort
 
-          // Step C: episode API with drama page as Referer
           const apiHeaders = {
             'Accept': 'application/json, text/plain, */*',
             'Referer': dramaPageUrl,
             'Origin': SITE_BASE,
             'X-Requested-With': 'XMLHttpRequest',
           };
-          for (const [type, source] of [[2, 1], [1, 0]]) {
+          for (const [type, source] of [[2, 1], [1, 0], [2, 0], [1, 1]]) {
             const url = `${API_BASE}/DramaList/Episode/${episodeId}?type=${type}&sub=0&source=${source}&quality=auto`;
             log.info(`FS stream: episode API type=${type} source=${source}`, { episodeId });
             const body = await sessionGet(url, sessionId, apiHeaders).catch(() => null);

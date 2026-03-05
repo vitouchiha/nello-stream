@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versi
 
 ---
 
+## [1.3.6] — 2026-05-14
+
+### Fixed
+- **KissKH streams: rimossa visita intermedia `drama page` nella sequenza FlareSolverr** — `_fetchStreamViaApi` ora esegue solo 2 step: CF primer → episode API (4 varianti), invece di 3 (primer → drama page → episode API). La visita alla drama page consumava 8–15 s del budget 25 s prima ancora di tentare l'API dello stream, causando timeout sistematici. Il `dramaPageUrl` è conservato come `Referer` nell'header della chiamata all'API episodio senza ulteriori caricamenti della pagina. Le varianti API tentate salgono da 2 a 4 (`type×source`: 2×1, 1×0, 2×0, 1×1).
+
+---
+
 ## [1.3.5] — 2026-05-09
 
 ### Added
