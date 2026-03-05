@@ -510,12 +510,51 @@ async function _getStreamFromEpisodePage(episodeLink, config = {}) {
 
   if (url) {
     url = decodeURI(url.trim());
+    // If url is an embed page (not a direct stream), resolve it to a playable URL
+    if (!/\.(?:m3u8|mp4)(\?|$)/i.test(url)) {
+      const resolved = await _resolveEmbedUrl(url, config);
+      if (resolved) {
+        log.info('embed resolved', { from: url.slice(0, 70), to: resolved.slice(0, 70) });
+        url = resolved;
+      }
+    }
     streamCache.set(cacheKey, url, 2 * 60 * 60_000);
   } else {
     log.warn('no stream URL found', { episodeLink });
   }
 
   return url || null;
+}
+
+/**
+ * Fetch an embed player page and extract the direct .m3u8 / .mp4 stream URL.
+ * Handles Vixcloud, SuperVideo, Streamtape, DropLoad and generic JWPlayer/VideoJS patterns.
+ */
+async function _resolveEmbedUrl(embedUrl, config = {}) {
+  try {
+    const html = await fetchWithCloudscraper(embedUrl, {
+      referer: embedUrl,
+      timeout: 10_000,
+      proxyUrl: config.proxyUrl,
+    });
+    if (!html) return null;
+    const patterns = [
+      /"file"\s*:\s*"(https?:[^"]+\.m3u8[^"]*)"/,
+      /"file"\s*:\s*"(https?:[^"]+\.mp4[^"]*)"/,
+      /"src"\s*:\s*"(https?:[^"]+\.m3u8[^"]*)"/,
+      /sources\s*:\s*\[\s*\{\s*["']?file["']?\s*:\s*["'](https?:[^"']+)"/,
+      /<source[^>]+src=["'](https?:[^"']+\.m3u8[^"']*)/i,
+      /(https?:\/\/[^\s"'<>]+\.m3u8(?:\?[^\s"'<>]*)?)/,
+      /(https?:\/\/[^\s"'<>]+\.mp4(?:\?[^\s"'<>]*)?)/,
+    ];
+    for (const pat of patterns) {
+      const m = html.match(pat);
+      if (m && m[1]) return decodeURIComponent(m[1].trim());
+    }
+  } catch (err) {
+    log.warn('embed resolve failed', { embedUrl: embedUrl.slice(0, 70), err: err.message });
+  }
+  return null;
 }
 
 module.exports = { getCatalog, getMeta, getStreams };

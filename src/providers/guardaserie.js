@@ -554,10 +554,53 @@ async function _getStreamFromEpisodePage(episodeLink, config = {}) {
   }
 
   log.info(`found ${streams.length} stream(s) for episode`, { episodeLink });
-  if (streams.length) {
-    streamCache.set(cacheKey, streams, 2 * 60 * 60_000);
+  if (!streams.length) return [];
+
+  // Resolve embed page URLs to direct .m3u8/.mp4 streams (parallel, best-effort)
+  const resolved = await Promise.all(
+    streams.map(async ({ url: embedUrl, label }) => {
+      if (/\.(?:m3u8|mp4)(\?|$)/i.test(embedUrl)) return { url: embedUrl, label };
+      const directUrl = await _resolveEmbedUrl(embedUrl, config);
+      return { url: directUrl || embedUrl, label };
+    })
+  );
+  const finalStreams = resolved.filter(s => s.url);
+
+  if (finalStreams.length) {
+    streamCache.set(cacheKey, finalStreams, 2 * 60 * 60_000);
   }
-  return streams;
+  return finalStreams;
+}
+
+/**
+ * Fetch an embed player page and extract the direct .m3u8 / .mp4 stream URL.
+ * Handles Vixcloud, SuperVideo, Streamtape, DropLoad and generic JWPlayer/VideoJS patterns.
+ */
+async function _resolveEmbedUrl(embedUrl, config = {}) {
+  try {
+    const html = await fetchWithCloudscraper(embedUrl, {
+      referer: embedUrl,
+      timeout: 10_000,
+      proxyUrl: config.proxyUrl,
+    });
+    if (!html) return null;
+    const patterns = [
+      /"file"\s*:\s*"(https?:[^"]+\.m3u8[^"]*)"/,
+      /"file"\s*:\s*"(https?:[^"]+\.mp4[^"]*)"/,
+      /"src"\s*:\s*"(https?:[^"]+\.m3u8[^"]*)"/,
+      /sources\s*:\s*\[\s*\{\s*["']?file["']?\s*:\s*["'](https?:[^"']+)"/,
+      /<source[^>]+src=["'](https?:[^"']+\.m3u8[^"']*)/i,
+      /(https?:\/\/[^\s"'<>]+\.m3u8(?:\?[^\s"'<>]*)?)/,
+      /(https?:\/\/[^\s"'<>]+\.mp4(?:\?[^\s"'<>]*)?)/,
+    ];
+    for (const pat of patterns) {
+      const m = html.match(pat);
+      if (m && m[1]) return decodeURIComponent(m[1].trim());
+    }
+  } catch (err) {
+    log.warn('embed resolve failed', { embedUrl: embedUrl.slice(0, 70), err: err.message });
+  }
+  return null;
 }
 
 function _hosterLabel(url = '') {

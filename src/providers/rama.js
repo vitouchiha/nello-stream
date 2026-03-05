@@ -319,8 +319,8 @@ async function getStreams(id, config = {}) {
       continue;
     }
     rawStreams.push({
-      name: '🚀 Rama',
-      description: `📁 ${displayName} - ${ep.title}\n👤 Rama Oriental Fansub\n🇰🇷 Sub ITA`,
+      name: _qualityLabel(streamUrl),
+      description: `🚀 Rama · 📁 ${displayName} - ${ep.title}\n🇰🇷 Sub ITA`,
       url: streamUrl,
       behaviorHints: { bingeGroup: `streamfusion-rama-${seriesId}` },
     });
@@ -419,6 +419,17 @@ async function _getStreamFromEpisodePage(episodeLink) {
   }
 
   return url;
+}
+
+function _qualityLabel(url = '') {
+  if (/2160|4k|uhd/i.test(url))  return '4K';
+  if (/1080/i.test(url))          return '1080p';
+  if (/720/i.test(url))           return '720p';
+  if (/480/i.test(url))           return '480p';
+  if (/360/i.test(url))           return '360p';
+  if (/\.m3u8/i.test(url))       return 'HLS';
+  if (/\.mp4/i.test(url))        return 'MP4';
+  return 'HD';
 }
 
 function _cleanTitle(raw) {
