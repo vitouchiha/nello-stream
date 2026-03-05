@@ -38,7 +38,7 @@ class TTLCache {
    * @param {number} [ttl]  Override default TTL in ms
    */
   set(key, value, ttl) {
-    if (this._store.size >= this._maxSize) {
+    if (this._store.size > this._maxSize) {
       // Evict oldest entry (first in Map = insertion order)
       const oldest = this._store.keys().next().value;
       this._store.delete(oldest);

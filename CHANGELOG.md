@@ -5,6 +5,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versi
 
 ---
 
+## [1.2.0] — 2026-03-05
+
+### Added
+- **Config encryption (AES-256-GCM)** — `src/utils/config.js` ora cifra il config con AES-256-GCM invece di base64url; proxy URL, MFP key e altri segreti non sono più leggibili in chiaro dalla URL. Imposta `CONFIG_SECRET` env var per personalizzare la chiave. Retrocompatibile con URL base64url esistenti.
+- **Timeout middleware globale** — `server.js` ora risponde `504 Gateway Timeout` dopo 50s invece di far morire la funzione Vercel senza risposta. Configurabile via `SERVERLESS_TIMEOUT` env var.
+- **Auth debug endpoints** — `/debug/providers`, `/debug/flaresolverr`, `/debug/browser` ora richiedono `?token=` o header `Authorization: Bearer ...` se `DEBUG_TOKEN` env var è impostato (aperto solo in dev).
+
+### Changed
+- **Performance: Rama stream fetch parallelo** — `getStreams()` ora fetcha tutti gli URL degli episodi in parallelo con `Promise.all` invece di sequenzialmente. Per serie multi-episodio: ~3x più veloce (15s → 5s per 3 ep).
+- **Performance: KissKH catalog search a batch** — `_searchCatalog()` ora fetcha le pagine in batch paralleli da 3 invece di una a volta. Riduce drasticamente il tempo di ricerca.
+- **Stream URL validation** — entrambi i provider ora verificano che l'URL inizi con `http` prima di restituirlo; stream malformati vengono scartati con log di warning.
+- **Logging stream extraction** — Rama ora logga per ogni episodio se lo stream non viene trovato e perché.
+
+### Fixed
+- **Cache LRU off-by-one** — `cache.js`: cambio `>=` → `>` nella condizione di eviction; la cache non supera più di 1 unità il `maxSize`.
+- **Season matching** — `index.js _matchEpisode()`: la condizione `if (seasonNum)` era falsy per season=0; sostituita con `if (seasonNum !== null && seasonNum !== undefined)`.
+- **Dead code rimosso** — `kisskh.js`: eliminata `_getSubtitles()` (backward-compat wrapper inutilizzato che poteva lanciare browser superflui).
+
+---
+
 ## [1.1.3] — 2026-03-05
 
 ### Fixed

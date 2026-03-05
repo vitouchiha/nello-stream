@@ -1,6 +1,6 @@
 # StreamFusion Mail
 
-![Version](https://img.shields.io/badge/version-1.1.3-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.2.0-blue?style=flat-square)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-green?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvitouchiha%2Fstreamfusion-mail)

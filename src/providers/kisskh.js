@@ -137,30 +137,35 @@ async function _listCatalog(page, limit, proxyUrl) {
 async function _searchCatalog(query, limit = 20, proxyUrl) {
   const cleanQuery = cleanTitleForSearch(query);
   const allResults = [];
-  let currentPage = 1;
   const maxPages = 10;
-  let emptyPages = 0;
+  const BATCH_SIZE = 3; // fetch 3 pages in parallel
+  let emptyBatches = 0;
 
-  while (allResults.length < limit && currentPage <= maxPages && emptyPages < 3) {
-    const url = `${API_BASE}/DramaList/List?page=${currentPage}&type=1&sub=0&country=2&status=2&order=3&pageSize=30&search=${encodeURIComponent(query)}`;
-    try {
-      const data = await _apiGet(url, 8_000, proxyUrl);
-      if (!data || !data.data || !data.data.length) { emptyPages++; currentPage++; continue; }
-
-      const pageItems = data.data
-        .map(_mapItem)
-        .filter(item => titleSimilarity(item.name, cleanQuery) > 0.3
-          || cleanTitleForSearch(item.name).includes(cleanQuery));
-
-      if (pageItems.length === 0) emptyPages++;
-      else emptyPages = 0;
-
-      allResults.push(...pageItems);
-    } catch (err) {
-      log.warn(`search page ${currentPage} failed: ${err.message}`);
-      break;
+  for (let batchStart = 1; allResults.length < limit && batchStart <= maxPages && emptyBatches < 2; batchStart += BATCH_SIZE) {
+    const pages = [];
+    for (let p = batchStart; p < batchStart + BATCH_SIZE && p <= maxPages; p++) {
+      pages.push(p);
     }
-    currentPage++;
+    const batchResults = await Promise.all(
+      pages.map(async p => {
+        const url = `${API_BASE}/DramaList/List?page=${p}&type=1&sub=0&country=2&status=2&order=3&pageSize=30&search=${encodeURIComponent(query)}`;
+        try {
+          const data = await _apiGet(url, 8_000, proxyUrl);
+          if (!data || !data.data || !data.data.length) return [];
+          return data.data
+            .map(_mapItem)
+            .filter(item => titleSimilarity(item.name, cleanQuery) > 0.3
+              || cleanTitleForSearch(item.name).includes(cleanQuery));
+        } catch (err) {
+          log.warn(`search page ${p} failed: ${err.message}`);
+          return [];
+        }
+      })
+    );
+    const batchFlat = batchResults.flat();
+    if (batchFlat.length === 0) emptyBatches++;
+    else emptyBatches = 0;
+    allResults.push(...batchFlat);
   }
 
   // Deduplicate
@@ -307,6 +312,12 @@ async function getStreams(stremioId, config = {}) {
       return [];
     }
     streamCache.set(cacheKey, { url: rawUrl, subtitles });
+  }
+
+  // Validate URL before wrapping
+  if (!rawUrl || !rawUrl.startsWith('http')) {
+    log.warn('invalid stream URL format, skipping', { rawUrl: rawUrl ? rawUrl.slice(0, 80) : null });
+    return [];
   }
 
   // Wrap stream URL through MediaFlow Proxy if configured
@@ -642,12 +653,6 @@ async function _getSubtitlesFromApiUrl(subApiUrl, serieId, episodeId) {
 
   subCache.set(cacheKey, decoded);
   return decoded;
-}
-
-/** Backward-compat wrapper: opens browser to get subApiUrl, then extracts subs */
-async function _getSubtitles(serieId, episodeId) {
-  const { subApiUrl } = await _extractStreamAndSubs(serieId, episodeId);
-  return _getSubtitlesFromApiUrl(subApiUrl, serieId, episodeId);
 }
 
 function _resolveSubUrl(s) {

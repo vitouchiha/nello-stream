@@ -32,6 +32,21 @@ const log = createLogger('server');
 
 const app = express();
 
+// ─── Global 50s timeout guard (Vercel limit is 60s) ──────────────────────────
+const SERVERLESS_TIMEOUT = Number(process.env.SERVERLESS_TIMEOUT) || 50_000;
+app.use((req, res, next) => {
+  const timer = setTimeout(() => {
+    if (!res.headersSent) {
+      log.warn('Request timed out', { path: req.path });
+      res.status(504).json({ error: 'Gateway Timeout' });
+    }
+  }, SERVERLESS_TIMEOUT);
+  // Clear timer when response finishes
+  res.once('finish', () => clearTimeout(timer));
+  res.once('close',  () => clearTimeout(timer));
+  next();
+});
+
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', '*');
@@ -155,7 +170,21 @@ app.get('/health', (req, res) => {
 
 // ─── Debug (provider reachability) ───────────────────────────────────────────
 
-app.get('/debug/providers', async (req, res) => {
+/**
+ * Simple token-based auth for debug endpoints.
+ * Set DEBUG_TOKEN env var; pass as ?token=... or Authorization: Bearer ...
+ */
+function requireDebugAuth(req, res, next) {
+  const token = (process.env.DEBUG_TOKEN || '').trim();
+  if (!token) return next(); // no token configured → open (dev mode)
+  const provided = req.query.token || (req.get('authorization') || '').replace(/^Bearer\s+/i, '');
+  if (provided !== token) {
+    return res.status(401).json({ error: 'Unauthorized — set ?token= header or DEBUG_TOKEN env' });
+  }
+  next();
+}
+
+app.get('/debug/providers', requireDebugAuth, async (req, res) => {
   const axios = require('axios');
   const { getProxyAgent } = require('./src/utils/fetcher');
   const pa = getProxyAgent();
@@ -178,7 +207,7 @@ app.get('/debug/providers', async (req, res) => {
   res.json(result);
 });
 
-app.get('/debug/flaresolverr', async (req, res) => {
+app.get('/debug/flaresolverr', requireDebugAuth, async (req, res) => {
   const { getFlareSolverrUrl } = require('./src/utils/flaresolverr');
   const url = getFlareSolverrUrl();
   const result = { FLARESOLVERR_URL: url ? url.slice(0, 60) : null, configured: !!url };
@@ -275,7 +304,7 @@ app.get('/debug/flaresolverr', async (req, res) => {
   res.json(result);
 });
 
-app.get('/debug/browser', async (req, res) => {
+app.get('/debug/browser', requireDebugAuth, async (req, res) => {
   const { launchBrowser } = require('./src/utils/browser');
   const cfClearance = (process.env.CF_CLEARANCE_KISSKH || '').trim();
   const result = {

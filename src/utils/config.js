@@ -3,11 +3,13 @@
 /**
  * User configuration — encode/decode from URL path
  *
- * Config is stored as base64url-encoded JSON in the addon URL:
- *   https://streamfusion-mail.vercel.app/BASE64_CONFIG/manifest.json
+ * Config is stored as AES-256-GCM encrypted JSON in the addon URL:
+ *   https://streamfusion-mail.vercel.app/ENCRYPTED_CONFIG/manifest.json
  *
- * This lets each user have their own personalised install URL with
- * their settings baked in.
+ * Encryption prevents proxy credentials and MediaFlow API keys from being
+ * exposed in URL logs, analytics tools, or browser history.
+ *
+ * If CONFIG_SECRET env var is not set, falls back to base64url (dev mode).
  *
  * Short keys to keep URLs compact:
  *   mfp   → MediaFlow Proxy base URL
@@ -18,17 +20,54 @@
  *   cm    → cinemeta (1 = enable IMDB stream support, omit = no)
  */
 
+const crypto = require('crypto');
+
 const DEFAULT_CONFIG = {
-  mfpUrl:       '',     // e.g. https://mfp.example.com
-  mfpKey:       '',     // e.g. mysecretpassword
-  proxyUrl:     '',     // e.g. http://user:pass@host:port
-  hideCatalogs: false,  // hide addon catalogs from Stremio home
-  providers:    'all',  // 'all' | 'kisskh' | 'rama'
-  cinemeta:     false,  // enable stream lookup for Cinemeta / IMDB IDs
+  mfpUrl:       '',
+  mfpKey:       '',
+  proxyUrl:     '',
+  hideCatalogs: false,
+  providers:    'all',
+  cinemeta:     false,
 };
 
+// ─── Encryption helpers ───────────────────────────────────────────────────────
+
 /**
- * Encode config object to base64url string.
+ * Derive a 32-byte key from CONFIG_SECRET (or a hardcoded dev fallback).
+ * Using scryptSync so keys are the same across restarts without storing state.
+ */
+function _getKey() {
+  const secret = (process.env.CONFIG_SECRET || 'streamfusion-dev-secret-change-me').trim();
+  return crypto.scryptSync(secret, 'sfm-config-salt-v1', 32);
+}
+
+function _encrypt(plaintext) {
+  const iv  = crypto.randomBytes(12); // 96-bit GCM IV
+  const key = _getKey();
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const body   = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const tag    = cipher.getAuthTag(); // 16 bytes
+  // Layout: 12 bytes IV | 16 bytes tag | N bytes ciphertext → base64url
+  return Buffer.concat([iv, tag, body]).toString('base64url');
+}
+
+function _decrypt(token) {
+  const buf = Buffer.from(token, 'base64url');
+  if (buf.length < 29) throw new Error('token too short');
+  const iv   = buf.slice(0, 12);
+  const tag  = buf.slice(12, 28);
+  const body = buf.slice(28);
+  const key  = _getKey();
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(body), decipher.final()]).toString('utf8');
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+/**
+ * Encode config object to encrypted (or base64url in dev) URL token.
  * @param {object} config
  * @returns {string}
  */
@@ -40,18 +79,20 @@ function encodeConfig(config) {
   if (config.hideCatalogs)              obj.hc   = 1;
   if (config.providers && config.providers !== 'all') obj.pv = config.providers === 'kisskh' ? 'k' : 'r';
   if (config.cinemeta)                  obj.cm   = 1;
-  return Buffer.from(JSON.stringify(obj)).toString('base64url');
+  return _encrypt(JSON.stringify(obj));
 }
 
 /**
- * Decode base64url string to config object.
+ * Decode encrypted (or legacy base64url) URL token to config object.
  * @param {string} encoded
  * @returns {object}
  */
 function decodeConfig(encoded) {
   if (!encoded) return { ...DEFAULT_CONFIG };
   try {
-    const obj = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+    // Try AES-GCM first
+    const json = _decrypt(encoded);
+    const obj = JSON.parse(json);
     const pvMap = { k: 'kisskh', r: 'rama', a: 'all' };
     return {
       mfpUrl:       (obj.mfp  || '').trim(),
@@ -62,26 +103,46 @@ function decodeConfig(encoded) {
       cinemeta:     !!obj.cm,
     };
   } catch {
-    return { ...DEFAULT_CONFIG };
+    // Legacy fallback: plain base64url (for old install URLs)
+    try {
+      const obj = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+      const pvMap = { k: 'kisskh', r: 'rama', a: 'all' };
+      return {
+        mfpUrl:       (obj.mfp  || '').trim(),
+        mfpKey:       (obj.mfpk || '').trim(),
+        proxyUrl:     (obj.px   || '').trim(),
+        hideCatalogs: !!obj.hc,
+        providers:    pvMap[obj.pv] || 'all',
+        cinemeta:     !!obj.cm,
+      };
+    } catch {
+      return { ...DEFAULT_CONFIG };
+    }
   }
 }
 
 /**
- * Check if a path segment is a valid config (not a reserved route segment).
+ * Check if a path segment is a valid config token (not a reserved route segment).
  * @param {string} str
  * @returns {boolean}
  */
 function isValidConfig(str) {
   if (!str || typeof str !== 'string' || str.length < 4) return false;
-  const reserved = ['catalog', 'meta', 'stream', 'manifest.json', 'health', 'debug'];
+  const reserved = ['catalog', 'meta', 'stream', 'manifest.json', 'health', 'debug', 'configure'];
   if (reserved.includes(str.toLowerCase())) return false;
-  // Must decode to valid JSON object
+  // Must decrypt/decode to valid JSON object
   try {
-    const decoded = Buffer.from(str, 'base64url').toString('utf8');
-    const obj = JSON.parse(decoded);
+    const json = _decrypt(str);
+    const obj = JSON.parse(json);
     return typeof obj === 'object' && obj !== null;
   } catch {
-    return false;
+    // Try legacy base64url
+    try {
+      const obj = JSON.parse(Buffer.from(str, 'base64url').toString('utf8'));
+      return typeof obj === 'object' && obj !== null;
+    } catch {
+      return false;
+    }
   }
 }
 

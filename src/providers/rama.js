@@ -273,19 +273,31 @@ async function getStreams(id, config = {}) {
     return [];
   }
 
-  // Fetch stream URLs lazily — only for the episode(s) we need
-  const rawStreams = [];
+  // Fetch stream URLs in parallel — significantly faster for multi-episode requests
   const displayName = (meta.name || '').replace(/\s*\(\d{4}\)\s*$/, '').trim();
-  for (const ep of episodes) {
-    const streamUrl = await _getStreamFromEpisodePage(ep.link);
-    if (streamUrl) {
-      rawStreams.push({
-        name: '🚀 Rama',
-        description: `📁 ${displayName} - ${ep.title}\n👤 Rama Oriental Fansub\n🇰🇷 Sub ITA`,
-        url: streamUrl,
-        behaviorHints: { bingeGroup: `streamfusion-rama-${seriesId}` },
-      });
+  const results = await Promise.all(
+    episodes.map(ep => _getStreamFromEpisodePage(ep.link)
+      .then(url => ({ ep, url }))
+      .catch(err => { log.warn(`stream fetch error for ${ep.id}: ${err.message}`); return { ep, url: null }; })
+    )
+  );
+
+  const rawStreams = [];
+  for (const { ep, url: streamUrl } of results) {
+    if (!streamUrl) {
+      log.warn('no stream found for episode', { epId: ep.id, link: ep.link });
+      continue;
     }
+    if (!streamUrl.startsWith('http')) {
+      log.warn('invalid stream URL format', { epId: ep.id, url: streamUrl.slice(0, 80) });
+      continue;
+    }
+    rawStreams.push({
+      name: '🚀 Rama',
+      description: `📁 ${displayName} - ${ep.title}\n👤 Rama Oriental Fansub\n🇰🇷 Sub ITA`,
+      url: streamUrl,
+      behaviorHints: { bingeGroup: `streamfusion-rama-${seriesId}` },
+    });
   }
 
   if (!rawStreams.length) {

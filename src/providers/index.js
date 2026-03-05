@@ -272,7 +272,7 @@ function _matchEpisode(videos, seasonNum, episodeNum) {
   const epNum = v => v.episode ?? v.number ?? null;
 
   // Exact match: season + episode
-  if (seasonNum) {
+  if (seasonNum !== null && seasonNum !== undefined) {
     const exact = videos.find(v => v.season === seasonNum && epNum(v) === episodeNum);
     if (exact) return exact;
   }
