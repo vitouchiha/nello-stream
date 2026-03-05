@@ -181,7 +181,7 @@ async function _fetchFromImdbId(rawId, type, config) {
  * Search KissKH by title, then get streams for the matching episode.
  */
 async function _kisskhStreamsForTitle(title, seasonNum, episodeNum, config) {
-  const SEARCH_TIMEOUT = 8_000;
+  const SEARCH_TIMEOUT = 20_000; // KissKH API ignores `search=` param — must paginate up to 20 pages
   const results = await withTimeout(kisskh.getCatalog(0, title, config), SEARCH_TIMEOUT, 'kisskh.search').catch(() => []);
   if (!results || !results.length) return [];
 

@@ -138,8 +138,8 @@ async function getCatalog(skip = 0, search = '', config = {}) {
 }
 
 async function _listCatalog(page, limit, proxyUrl) {
-  // status=0 → all (ongoing + completed); country=0 → all countries
-  const url = `${API_BASE}/DramaList/List?page=${page}&type=1&sub=0&country=0&status=0&order=3&pageSize=${limit}`;
+  // country=2 → Korea only; status=0 → all (ongoing + completed)
+  const url = `${API_BASE}/DramaList/List?page=${page}&type=1&sub=0&country=2&status=0&order=3&pageSize=${limit}`;
   log.info('list catalog', { url });
   const data = await _apiGet(url, 8_000, proxyUrl);
   if (!data || !data.data) return [];
@@ -147,20 +147,25 @@ async function _listCatalog(page, limit, proxyUrl) {
 }
 
 async function _searchCatalog(query, limit = 20, proxyUrl) {
+  // NOTE: KissKH's `search=` parameter is ignored by the API — it always
+  // returns dramas sorted by recency. We paginate manually and apply local
+  // title-similarity filtering. To find older dramas we must search more pages.
   const cleanQuery = cleanTitleForSearch(query);
   const allResults = [];
-  const maxPages = 10;
-  const BATCH_SIZE = 3; // fetch 3 pages in parallel
-  let emptyBatches = 0;
+  const maxPages   = 20;  // cover ~600 most-recent Korean dramas
+  const BATCH_SIZE = 3;   // fetch 3 pages in parallel per batch
+  // No emptyBatches early-exit: since `search=` is ignored, every page returns
+  // recent dramas that won't match until we reach the target drama's page.
 
-  for (let batchStart = 1; allResults.length < limit && batchStart <= maxPages && emptyBatches < 2; batchStart += BATCH_SIZE) {
+  for (let batchStart = 1; allResults.length < limit && batchStart <= maxPages; batchStart += BATCH_SIZE) {
     const pages = [];
     for (let p = batchStart; p < batchStart + BATCH_SIZE && p <= maxPages; p++) {
       pages.push(p);
     }
     const batchResults = await Promise.all(
       pages.map(async p => {
-        const url = `${API_BASE}/DramaList/List?page=${p}&type=1&sub=0&country=0&status=0&order=3&pageSize=30&search=${encodeURIComponent(query)}`;
+        // country=2 → Korea only; status=0 → ongoing + completed
+        const url = `${API_BASE}/DramaList/List?page=${p}&type=1&sub=0&country=2&status=0&order=3&pageSize=30`;
         try {
           const data = await _apiGet(url, 8_000, proxyUrl);
           if (!data || !data.data || !data.data.length) return [];
@@ -175,9 +180,9 @@ async function _searchCatalog(query, limit = 20, proxyUrl) {
       })
     );
     const batchFlat = batchResults.flat();
-    if (batchFlat.length === 0) emptyBatches++;
-    else emptyBatches = 0;
     allResults.push(...batchFlat);
+    // Early-exit only when we have enough results
+    if (allResults.length >= limit) break;
   }
 
   // Deduplicate

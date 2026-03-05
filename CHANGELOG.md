@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versi
 
 ---
 
+## [1.3.7] — 2026-03-05
+
+### Fixed
+- **KissKH catalog: ripristinato filtro `country=2` (solo drammi coreani)** — il cambio precedente a `country=0` mostrava drammi cinesi/giapponesi in prima pagina. Ora `_listCatalog` usa `country=2&status=0` (solo Corea, sia ongoing che completati).
+- **KissKH ricerca titola falliva per drammi meno recenti** — l’API KissKH ignora completamente il parametro `search=` e restituisce sempre il catalogo ordinato per data. `_searchCatalog` si fermava dopo 2 batch consecutivi senza match (~180 drammi visti), non raggiungendo drammi come "Our Universe" (pagina 11). Fix: rimosso l’early-exit `emptyBatches`, aumentato `maxPages` da 10 a 20 (600 drammi coperti). Rimosso `search=query` dall’URL (era inutile).
+- **Cinemeta path `SEARCH_TIMEOUT` raddoppiato** — `_kisskhStreamsForTitle` usava 8 s di timeout per la ricerca catalogo. Con la nuova logica (fino a 20 pagine in batch da 3) il timeout è aumentato a 20 s per permettere la ricerca nelle pagine più avanzate.
+
+---
+
 ## [1.3.6] — 2026-05-14
 
 ### Fixed
