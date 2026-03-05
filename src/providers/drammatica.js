@@ -1,0 +1,521 @@
+'use strict';
+
+/**
+ * Drammatica.it provider
+ * Source: https://www.drammatica.it
+ *
+ * Italian K-Drama fansub site (WordPress-based, Cloudflare protected).
+ * Bypass via cloudscraper (same approach as Rama).
+ *
+ * Provides:
+ *   - getCatalog(skip, search)  → [{id, type, name, poster, ...}]
+ *   - getMeta(id)               → {meta}
+ *   - getStreams(id)             → [{name, description, url, behaviorHints}]
+ */
+
+const cheerio = require('cheerio');
+const { fetchWithCloudscraper } = require('../utils/fetcher');
+const { TTLCache } = require('../utils/cache');
+const { wrapStreamUrl } = require('../utils/mediaflow');
+const { createLogger } = require('../utils/logger');
+
+const log = createLogger('drammatica');
+
+const BASE_URL = 'https://www.drammatica.it';
+// Drammatica uses a WordPress-based layout — dramas listed under /drama/ category
+const CATALOG_PATHS = ['/drama/', '/k-drama/', '/serie/', '/'];
+const ITEMS_PER_PAGE = 20;
+const MAX_PAGES = 20;
+
+const catalogCache = new TTLCache({ ttl: 10 * 60_000, maxSize: 200 });
+const metaCache    = new TTLCache({ ttl: 30 * 60_000, maxSize: 500 });
+const streamCache  = new TTLCache({ ttl: 60 * 60_000, maxSize: 1000 });
+
+// ─── Catalog ─────────────────────────────────────────────────────────────────
+
+/**
+ * @param {number} [skip=0]
+ * @param {string} [search='']
+ * @param {object} [config={}]
+ * @returns {Promise<Array>}
+ */
+async function getCatalog(skip = 0, search = '', config = {}) {
+  const cacheKey = `catalog:${skip}:${search}`;
+  const cached = catalogCache.get(cacheKey);
+  if (cached) {
+    log.debug('catalog from cache', { skip, search });
+    return cached;
+  }
+
+  // If search is provided, use the WP search endpoint
+  if (search && search.trim()) {
+    return _searchCatalog(search.trim(), config);
+  }
+
+  const items = [];
+  const startPage = Math.floor(skip / ITEMS_PER_PAGE) + 1;
+  let catalogPath = null;
+
+  // Detect which catalog path works
+  if (!catalogPath) {
+    catalogPath = await _detectCatalogPath(config);
+  }
+  if (!catalogPath) {
+    log.warn('could not detect catalog path');
+    return [];
+  }
+
+  let pageNumber = startPage;
+  while (items.length < ITEMS_PER_PAGE && pageNumber <= MAX_PAGES) {
+    const url = `${BASE_URL}${catalogPath}page/${pageNumber}/`;
+    log.info(`fetching catalog page ${pageNumber}`, { url });
+    const html = await fetchWithCloudscraper(url, { referer: BASE_URL + catalogPath, proxyUrl: config.proxyUrl });
+    if (!html) break;
+
+    const $ = cheerio.load(html);
+    const pageItems = _extractCards($);
+
+    if (!pageItems.length) break;
+    items.push(...pageItems);
+    pageNumber++;
+  }
+
+  const result = items.slice(0, ITEMS_PER_PAGE);
+  catalogCache.set(cacheKey, result);
+  log.info(`catalog: found ${result.length} items`, { skip, search });
+  return result;
+}
+
+/**
+ * Detect which catalog URL path the site uses by trying known patterns.
+ * Result is cached in the module scope.
+ */
+let _detectedPath = null;
+async function _detectCatalogPath(config) {
+  if (_detectedPath) return _detectedPath;
+  for (const path of CATALOG_PATHS) {
+    const url = `${BASE_URL}${path}`;
+    log.info(`trying catalog path: ${url}`);
+    const html = await fetchWithCloudscraper(url, { referer: BASE_URL, proxyUrl: config.proxyUrl }).catch(() => null);
+    if (!html) continue;
+    const $ = cheerio.load(html);
+    const cards = _extractCards($);
+    if (cards.length > 0) {
+      log.info(`catalog path detected: ${path} (${cards.length} cards)`);
+      _detectedPath = path;
+      return path;
+    }
+  }
+  return null;
+}
+
+/**
+ * WordPress search endpoint: /?s=query
+ */
+async function _searchCatalog(search, config) {
+  const url = `${BASE_URL}/?s=${encodeURIComponent(search)}`;
+  log.info('searching catalog', { url });
+  const html = await fetchWithCloudscraper(url, { referer: BASE_URL, proxyUrl: config.proxyUrl });
+  if (!html) return [];
+
+  const $ = cheerio.load(html);
+  const items = _extractCards($);
+  log.info(`search found ${items.length} items`, { search });
+  return items;
+}
+
+/**
+ * Extract drama cards from a cheerio-loaded page.
+ * Tries multiple common WordPress drama-site selectors.
+ */
+function _extractCards($) {
+  const items = [];
+  const seen  = new Set();
+
+  // Strategy 1: article posts with class post or drama
+  const selectors = [
+    'article.post a[href*="/drama/"]',
+    'article.drama a[href]',
+    '.drama-card a[href]',
+    '.post-thumbnail a[href*="/drama/"]',
+    'article a[rel="bookmark"]',
+    // Fallback: any article with a plausible internal link
+    'article h2 a[href]',
+    'article h3 a[href]',
+    '.entry-title a[href]',
+  ];
+
+  for (const sel of selectors) {
+    $(sel).each((_, el) => {
+      const $el = $(el);
+      const href = $el.attr('href') || '';
+      if (!href.startsWith(BASE_URL) && !href.startsWith('/')) return;
+      if (href.includes('?') && !href.includes('/drama/')) return; // skip pagination/tag links
+
+      // Try to find title
+      let title = $el.attr('title')
+        || $el.text().trim()
+        || $el.find('img').attr('alt')
+        || '';
+      title = title.replace(/\s*\(\d{4}\)\s*$/, '').replace(/\s+/g, ' ').trim();
+      if (!title || title.length > 100) return;
+
+      // Slug-based ID
+      const slug = href.replace(/\/$/, '').split('/').pop();
+      if (!slug || seen.has(slug)) return;
+      seen.add(slug);
+
+      // Try to get poster from nearby image
+      const $parent = $el.parent();
+      const posterEl = $parent.find('img').first()
+        || $el.closest('article, .drama-card, .post').find('img').first();
+      const poster = (posterEl.length ? posterEl.attr('src') || posterEl.attr('data-src') : '') || '';
+
+      items.push({
+        id: `drammatica_${slug}`,
+        type: 'kdrama',
+        name: title,
+        poster,
+        posterShape: 'poster',
+      });
+    });
+    if (items.length > 3) break; // Found something with this selector, stop trying others
+  }
+
+  return items;
+}
+
+// ─── Meta ─────────────────────────────────────────────────────────────────────
+
+/**
+ * @param {string} id  e.g. "drammatica_serie-coreana-2024"
+ * @param {object} [config={}]
+ * @returns {Promise<{meta: object}>}
+ */
+async function getMeta(id, config = {}) {
+  const seriesId = id.includes(':') ? id.split(':')[0] : id;
+
+  const cached = metaCache.get(seriesId);
+  if (cached) {
+    log.debug('meta from cache', { id: seriesId });
+    return { meta: cached };
+  }
+
+  const slug = seriesId.replace(/^drammatica_/, '');
+
+  // Try multiple URL patterns for the drama page
+  const seriesUrl = await _findDramaUrl(slug, config);
+  if (!seriesUrl) {
+    log.warn('series page not found', { id, slug });
+    return { meta: _emptyMeta(seriesId) };
+  }
+
+  log.info('fetching meta', { id, seriesUrl });
+  const html = await fetchWithCloudscraper(seriesUrl, { referer: BASE_URL, proxyUrl: config.proxyUrl });
+  if (!html) {
+    log.warn('meta fetch returned null', { id });
+    return { meta: _emptyMeta(seriesId) };
+  }
+
+  const $ = cheerio.load(html);
+
+  // Series title
+  const name = $('h1.entry-title, h1.drama-title, h1.post-title, h1').first().text().trim()
+    || $('meta[property="og:title"]').attr('content')?.replace(/\s*[-|].*$/, '').trim()
+    || slug.replace(/-/g, ' ');
+
+  // Poster
+  const poster = $('meta[property="og:image"]').attr('content')
+    || $('.post-thumbnail img, .drama-poster img, .serie-image img').first().attr('src')
+    || '';
+
+  // Background (wider banner, fallback to poster)
+  const background = $('meta[property="og:image"]').attr('content')
+    || $('meta[name="twitter:image"]').attr('content')
+    || poster;
+
+  // Description / synopsis
+  const description = $('.entry-content p, .drama-description, .serie-description, .synopsis')
+    .first().text().trim()
+    || $('meta[property="og:description"]').attr('content') || '';
+
+  // Year
+  let year = null;
+  const yearMatch = ($('title').text() + description).match(/\b(20\d{2}|19\d{2})\b/);
+  if (yearMatch) year = yearMatch[1];
+
+  // Genres
+  const genres = [];
+  $('a[href*="/genere/"], a[href*="/genre/"], a[href*="/categoria/"], a[href*="/category/"], a[rel="category tag"]').each((_, el) => {
+    const g = $(el).text().trim();
+    if (g && g.length < 40 && !genres.includes(g)) genres.push(g);
+  });
+
+  // Cast — multiple strategies
+  const cast = [];
+  $('a[href*="/attori/"], a[href*="/actor/"], a[href*="/cast/"]').each((_, el) => {
+    const c = $(el).text().trim();
+    if (c && c.length > 1 && c.length < 60 && !cast.includes(c)) cast.push(c);
+  });
+  if (!cast.length) {
+    $('li, p, td').each((_, el) => {
+      const text = $(el).text().replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+      if (/\b(Attori|Cast|Interpreti|Star|Protagonisti)\s*:/i.test(text)) {
+        text.replace(/^[^:]+:\s*/, '').split(/[,;]/).forEach(n => {
+          n = n.trim();
+          if (n && n.length > 1 && n.length < 60 && !cast.includes(n)) cast.push(n);
+        });
+      }
+    });
+  }
+
+  // Episode list
+  const episodes = _extractEpisodes($, slug, year);
+
+  const meta = {
+    id: seriesId,
+    type: 'kdrama',
+    name,
+    poster,
+    background: background || undefined,
+    description,
+    releaseInfo: year || '',
+    genres: genres.length ? genres : undefined,
+    cast: cast.length ? cast : undefined,
+    seriesUrl,
+    slug,
+    year,
+    episodes,
+    videos: episodes.map((ep, idx) => ({
+      id: `${seriesId}:${ep.id}`,
+      title: ep.title,
+      season: 1,
+      episode: idx + 1,
+      overview: '',
+      thumbnail: ep.thumbnail || poster || '',
+      released: year ? new Date(`${year}-01-01`).toISOString() : '',
+    })),
+  };
+
+  metaCache.set(seriesId, meta);
+  return { meta };
+}
+
+/**
+ * Try multiple URL patterns to locate the drama page.
+ */
+async function _findDramaUrl(slug, config) {
+  const candidates = [
+    `${BASE_URL}/drama/${slug}/`,
+    `${BASE_URL}/${slug}/`,
+    `${BASE_URL}/serie/${slug}/`,
+    `${BASE_URL}/k-drama/${slug}/`,
+    `${BASE_URL}/drama-streaming/${slug}/`,
+  ];
+  for (const url of candidates) {
+    const html = await fetchWithCloudscraper(url, { referer: BASE_URL, proxyUrl: config.proxyUrl }).catch(() => null);
+    if (html && html.length > 500 && !html.includes('404') && !html.includes('Pagina non trovata')) {
+      return url;
+    }
+  }
+  return null;
+}
+
+/**
+ * Extract episode list from the drama page.
+ */
+function _extractEpisodes($, seriesSlug, year) {
+  const episodes = [];
+  const seen = new Set();
+
+  // Strategy 1: links containing the series slug + episode number
+  $('a[href]').each((_, el) => {
+    const $el = $(el);
+    const href = $el.attr('href') || '';
+    if (!href.startsWith(BASE_URL) && !href.startsWith('/')) return;
+
+    // Match patterns like:
+    // /series-slug-episodio-1/ or /episodio-1-series-slug/ or /watch/series-slug/1/
+    const epMatch = href.match(/episodio[-_]?(\d+)|episode[-_]?(\d+)|ep[-_]?(\d+)|\/(\d+)\//i);
+    if (!epMatch) return;
+    const epNum = parseInt(epMatch[1] || epMatch[2] || epMatch[3] || epMatch[4], 10);
+    if (!epNum || seen.has(epNum)) return;
+    seen.add(epNum);
+
+    const img = $el.find('img').first();
+    const thumbnail = img.attr('src') || img.attr('data-src') || '';
+    episodes.push({ epNum, id: `episodio-${epNum}`, title: `Episodio ${epNum}`, thumbnail, link: href.startsWith('http') ? href : BASE_URL + href });
+  });
+
+  // Strategy 2: ordered list of links marked as episodes
+  if (!episodes.length) {
+    $('ol li a, ul.episodi li a, .episode-list a, .episodes a').each((_, el) => {
+      const $el = $(el);
+      const href = $el.attr('href') || '';
+      const text = $el.text().trim();
+      if (!href) return;
+
+      const epMatch = text.match(/\d+/) || href.match(/(\d+)/);
+      if (!epMatch) return;
+      const epNum = parseInt(epMatch[0], 10);
+      if (!epNum || seen.has(epNum)) return;
+      seen.add(epNum);
+      episodes.push({ epNum, id: `episodio-${epNum}`, title: `Episodio ${epNum}`, thumbnail: '', link: href.startsWith('http') ? href : BASE_URL + href });
+    });
+  }
+
+  episodes.sort((a, b) => a.epNum - b.epNum);
+  return episodes;
+}
+
+function _emptyMeta(id) {
+  return { id, type: 'kdrama', name: id.replace(/^drammatica_/, '').replace(/-/g, ' '), videos: [] };
+}
+
+// ─── Streams ──────────────────────────────────────────────────────────────────
+
+/**
+ * @param {string} id  e.g. "drammatica_my-drama" or "drammatica_my-drama:episodio-3"
+ * @param {object} [config={}]
+ * @returns {Promise<Array>}
+ */
+async function getStreams(id, config = {}) {
+  const colonIdx = id.indexOf(':');
+  const seriesId  = colonIdx !== -1 ? id.slice(0, colonIdx) : id;
+  const episodeId = colonIdx !== -1 ? id.slice(colonIdx + 1) : null;
+
+  const cacheKey = episodeId ? `${seriesId}:${episodeId}` : seriesId;
+  const cached = streamCache.get(cacheKey);
+  if (cached) {
+    log.debug('streams from cache', { cacheKey });
+    return cached.map(s => ({ ...s, url: wrapStreamUrl(s.url, config) }));
+  }
+
+  const { meta } = await getMeta(seriesId, config);
+  if (!meta || !meta.episodes || !meta.episodes.length) {
+    log.warn('no episodes found', { id });
+    return [];
+  }
+
+  const episodes = episodeId
+    ? meta.episodes.filter(ep => ep.id === episodeId)
+    : meta.episodes;
+
+  if (!episodes.length) {
+    log.warn('episode not found', { episodeId });
+    return [];
+  }
+
+  const displayName = (meta.name || '').replace(/\s*\(\d{4}\)\s*$/, '').trim();
+
+  const results = await Promise.all(
+    episodes.map(ep => _getStreamFromEpisodePage(ep.link, config)
+      .then(url => ({ ep, url }))
+      .catch(err => { log.warn(`stream fetch error for ${ep.id}: ${err.message}`); return { ep, url: null }; })
+    )
+  );
+
+  const rawStreams = [];
+  for (const { ep, url: streamUrl } of results) {
+    if (!streamUrl) {
+      log.warn('no stream found for episode', { epId: ep.id });
+      continue;
+    }
+    if (!streamUrl.startsWith('http')) {
+      log.warn('invalid stream URL', { epId: ep.id, url: streamUrl.slice(0, 80) });
+      continue;
+    }
+    rawStreams.push({
+      name: '🚀 Drammatica',
+      description: `📁 ${displayName} - ${ep.title}\n👤 Drammatica.it\n🇰🇷 Sub ITA`,
+      url: streamUrl,
+      behaviorHints: { bingeGroup: `streamfusion-drammatica-${seriesId}` },
+    });
+  }
+
+  if (!rawStreams.length) {
+    log.warn('no streams found', { id });
+    return [];
+  }
+
+  streamCache.set(cacheKey, rawStreams);
+  return rawStreams.map(s => ({ ...s, url: wrapStreamUrl(s.url, config) }));
+}
+
+/**
+ * Fetch an episode page and extract the direct video URL or embed iframe src.
+ * Handles common Italian drama site hosters:
+ *   - DropLoad, Streamtape, SuperVideo, Vixcloud, MaxStream, direct .m3u8/.mp4
+ */
+async function _getStreamFromEpisodePage(episodeLink, config = {}) {
+  const cacheKey = `stream:${episodeLink}`;
+  const cached = streamCache.get(cacheKey);
+  if (cached) return cached;
+
+  log.debug('fetching episode page', { episodeLink });
+  const html = await fetchWithCloudscraper(episodeLink, {
+    referer: BASE_URL,
+    timeout: 20_000,
+    proxyUrl: config.proxyUrl,
+  });
+  if (!html) return null;
+
+  const $ = cheerio.load(html);
+  let url = null;
+
+  // Priority 1 — main player iframe
+  const iframeSelectors = [
+    'iframe#video-player',
+    'iframe.video-player',
+    '.wp-block-embed iframe',
+    '.player-box iframe',
+    '.video-container iframe',
+    'div[class*="player"] iframe',
+    'div[class*="embed"] iframe',
+    'iframe[src*="dropload"], iframe[src*="streamtape"], iframe[src*="supervideo"]',
+    'iframe[src*="vixcloud"], iframe[src*="maxstream"], iframe[src*="vixede"]',
+    // Last resort: any iframe with an external src
+    'iframe[src^="http"]',
+  ];
+  for (const sel of iframeSelectors) {
+    const iframe = $(sel).first();
+    if (iframe.length) {
+      url = iframe.attr('src') || iframe.attr('data-src');
+      if (url) { log.info('iframe found', { sel, url: url.slice(0, 80) }); break; }
+    }
+  }
+
+  // Priority 2 — <video> source tag (direct stream)
+  if (!url) {
+    url = $('video source').attr('src') || $('video').attr('src');
+    if (url) log.info('video src found', { url: url.slice(0, 80) });
+  }
+
+  // Priority 3 — script tags containing known hoster URLs
+  if (!url) {
+    const scripts = $('script').map((_, el) => $(el).html()).get().join('\n');
+    const patterns = [
+      /(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/,
+      /(https?:\/\/[^"'\s]+\.mp4[^"'\s]*)/,
+      /(https?:\/\/(?:www\.)?dropload\.io\/[^"'\s]+)/,
+      /(https?:\/\/(?:www\.)?streamtape\.com\/[^"'\s]+)/,
+      /(https?:\/\/supervideo\.[^/]+\/[^"'\s]+)/,
+      /(https?:\/\/vixcloud\.[^/]+\/[^"'\s]+)/,
+    ];
+    for (const pat of patterns) {
+      const match = (scripts + html).match(pat);
+      if (match) { url = match[1]; log.info('script pattern match', { url: url.slice(0, 80) }); break; }
+    }
+  }
+
+  if (url) {
+    url = decodeURI(url.trim());
+    streamCache.set(cacheKey, url, 2 * 60 * 60_000);
+  } else {
+    log.warn('no stream URL found', { episodeLink });
+  }
+
+  return url || null;
+}
+
+module.exports = { getCatalog, getMeta, getStreams };

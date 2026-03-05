@@ -17,9 +17,11 @@
  *   "rama_catalog"    → Rama
  */
 
-const axios  = require('axios');
-const kisskh = require('./kisskh');
-const rama   = require('./rama');
+const axios         = require('axios');
+const kisskh        = require('./kisskh');
+const rama          = require('./rama');
+const drammatica    = require('./drammatica');
+const guardaserie   = require('./guardaserie');
 const { withTimeout } = require('../utils/fetcher');
 const { titleSimilarity } = require('../utils/titleHelper');
 const { createLogger } = require('../utils/logger');
@@ -57,6 +59,16 @@ async function handleCatalog(type, catalogId, extra = {}, config = {}) {
       const metas = await withTimeout(rama.getCatalog(skip, search, config), CATALOG_TIMEOUT, 'rama.getCatalog');
       return { metas };
     }
+
+    if (catalogId === 'drammatica_catalog') {
+      const metas = await withTimeout(drammatica.getCatalog(skip, search, config), CATALOG_TIMEOUT, 'drammatica.getCatalog');
+      return { metas };
+    }
+
+    if (catalogId === 'guardaserie_catalog') {
+      const metas = await withTimeout(guardaserie.getCatalog(skip, search, config), CATALOG_TIMEOUT, 'guardaserie.getCatalog');
+      return { metas };
+    }
   } catch (err) {
     log.error(`catalog failed: ${err.message}`, { type, catalogId });
   }
@@ -83,6 +95,16 @@ async function handleMeta(type, id, config = {}) {
 
     if (id.startsWith('rama_')) {
       const result = await withTimeout(rama.getMeta(id, config), META_TIMEOUT, 'rama.getMeta');
+      return result || { meta: null };
+    }
+
+    if (id.startsWith('drammatica_')) {
+      const result = await withTimeout(drammatica.getMeta(id, config), META_TIMEOUT, 'drammatica.getMeta');
+      return result || { meta: null };
+    }
+
+    if (id.startsWith('guardaserie_')) {
+      const result = await withTimeout(guardaserie.getMeta(id, config), META_TIMEOUT, 'guardaserie.getMeta');
       return result || { meta: null };
     }
   } catch (err) {
@@ -164,12 +186,16 @@ async function _fetchFromImdbId(rawId, type, config) {
   log.info(`Cinemeta title: "${title}"`, { imdbId });
 
   // 2. Search providers for the title, respecting `config.providers`
-  const useKisskh = !config.providers || config.providers === 'all' || config.providers === 'kisskh';
-  const useRama   = !config.providers || config.providers === 'all' || config.providers === 'rama';
+  const useKisskh     = !config.providers || config.providers === 'all' || config.providers === 'kisskh';
+  const useRama       = !config.providers || config.providers === 'all' || config.providers === 'rama';
+  const useDrammatica = !config.providers || config.providers === 'all' || config.providers === 'drammatica';
+  const useGuardaserie = !config.providers || config.providers === 'all' || config.providers === 'guardaserie';
 
   const jobs = [];
-  if (useKisskh) jobs.push(_kisskhStreamsForTitle(title, seasonNum, episodeNum, config).catch(e => { log.warn(`kisskh title search failed: ${e.message}`); return []; }));
-  if (useRama)   jobs.push(_ramaStreamsForTitle(title, episodeNum, config).catch(e => { log.warn(`rama title search failed: ${e.message}`); return []; }));
+  if (useKisskh)      jobs.push(_kisskhStreamsForTitle(title, seasonNum, episodeNum, config).catch(e => { log.warn(`kisskh title search failed: ${e.message}`); return []; }));
+  if (useRama)        jobs.push(_ramaStreamsForTitle(title, episodeNum, config).catch(e => { log.warn(`rama title search failed: ${e.message}`); return []; }));
+  if (useDrammatica)  jobs.push(_drammaticaStreamsForTitle(title, episodeNum, config).catch(e => { log.warn(`drammatica title search failed: ${e.message}`); return []; }));
+  if (useGuardaserie) jobs.push(_guardaserieStreamsForTitle(title, episodeNum, config).catch(e => { log.warn(`guardaserie title search failed: ${e.message}`); return []; }));
 
   const results = await Promise.all(jobs);
   return results.flat();
@@ -226,6 +252,54 @@ async function _ramaStreamsForTitle(title, episodeNum, config) {
   }
 
   return withTimeout(rama.getStreams(ep.id, config), STREAM_TIMEOUT, 'rama.getStreams').catch(() => []);
+}
+
+/**
+ * Search Drammatica by title, then get streams for the matching episode.
+ */
+async function _drammaticaStreamsForTitle(title, episodeNum, config) {
+  const SEARCH_TIMEOUT = 8_000;
+  const results = await withTimeout(drammatica.getCatalog(0, title, config), SEARCH_TIMEOUT, 'drammatica.search').catch(() => []);
+  if (!results || !results.length) return [];
+
+  const best = _bestMatch(results, title);
+  if (!best) return [];
+  log.info(`drammatica best match: "${best.name}" (${best.id})`, { title });
+
+  const { meta } = await withTimeout(drammatica.getMeta(best.id, config), META_TIMEOUT, 'drammatica.getMeta').catch(() => ({ meta: null }));
+  if (!meta || !meta.videos || !meta.videos.length) return [];
+
+  const ep = _matchEpisode(meta.videos, 1, episodeNum);
+  if (!ep) {
+    log.warn(`drammatica: no matching episode e${episodeNum} in "${best.name}"`);
+    return [];
+  }
+
+  return withTimeout(drammatica.getStreams(ep.id, config), STREAM_TIMEOUT, 'drammatica.getStreams').catch(() => []);
+}
+
+/**
+ * Search Guardaserie by title, then get streams for the matching episode.
+ */
+async function _guardaserieStreamsForTitle(title, episodeNum, config) {
+  const SEARCH_TIMEOUT = 8_000;
+  const results = await withTimeout(guardaserie.getCatalog(0, title, config), SEARCH_TIMEOUT, 'guardaserie.search').catch(() => []);
+  if (!results || !results.length) return [];
+
+  const best = _bestMatch(results, title);
+  if (!best) return [];
+  log.info(`guardaserie best match: "${best.name}" (${best.id})`, { title });
+
+  const { meta } = await withTimeout(guardaserie.getMeta(best.id, config), META_TIMEOUT, 'guardaserie.getMeta').catch(() => ({ meta: null }));
+  if (!meta || !meta.videos || !meta.videos.length) return [];
+
+  const ep = _matchEpisode(meta.videos, 1, episodeNum);
+  if (!ep) {
+    log.warn(`guardaserie: no matching episode e${episodeNum} in "${best.name}"`);
+    return [];
+  }
+
+  return withTimeout(guardaserie.getStreams(ep.id, config), STREAM_TIMEOUT, 'guardaserie.getStreams').catch(() => []);
 }
 
 /**
@@ -290,18 +364,25 @@ async function _fetchFromProvider(id, type, config = {}) {
   if (id.startsWith('rama_')) {
     return withTimeout(rama.getStreams(id, config), STREAM_TIMEOUT, 'rama.getStreams');
   }
+  if (id.startsWith('drammatica_')) {
+    return withTimeout(drammatica.getStreams(id, config), STREAM_TIMEOUT, 'drammatica.getStreams');
+  }
+  if (id.startsWith('guardaserie_')) {
+    return withTimeout(guardaserie.getStreams(id, config), STREAM_TIMEOUT, 'guardaserie.getStreams');
+  }
 
-  // Unknown prefix — try both providers in parallel and merge
+  // Unknown prefix — try all providers in parallel and merge
   log.warn('unknown id prefix, trying all providers', { id });
-  const [kisskhResult, ramaResult] = await Promise.allSettled([
+  const allResults = await Promise.allSettled([
     withTimeout(kisskh.getStreams(`kisskh_${id}`, config), STREAM_TIMEOUT, 'kisskh.getStreams.fallback'),
     withTimeout(rama.getStreams(`rama_${id}`, config), STREAM_TIMEOUT, 'rama.getStreams.fallback'),
+    withTimeout(drammatica.getStreams(`drammatica_${id}`, config), STREAM_TIMEOUT, 'drammatica.getStreams.fallback'),
+    withTimeout(guardaserie.getStreams(`guardaserie_${id}`, config), STREAM_TIMEOUT, 'guardaserie.getStreams.fallback'),
   ]);
 
-  return [
-    ...(kisskhResult.status === 'fulfilled' ? kisskhResult.value : []),
-    ...(ramaResult.status  === 'fulfilled' ? ramaResult.value  : []),
-  ];
+  return allResults
+    .filter(r => r.status === 'fulfilled')
+    .flatMap(r => r.value);
 }
 
 module.exports = { handleCatalog, handleMeta, handleStream };

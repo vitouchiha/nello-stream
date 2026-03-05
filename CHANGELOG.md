@@ -5,6 +5,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versi
 
 ---
 
+## [1.3.0] — 2026-03-05
+
+### Added
+- **Drammatica.it provider** (`drammatica_` ID prefix, `kdrama` type)
+  - Catalog with Cloudflare bypass via cloudscraper
+  - Multi-strategy card extraction (5 selector patterns)
+  - Auto-detection of catalog path (`/drama/`, `/k-drama/`, `/serie/`, `/`)
+  - WordPress search endpoint (`/?s=`) for search queries
+  - Meta: poster, background, genres, cast, episode list
+  - Multi-strategy episode extraction (URL pattern matching + list selectors)
+  - Multi-strategy stream extraction (iframe selectors, `<video>`, data-attrs, script scan)
+  - Handles DropLoad, Streamtape, SuperVideo, Vixcloud, MaxStream, direct HLS/MP4
+  - Stream card: `🚀 Drammatica` · `🇰🇷 Sub ITA`
+- **Guardaserie provider** (`guardaserie_` ID prefix, `kdrama` type)
+  - Mirror auto-detection (guardaserie.re → .fm → .cloud → .cx)
+  - Catalog path auto-detection with 4 fallback paths
+  - Multi-hoster support: DropLoad, Streamtape, SuperVideo, Vixcloud, MaxStream, DoodStream
+  - Per-episode multi-stream extraction (all available hosters shown as separate streams)
+  - Hoster label in stream name (e.g. `🚀 Guardaserie [DropLoad]`)
+  - Tab/data-attribute scan + script scan for embedded URLs
+  - Stream card: `🚀 Guardaserie [Hoster]` · `🇰🇷 Sub ITA`
+- Both new providers wired into `index.js` aggregator (catalog, meta, stream, IMDB lookup)
+- `manifest.json`: 4 catalogs total (`kisskh_catalog`, `rama_catalog`, `drammatica_catalog`, `guardaserie_catalog`)
+- `idPrefixes` extended to `["kisskh_", "rama_", "drammatica_", "guardaserie_"]`
+
+### Note
+- **Viki (viki.com)** NOT implemented — Widevine DRM (L1/L3) + Rakuten subscription required; stream extraction technically/legally not feasible
+
+---
+
 ## [1.2.0] — 2026-03-05
 
 ### Added

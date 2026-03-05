@@ -1,6 +1,6 @@
 {
   "name": "streamfusion-mail",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Aggregatore flussi streaming multi-provider per Stremio",
   "main": "server.js",
   "engines": {

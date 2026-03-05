@@ -23,11 +23,29 @@
         { "name": "search", "isRequired": false },
         { "name": "skip", "isRequired": false }
       ]
+    },
+    {
+      "type": "kdrama",
+      "id": "drammatica_catalog",
+      "name": "Korean Drama (Drammatica.it)",
+      "extra": [
+        { "name": "search", "isRequired": false },
+        { "name": "skip", "isRequired": false }
+      ]
+    },
+    {
+      "type": "kdrama",
+      "id": "guardaserie_catalog",
+      "name": "Asian Drama (Guardaserie)",
+      "extra": [
+        { "name": "search", "isRequired": false },
+        { "name": "skip", "isRequired": false }
+      ]
     }
   ],
   "resources": ["catalog", "meta", "stream"],
   "types": ["series", "kdrama"],
-  "idPrefixes": ["kisskh_", "rama_"],
+  "idPrefixes": ["kisskh_", "rama_", "drammatica_", "guardaserie_"],
   "behaviorHints": {
     "configurable": true
   }
