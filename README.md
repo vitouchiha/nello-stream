@@ -1,6 +1,6 @@
 ﻿# StreamFusion Mail
 
-![Version](https://img.shields.io/badge/version-1.3.4-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.3.5-blue?style=flat-square)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-green?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvitouchiha%2Fstreamfusion-mail)
@@ -139,6 +139,7 @@ https://streamfusion-mail.vercel.app/BASE64_CONFIG/manifest.json
 | **HTTP/SOCKS5 Proxy** | Proxy residenziale per bypassare blocchi IP Cloudflare |
 | **TMDB API Key** | Poster HD, cast, generi, rating dei drama |
 | **RPDB API Key** | Poster con rating IMDb sovrimpresso (richiede TMDB) |
+| **TopPoster API Key** | Locandine personalizzate HD con priorità su RPDB (richiede TMDB) |
 | **Provider attivi** | Scegli KissKH, Rama, o entrambi |
 | **Nascondi cataloghi** | Rimuove catalog dalla home Stremio |
 | **Stream da Cinemeta/IMDB** | Risponde anche a ID `tt*` da Cinemeta |

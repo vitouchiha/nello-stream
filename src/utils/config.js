@@ -20,6 +20,7 @@
  *   cm    → cinemeta (1 = enable IMDB stream support, omit = no)
  *   tm    → TMDB API key (for meta enrichment: poster, background, cast, genres)
  *   rp    → RPDB API key (for rated poster overlays)
+ *   tp    → TopPoster API key (for TopPoster poster overlays)
  */
 
 const crypto = require('crypto');
@@ -31,8 +32,9 @@ const DEFAULT_CONFIG = {
   hideCatalogs: false,
   providers:    'all',
   cinemeta:     false,
-  tmdbKey:      '',
-  rpdbKey:      '',
+  tmdbKey:        '',
+  rpdbKey:        '',
+  topPosterKey:   '',
 };
 
 // ─── Encryption helpers ───────────────────────────────────────────────────────
@@ -86,6 +88,7 @@ function encodeConfig(config) {
   if (config.cinemeta)                  obj.cm   = 1;
   if (config.tmdbKey)                   obj.tm   = config.tmdbKey.trim();
   if (config.rpdbKey)                   obj.rp   = config.rpdbKey.trim();
+  if (config.topPosterKey)               obj.tp   = config.topPosterKey.trim();
   return _encrypt(JSON.stringify(obj));
 }
 
@@ -108,8 +111,9 @@ function decodeConfig(encoded) {
       hideCatalogs: !!obj.hc,
       providers:    pvMap[obj.pv] || 'all',
       cinemeta:     !!obj.cm,
-      tmdbKey:      (obj.tm   || '').trim(),
-      rpdbKey:      (obj.rp   || '').trim(),
+      tmdbKey:        (obj.tm   || '').trim(),
+      rpdbKey:        (obj.rp   || '').trim(),
+      topPosterKey:   (obj.tp   || '').trim(),
     };
   } catch {
     // Legacy fallback: plain base64url (for old install URLs)
@@ -123,8 +127,9 @@ function decodeConfig(encoded) {
         hideCatalogs: !!obj.hc,
         providers:    pvMap[obj.pv] || 'all',
         cinemeta:     !!obj.cm,
-        tmdbKey:      (obj.tm   || '').trim(),
-        rpdbKey:      (obj.rp   || '').trim(),
+        tmdbKey:        (obj.tm   || '').trim(),
+        rpdbKey:        (obj.rp   || '').trim(),
+        topPosterKey:   (obj.tp   || '').trim(),
       };
     } catch {
       return { ...DEFAULT_CONFIG };

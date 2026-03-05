@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versi
 
 ---
 
+## [1.3.5] — 2026-05-09
+
+### Added
+- **TopPoster API** — nuovo campo `topPosterKey` nella configurazione. Se configurato (assieme a TMDB), sostituisce il poster standard con la locandina fornita da TopPoster. Ha priorità su RPDB. Integrato in `src/utils/tmdb.js` (`topPosterUrl()`), `src/utils/config.js` (chiave breve `tp`), `src/providers/kisskh.js` (nuovo blocco TMDB enrichment in `getMeta`), `src/providers/rama.js` (entrambi i blocchi poster). Aggiunto il campo nella landing page di configurazione.
+- **KissKH TMDB enrichment in getMeta** — `getMeta` di KissKH ora arricchisce la scheda con dati TMDB (poster HD, background, cast, generi, IMDB ID) se `tmdbKey` è configurata, con la stessa logica di Rama.
+
+---
+
 ## [1.3.4] — 2026-05-08
 
 ### Removed

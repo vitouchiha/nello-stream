@@ -21,6 +21,7 @@ const { TTLCache } = require('../utils/cache');
 const { cleanTitleForSearch, titleSimilarity, extractEpisodeNumericId } = require('../utils/titleHelper');
 const { withTimeout, makeProxyAgent, getProxyAgent } = require('../utils/fetcher');
 const { wrapStreamUrl } = require('../utils/mediaflow');
+const { enrichFromTmdb, rpdbPosterUrl, topPosterUrl } = require('../utils/tmdb');
 const { flareSolverrGetJSONWithPrimer, createSession, destroySession, sessionGet, getFlareSolverrUrl } = require('../utils/flaresolverr');
 const { createLogger } = require('../utils/logger');
 
@@ -248,6 +249,30 @@ async function getMeta(id, config = {}) {
         released: ep.releaseDate || '',
       })),
     };
+
+    // ── TMDB enrichment (fills poster with HD artwork, cast, genres, imdb_id) ─
+    if (config.tmdbKey) {
+      const year = meta.releaseInfo || null;
+      const tmdb = await enrichFromTmdb(meta.name, year, config.tmdbKey).catch(() => null);
+      if (tmdb) {
+        if (tmdb.poster)                               meta.poster      = tmdb.poster;
+        if (tmdb.background)                           meta.background  = tmdb.background;
+        if (!meta.description && tmdb.description)     meta.description = tmdb.description;
+        if (!meta.genres?.length && tmdb.genres?.length) meta.genres    = tmdb.genres;
+        if (!meta.cast?.length  && tmdb.cast?.length)  meta.cast        = tmdb.cast;
+        if (!meta.imdbRating   && tmdb.imdbRating)     meta.imdbRating  = tmdb.imdbRating;
+        if (!meta.director     && tmdb.director)       meta.director    = tmdb.director;
+        if (tmdb.imdbId) meta.imdb_id = tmdb.imdbId;
+        // Poster priority: TopPoster > RPDB > TMDB
+        const tp = topPosterUrl(config.topPosterKey, tmdb.imdbId);
+        if (tp) {
+          meta.poster = tp;
+        } else if (config.rpdbKey) {
+          const rp = rpdbPosterUrl(config.rpdbKey, tmdb.imdbId);
+          if (rp) meta.poster = rp;
+        }
+      }
+    }
 
     metaCache.set(id, meta);
     return { meta };

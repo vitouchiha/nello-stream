@@ -89,6 +89,22 @@ function rpdbPosterUrl(rpdbKey, imdbId) {
   return `https://api.ratingposterdb.com/${rpdbKey}/imdb/poster-default/${imdbId}.jpg`;
 }
 
+/**
+ * Build a TopPoster poster URL.
+ * Returns null if apiKey or imdbId is missing.
+ *
+ * TopPoster API docs: https://topasterdb.com
+ * Poster URL format: https://api.topasterdb.com/{key}/imdb/poster-default/{imdbId}.jpg
+ *
+ * @param {string} topPosterKey
+ * @param {string} imdbId   e.g. "tt1234567"
+ * @returns {string|null}
+ */
+function topPosterUrl(topPosterKey, imdbId) {
+  if (!topPosterKey || !imdbId || !imdbId.startsWith('tt')) return null;
+  return `https://api.topasterdb.com/${topPosterKey}/imdb/poster-default/${imdbId}.jpg`;
+}
+
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 async function _searchTv(title, year, apiKey) {
@@ -191,4 +207,4 @@ function _bestMatch(query, results) {
   return results.reduce((best, r) => (!best || r.popularity > best.popularity) ? r : best, null);
 }
 
-module.exports = { enrichFromTmdb, rpdbPosterUrl };
+module.exports = { enrichFromTmdb, rpdbPosterUrl, topPosterUrl };

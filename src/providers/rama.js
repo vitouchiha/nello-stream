@@ -14,7 +14,7 @@ const cheerio = require('cheerio');
 const { fetchWithCloudscraper } = require('../utils/fetcher');
 const { TTLCache } = require('../utils/cache');
 const { extractBaseSlug } = require('../utils/titleHelper');
-const { enrichFromTmdb, rpdbPosterUrl } = require('../utils/tmdb');
+const { enrichFromTmdb, rpdbPosterUrl, topPosterUrl } = require('../utils/tmdb');
 const { wrapStreamUrl } = require('../utils/mediaflow');
 const { createLogger } = require('../utils/logger');
 
@@ -273,8 +273,11 @@ async function getMeta(id, config = {}) {
       if (!meta.director     && tmdb.director)           meta.director   = tmdb.director;
       if (!meta.releaseInfo  && tmdb.releaseInfo)        meta.releaseInfo = tmdb.releaseInfo;
       if (tmdb.imdbId) meta.imdb_id = tmdb.imdbId;
-      // RPDB rated poster (requires IMDB ID)
-      if (config.rpdbKey && tmdb.imdbId) {
+      // Poster priority: TopPoster > RPDB > TMDB
+      const tp = topPosterUrl(config.topPosterKey, tmdb.imdbId);
+      if (tp) {
+        meta.poster = tp;
+      } else if (config.rpdbKey && tmdb.imdbId) {
         const rpdb = rpdbPosterUrl(config.rpdbKey, tmdb.imdbId);
         if (rpdb) meta.poster = rpdb;
       }
@@ -502,7 +505,11 @@ async function _tmdbFallbackMeta(seriesId, slug, config) {
     if (tmdb.imdbRating)     base.imdbRating  = tmdb.imdbRating;
     if (tmdb.releaseInfo)    base.releaseInfo = tmdb.releaseInfo;
     if (tmdb.imdbId)         base.imdb_id     = tmdb.imdbId;
-    if (config.rpdbKey && tmdb.imdbId) {
+    // Poster priority: TopPoster > RPDB > TMDB
+    const tp = topPosterUrl(config.topPosterKey, tmdb.imdbId);
+    if (tp) {
+      base.poster = tp;
+    } else if (config.rpdbKey && tmdb.imdbId) {
       const rpdb = rpdbPosterUrl(config.rpdbKey, tmdb.imdbId);
       if (rpdb) base.poster = rpdb;
     }

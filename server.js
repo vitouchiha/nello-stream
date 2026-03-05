@@ -567,6 +567,17 @@ Configura il proxy per sbloccare i contenuti da Vercel.</p>
 </div>
 
 <div class="card">
+  <div class="card-title">🎬 TopPoster <span class="badge">Poster personalizzati</span></div>
+  <p style="font-size:.82rem;color:var(--muted);margin-bottom:14px">
+    Sostituisce i poster standard con locandine personalizzate ad alta qualità.
+    Richiede TMDB attivo (per ricavare l&rsquo;IMDB ID). <a href="https://topasterdb.com" target="_blank" style="color:var(--accent-light)">topasterdb.com</a>
+  </p>
+  <label for="tpKey">TopPoster API Key</label>
+  <input id="tpKey" type="password" placeholder="Incolla qui la tua TopPoster API key" autocomplete="off" spellcheck="false" value="${esc(f.topPosterKey)}"/>
+  <div class="hint">Ha priorità su RPDB. Funziona solo se TMDB è configurato. Lascia vuoto per disattivare.</div>
+</div>
+
+<div class="card">
 
   <label style="margin-top:0">Provider attivi</label>
   <div class="radio-group" id="providerGroup">
@@ -624,6 +635,7 @@ Configura il proxy per sbloccare i contenuti da Vercel.</p>
     if(c.cinemeta)      o.cm=1;
     if(c.tmdbKey)       o.tm=c.tmdbKey;
     if(c.rpdbKey)       o.rp=c.rpdbKey;
+    if(c.topPosterKey)  o.tp=c.topPosterKey;
     return b64url(JSON.stringify(o));
   }
   window.generate=function(){
@@ -636,9 +648,10 @@ Configura il proxy per sbloccare i contenuti da Vercel.</p>
       providers: pvEl ? pvEl.value : 'all',
       cinemeta: document.getElementById('cinemetaChk').checked,
       tmdbKey: document.getElementById('tmdbKey').value.trim(),
-      rpdbKey: document.getElementById('rpdbKey').value.trim()
+      rpdbKey: document.getElementById('rpdbKey').value.trim(),
+      topPosterKey: document.getElementById('tpKey').value.trim()
     };
-    if(!cfg.mfpUrl&&!cfg.proxyUrl&&!cfg.hideCatalogs&&cfg.providers==='all'&&!cfg.cinemeta&&!cfg.tmdbKey&&!cfg.rpdbKey){
+    if(!cfg.mfpUrl&&!cfg.proxyUrl&&!cfg.hideCatalogs&&cfg.providers==='all'&&!cfg.cinemeta&&!cfg.tmdbKey&&!cfg.rpdbKey&&!cfg.topPosterKey){
       alert('Configura almeno una opzione (Proxy, Provider, o Nascondi cataloghi).');
       return;
     }
