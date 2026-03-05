@@ -194,36 +194,63 @@ app.get('/debug/flaresolverr', async (req, res) => {
     result.health = { error: err.message, ms: Date.now() - t0 };
   }
 
-  // Test 2: KissKH episode API via FlareSolverr SESSION
-  // (primer visit to kisskh.co → cf_clearance in session → API call with that cookie)
+  // Test 2: FlareSolverr step-by-step session diagnostic
   const t1 = Date.now();
-  const testEpId = req.query.ep || '202614'; // default: Ep1 of series 12203
+  const testEpId = req.query.ep || '202614';
   try {
-    const { flareSolverrGetJSONWithPrimer, createSession, destroySession, sessionGet } = require('./src/utils/flaresolverr');
+    const { createSession, destroySession, sessionGet, flareSolverrGetJSONWithPrimer } = require('./src/utils/flaresolverr');
 
-    // Test A: session primer approach
-    const apiUrl = `https://kisskh.co/api/DramaList/Episode/${testEpId}?type=2&sub=0&source=1&quality=auto`;
-    const data = await flareSolverrGetJSONWithPrimer(apiUrl);
-    result.kisskhEpisodeApi = {
-      mode: 'session+primer',
-      episodeId: testEpId,
-      gotJSON: !!data,
-      hasVideo: !!(data?.Video || data?.video),
-      videoPreview: data?.Video ? String(data.Video).slice(0, 80) : null,
-      ms: Date.now() - t1,
+    // Step A: create session
+    const tA = Date.now();
+    const sessionId = await createSession();
+    result.step_createSession = { ok: !!sessionId, id: sessionId ? sessionId.slice(0,8) : null, ms: Date.now()-tA };
+    if (!sessionId) { result.totalMs = Date.now()-t0; return res.json(result); }
+
+    // Step B: primer visit — kisskh.co main page
+    const tB = Date.now();
+    const primerBody = await sessionGet('https://kisskh.co/', sessionId);
+    const primerIsCF = !primerBody || primerBody.includes('Just a moment') || primerBody.includes('cf-browser-verification') || primerBody.includes('challenge');
+    result.step_primer = {
+      ok: !!primerBody && !primerIsCF,
+      bodyLen: primerBody ? primerBody.length : 0,
+      preview: primerBody ? primerBody.replace(/<[^>]+>/g,'').trim().slice(0,200) : null,
+      isCFChallenge: primerIsCF,
+      ms: Date.now()-tB,
     };
 
-    // Test B: also verify catalog search works
-    const t2 = Date.now();
-    const catalogUrl = 'https://kisskh.co/api/DramaList/List?page=1&type=1&sub=0&country=2&status=2&order=3&pageSize=5';
-    const catalogData = await flareSolverrGetJSONWithPrimer(catalogUrl);
-    result.kisskhCatalogApi = {
-      gotJSON: !!catalogData,
-      count: catalogData?.data?.length ?? 0,
-      ms: Date.now() - t2,
-    };
+    // Step C: catalog API (only if primer worked)
+    if (!primerIsCF && primerBody) {
+      const tC = Date.now();
+      const catalogUrl = 'https://kisskh.co/api/DramaList/List?page=1&type=1&sub=0&country=2&status=2&order=3&pageSize=5';
+      const catalogBody = await sessionGet(catalogUrl, sessionId);
+      let catalogData = null;
+      try { catalogData = JSON.parse(catalogBody); } catch {}
+      result.step_catalogApi = {
+        gotJSON: !!catalogData,
+        bodyLen: catalogBody ? catalogBody.length : 0,
+        preview: catalogBody ? catalogBody.slice(0,200) : null,
+        count: catalogData?.data?.length ?? 0,
+        ms: Date.now()-tC,
+      };
+
+      // Step D: episode API
+      const tD = Date.now();
+      const apiUrl = `https://kisskh.co/api/DramaList/Episode/${testEpId}?type=2&sub=0&source=1&quality=auto`;
+      const epBody = await sessionGet(apiUrl, sessionId);
+      let epData = null;
+      try { epData = JSON.parse(epBody); } catch {}
+      result.step_episodeApi = {
+        gotJSON: !!epData,
+        hasVideo: !!(epData?.Video || epData?.video),
+        videoPreview: epData?.Video ? String(epData.Video).slice(0,80) : null,
+        bodyPreview: epBody ? epBody.slice(0,200) : null,
+        ms: Date.now()-tD,
+      };
+    }
+
+    destroySession(sessionId);
   } catch (err) {
-    result.kisskhEpisodeApi = { error: err.message, ms: Date.now() - t1 };
+    result.sessionTest = { error: err.message, ms: Date.now()-t1 };
   }
 
   result.totalMs = Date.now() - t0;
