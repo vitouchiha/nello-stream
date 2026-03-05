@@ -363,41 +363,30 @@ app.get('/debug/drammatica', requireDebugAuth, async (req, res) => {
   const { fetchWithCloudscraper } = require('./src/utils/fetcher');
   const cheerio = require('cheerio');
   const proxyUrl = (process.env.PROXY_URL || '').trim();
-  const BASE_URL = 'https://www.drammatica.it';
-  const PATHS = ['/drama/', '/k-drama/', '/serie/', '/archivio/', '/'];
-  const result = { proxyConfigured: !!proxyUrl, paths: {} };
 
-  for (const path of PATHS) {
-    const url = BASE_URL + path;
+  // Check if any known alternative domains for Drammatica are alive
+  const altDomains = [
+    'https://www.drammatica.it',
+    'https://drammatica.it',
+    'https://www.drammatica.tv',
+    'https://www.drammatica.online',
+    'https://drammaticaita.wordpress.com',
+  ];
+  const domainCheck = {};
+  for (const base of altDomains) {
     const t0 = Date.now();
     try {
-      const html = await fetchWithCloudscraper(url, { referer: BASE_URL, proxyUrl });
-      if (!html) { result.paths[path] = { ok: false, error: 'empty response', ms: Date.now()-t0 }; continue; }
-      const $ = cheerio.load(html);
-      const title = $('title').text().trim().slice(0, 80);
-      const cfBlocked = html.includes('Just a moment') || html.includes('Checking your browser') || (html.includes('cloudflare.com') && html.length < 40_000);
-      const articleCount = $('article').length;
-      const h2Links = $('article h2 a[href], article h3 a[href], .entry-title a[href], article a[rel="bookmark"]').length;
-      const firstHrefs = [];
-      $('article a[href]').slice(0, 5).each((_, el) => firstHrefs.push($(el).attr('href')));
-      const firstClasses = [];
-      $('article').slice(0, 3).each((_, el) => firstClasses.push($(el).attr('class') || ''));
-      const htmlFull = path === '/' ? html : '';
-      const redirectTarget = (() => {
-        const m2 = html.match(/(?:location\.href|location\.replace)\s*[=(]\s*['"`]([^'"`]+)['"`]/);
-        if (m2) return m2[1];
-        const m3 = html.match(/window\.location\s*=\s*['"`]([^'"`]+)['"`]/);
-        if (m3) return m3[1];
-        const m4 = html.match(/<meta[^>]+http-equiv=["']refresh["'][^>]+content=["'][^"']*url=([^"']+)/i);
-        if (m4) return m4[1];
-        return null;
-      })();
-      result.paths[path] = { ok: true, htmlLen: html.length, title, cfBlocked, articleCount, h2Links, firstHrefs, firstClasses, redirectTarget, htmlPreview: html.slice(0, 600).replace(/\s+/g, ' '), htmlFull: htmlFull || undefined, ms: Date.now()-t0 };
+      const html = await fetchWithCloudscraper(base + '/', { referer: base, proxyUrl });
+      const isParked = !html || html.includes('parklogic') || html.includes('Redirecting...') || html.length < 6000;
+      const $ = html ? cheerio.load(html) : null;
+      const title = $ ? $('title').text().trim().slice(0, 80) : '';
+      const articleCount = $ ? $('article').length : 0;
+      domainCheck[base] = { alive: !!html && !isParked, isParked, htmlLen: html?.length ?? 0, title, articleCount, ms: Date.now()-t0 };
     } catch (err) {
-      result.paths[path] = { ok: false, error: err.message, ms: Date.now()-t0 };
+      domainCheck[base] = { alive: false, error: err.message, ms: Date.now()-t0 };
     }
   }
-  res.json(result);
+  res.json({ proxyConfigured: !!proxyUrl, domainCheck });
 });
 
 // ─── Landing Page ─────────────────────────────────────────────────────────────
