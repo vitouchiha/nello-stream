@@ -454,27 +454,22 @@ async function getStreams(id, config = {}) {
 
   const results = await Promise.all(
     episodes.map(ep => _getStreamFromEpisodePage(ep.link, config)
-      .then(url => ({ ep, url }))
-      .catch(err => { log.warn(`stream fetch error for ${ep.id}: ${err.message}`); return { ep, url: null }; })
+      .then(streams => ({ ep, streams }))
+      .catch(err => { log.warn(`stream fetch error for ${ep.id}: ${err.message}`); return { ep, streams: [] }; })
     )
   );
 
   const rawStreams = [];
-  for (const { ep, url: streamUrl } of results) {
-    if (!streamUrl) {
-      log.warn('no stream found for episode', { epId: ep.id });
-      continue;
+  for (const { ep, streams } of results) {
+    for (const { url: streamUrl, label } of streams) {
+      if (!streamUrl || !streamUrl.startsWith('http')) continue;
+      rawStreams.push({
+        name: `🚀 Drammatica${label ? ` [${label}]` : ''}`,
+        description: `📁 ${displayName} - ${ep.title}\n👤 Drammatica.it\n🇰🇷 Sub ITA`,
+        url: streamUrl,
+        behaviorHints: { bingeGroup: `streamfusion-drammatica-${seriesId}` },
+      });
     }
-    if (!streamUrl.startsWith('http')) {
-      log.warn('invalid stream URL', { epId: ep.id, url: streamUrl.slice(0, 80) });
-      continue;
-    }
-    rawStreams.push({
-      name: '🚀 Drammatica',
-      description: `📁 ${displayName} - ${ep.title}\n👤 Drammatica.it\n🇰🇷 Sub ITA`,
-      url: streamUrl,
-      behaviorHints: { bingeGroup: `streamfusion-drammatica-${seriesId}` },
-    });
   }
 
   if (!rawStreams.length) {
@@ -487,9 +482,8 @@ async function getStreams(id, config = {}) {
 }
 
 /**
- * Fetch an episode page and extract the direct video URL or embed iframe src.
- * Handles common Italian drama site hosters:
- *   - DropLoad, Streamtape, SuperVideo, Vixcloud, MaxStream, direct .m3u8/.mp4
+ * Fetch an episode page and extract ALL available stream URLs.
+ * Returns Array of { url, label }
  */
 async function _getStreamFromEpisodePage(episodeLink, config = {}) {
   const cacheKey = `stream:${episodeLink}`;
@@ -502,72 +496,115 @@ async function _getStreamFromEpisodePage(episodeLink, config = {}) {
     timeout: 20_000,
     proxyUrl: config.proxyUrl,
   });
-  if (!html) return null;
+  if (!html) return [];
 
   const $ = cheerio.load(html);
-  let url = null;
+  const streams = [];
+  const seenEmbeds = new Set();
 
-  // Priority 1 — main player iframe
+  const addEmbed = (src, label = '') => {
+    if (!src || seenEmbeds.has(src)) return;
+    try { new URL(src.startsWith('//') ? 'https:' + src : src); } catch { return; }
+    seenEmbeds.add(src);
+    streams.push({ embedUrl: src.startsWith('//') ? 'https:' + src : src, label: label || _hosterLabel(src) });
+  };
+
+  // 1 — iframes (multiple hosters as tabs)
   const iframeSelectors = [
-    'iframe#video-player',
-    'iframe.video-player',
-    '.wp-block-embed iframe',
-    '.player-box iframe',
-    '.video-container iframe',
-    'div[class*="player"] iframe',
-    'div[class*="embed"] iframe',
-    'iframe[src*="dropload"], iframe[src*="streamtape"], iframe[src*="supervideo"]',
-    'iframe[src*="vixcloud"], iframe[src*="maxstream"], iframe[src*="vixede"]',
-    // Last resort: any iframe with an external src
+    'iframe#video-player', 'iframe.video-player',
+    '.wp-block-embed iframe', '.player-box iframe', '.video-container iframe',
+    'div[class*="player"] iframe', 'div[class*="embed"] iframe',
+    'iframe[src*="dropload"]', 'iframe[src*="streamtape"]', 'iframe[src*="supervideo"]',
+    'iframe[src*="vixcloud"]', 'iframe[src*="maxstream"]', 'iframe[src*="vixede"]',
     'iframe[src^="http"]',
   ];
   for (const sel of iframeSelectors) {
-    const iframe = $(sel).first();
-    if (iframe.length) {
-      url = iframe.attr('src') || iframe.attr('data-src');
-      if (url) { log.info('iframe found', { sel, url: url.slice(0, 80) }); break; }
-    }
+    $(sel).each((_, el) => {
+      const src = $(el).attr('src') || $(el).attr('data-src');
+      if (src) addEmbed(src.trim());
+    });
   }
 
-  // Priority 2 — <video> source tag (direct stream)
-  if (!url) {
-    url = $('video source').attr('src') || $('video').attr('src');
-    if (url) log.info('video src found', { url: url.slice(0, 80) });
-  }
+  // 2 — data-url / data-link attributes
+  $('[data-url], [data-link], [data-src]').each((_, el) => {
+    const src = $(el).attr('data-url') || $(el).attr('data-link') || $(el).attr('data-src');
+    if (src && src.startsWith('http')) addEmbed(src);
+  });
 
-  // Priority 3 — script tags containing known hoster URLs
-  if (!url) {
-    const scripts = $('script').map((_, el) => $(el).html()).get().join('\n');
-    const patterns = [
-      /(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/,
-      /(https?:\/\/[^"'\s]+\.mp4[^"'\s]*)/,
-      /(https?:\/\/(?:www\.)?dropload\.io\/[^"'\s]+)/,
-      /(https?:\/\/(?:www\.)?streamtape\.com\/[^"'\s]+)/,
-      /(https?:\/\/supervideo\.[^/]+\/[^"'\s]+)/,
-      /(https?:\/\/vixcloud\.[^/]+\/[^"'\s]+)/,
+  // 3 — <video> direct
+  $('video source, video').each((_, el) => {
+    const src = $(el).attr('src');
+    if (src) streams.push({ embedUrl: src, label: 'Direct' });
+  });
+
+  // 4 — scripts fallback
+  if (!streams.length) {
+    const combined = $('script').map((_, el) => $(el).html()).get().join('\n') + html;
+    const urlPatterns = [
+      /(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/g,
+      /(https?:\/\/[^"'\s]+\.mp4[^"'\s]*)/g,
+      /(https?:\/\/(?:www\.)?dropload\.io\/[^"'\s]+)/g,
+      /(https?:\/\/(?:www\.)?streamtape\.(?:com|to|net)\/[^"'\s]+)/g,
+      /(https?:\/\/supervideo\.[^/\s"']+\/[^"'\s]+)/g,
+      /(https?:\/\/vixcloud\.[^/\s"']+\/[^"'\s]+)/g,
     ];
-    for (const pat of patterns) {
-      const match = (scripts + html).match(pat);
-      if (match) { url = match[1]; log.info('script pattern match', { url: url.slice(0, 80) }); break; }
+    for (const pat of urlPatterns) {
+      let match;
+      while ((match = pat.exec(combined)) !== null) addEmbed(match[1]);
     }
   }
 
-  if (url) {
-    url = decodeURI(url.trim());
-    // If url is an embed page (not a direct stream), resolve it to a playable URL
-    if (!/\.(?:m3u8|mp4)(\?|$)/i.test(url)) {
-      const resolved = await _resolveEmbedUrl(url, config);
-      if (resolved) {
-        log.info('embed resolved', { from: url.slice(0, 70), to: resolved.slice(0, 70) });
-        url = resolved;
-      }
-    }
-    streamCache.set(cacheKey, url, 2 * 60 * 60_000);
-  } else {
-    log.warn('no stream URL found', { episodeLink });
-  }
+  log.info(`found ${streams.length} embed(s) for episode`, { episodeLink });
+  if (!streams.length) return [];
 
-  return url || null;
+  // Resolve each embed to a direct playable URL
+  const resolved = await Promise.all(
+    streams.map(async ({ embedUrl, label }) => {
+      if (/\.(?:m3u8|mp4)(\?|$)/i.test(embedUrl)) return { url: embedUrl, label };
+      const direct = await _resolveEmbedUrl(embedUrl, config);
+      return { url: direct || embedUrl, label };
+    })
+  );
+  const finalStreams = resolved.filter(s => s.url && s.url.startsWith('http'));
+
+  if (finalStreams.length) streamCache.set(cacheKey, finalStreams, 2 * 60 * 60_000);
+  return finalStreams;
+}
+
+/**
+ * SuperVideo P,A,C,K deobfuscation — ported from Streamvix.
+ */
+async function _resolveSupervideo(url, config = {}) {
+  try {
+    const normalized = url.replace(/\/e\//, '/').replace(/\/d\//, '/');
+    const html = await fetchWithCloudscraper(normalized, { referer: normalized, timeout: 12_000, proxyUrl: config.proxyUrl });
+    if (!html) return null;
+    const m = html.match(/}\('(.+?)',.+,'(.+?)'\.split/s);
+    if (!m) return null;
+    const terms = m[2].split('|');
+    const fileIndex = terms.indexOf('file');
+    if (fileIndex === -1) return null;
+    let hfs = '';
+    for (let i = fileIndex; i < terms.length; i++) {
+      if (terms[i].includes('hfs')) { hfs = terms[i]; break; }
+    }
+    if (!hfs) return null;
+    const urlsetIndex = terms.indexOf('urlset');
+    const hlsIndex    = terms.indexOf('hls');
+    if (urlsetIndex === -1 || hlsIndex === -1 || hlsIndex <= urlsetIndex) return null;
+    const slice    = terms.slice(urlsetIndex + 1, hlsIndex);
+    const reversed = slice.reverse();
+    let base = `https://${hfs}.serversicuro.cc/hls/`;
+    if (reversed.length === 1) return base + ',' + reversed[0] + '.urlset/master.m3u8';
+    const len = reversed.length;
+    reversed.forEach((el, idx) => {
+      base += el + ',' + (idx === len - 1 ? '.urlset/master.m3u8' : '');
+    });
+    return base;
+  } catch (e) {
+    log.warn('supervideo resolve failed', { err: e.message });
+    return null;
+  }
 }
 
 /**
@@ -575,6 +612,12 @@ async function _getStreamFromEpisodePage(episodeLink, config = {}) {
  * Handles Vixcloud, SuperVideo, Streamtape, DropLoad and generic JWPlayer/VideoJS patterns.
  */
 async function _resolveEmbedUrl(embedUrl, config = {}) {
+  // SuperVideo: use dedicated P,A,C,K deobfuscator first
+  if (/supervideo/i.test(embedUrl)) {
+    const sv = await _resolveSupervideo(embedUrl, config);
+    if (sv) return sv;
+  }
+
   try {
     const html = await fetchWithCloudscraper(embedUrl, {
       referer: embedUrl,

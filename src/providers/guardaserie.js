@@ -311,7 +311,7 @@ async function getMeta(id, config = {}) {
     });
   }
 
-  const episodes = _extractEpisodes($, seriesId, seriesUrl, base);
+  const episodes = _extractEpisodes(html, $, seriesId, seriesUrl, base);
 
   const meta = {
     id: seriesId,
@@ -381,10 +381,83 @@ async function _findSeriesUrl(base, slug, config) {
 /**
  * Extract episode list. Guardaserie often lists episodes in tabs or an accordion.
  */
-function _extractEpisodes($, seriesId, seriesUrl, base) {
+function _extractEpisodes(html, $, seriesId, seriesUrl, base) {
   const episodes = [];
   const seen = new Set();
 
+  // ── Pattern A (Streamvix legacy): data-episode="N" data-url="embed_url" ──────
+  $('[data-episode][data-url]').each((_, el) => {
+    const n = parseInt($(el).attr('data-episode'), 10);
+    let u = $(el).attr('data-url') || '';
+    if (isNaN(n) || !u || seen.has(n)) return;
+    seen.add(n);
+    if (u.startsWith('//')) u = 'https:' + u;
+    episodes.push({ epNum: n, id: `episodio-${n}`, title: `Episodio ${n}`, thumbnail: '', link: u, embeds: [u] });
+  });
+  if (episodes.length) {
+    log.info(`episodes via data-episode: ${episodes.length}`);
+    return episodes.sort((a, b) => a.epNum - b.epNum);
+  }
+
+  // ── Pattern B (Streamvix new): id="serie-S_E" + data-link inside <li> blocks ──
+  $('a[id^="serie-"]').each((_, el) => {
+    const idAttr = $(el).attr('id') || '';
+    const m = idAttr.match(/^serie-(\d+)_(\d+)$/);
+    if (!m) return;
+    const epNum = parseInt(m[2], 10);
+    if (isNaN(epNum) || seen.has(epNum)) return;
+    seen.add(epNum);
+
+    // Collect all data-link values from within the enclosing <li>
+    const $li = $(el).closest('li');
+    const embeds = [];
+    const addEmbed = (u) => {
+      if (!u) return;
+      if (u.startsWith('//')) u = 'https:' + u;
+      if (/supervideo|dropload|mixdrop|doodstream|vixcloud/i.test(u) && !embeds.includes(u)) embeds.push(u);
+    };
+    // Main anchor data-link
+    addEmbed($(el).attr('data-link'));
+    // All mirrors in the li
+    $li.find('[data-link]').each((_, dl) => addEmbed($(dl).attr('data-link')));
+
+    episodes.push({
+      epNum,
+      id: `episodio-${epNum}`,
+      title: `Episodio ${epNum}`,
+      thumbnail: '',
+      link: seriesUrl,
+      embeds: embeds.length ? embeds : undefined,
+    });
+  });
+  if (episodes.length) {
+    log.info(`episodes via data-link: ${episodes.length}`);
+    return episodes.sort((a, b) => a.epNum - b.epNum);
+  }
+
+  // ── Pattern C (raw regex fallback for data-link in HTML): ────────────────────
+  const dataLinkRe = /id="serie-(\d+)_(\d+)"[^>]*data-link="([^"]+)"/g;
+  const rawEmbedMap = new Map();
+  let rm;
+  while ((rm = dataLinkRe.exec(html)) !== null) {
+    const epNum = parseInt(rm[2], 10);
+    if (isNaN(epNum)) continue;
+    let u = rm[3];
+    if (u.startsWith('//')) u = 'https:' + u;
+    if (!rawEmbedMap.has(epNum)) rawEmbedMap.set(epNum, []);
+    if (/supervideo|dropload|mixdrop|doodstream|vixcloud/i.test(u)) rawEmbedMap.get(epNum).push(u);
+  }
+  if (rawEmbedMap.size) {
+    for (const [epNum, embeds] of rawEmbedMap) {
+      if (seen.has(epNum)) continue;
+      seen.add(epNum);
+      episodes.push({ epNum, id: `episodio-${epNum}`, title: `Episodio ${epNum}`, thumbnail: '', link: seriesUrl, embeds: embeds.length ? embeds : undefined });
+    }
+    log.info(`episodes via raw data-link regex: ${episodes.length}`);
+    return episodes.sort((a, b) => a.epNum - b.epNum);
+  }
+
+  // ── Strategy 1 (legacy): episode links with numeric pattern ──────────────────
   // Strategy 1: episode links with numeric pattern
   $('a[href]').each((_, el) => {
     const $el  = $(el);
@@ -488,10 +561,17 @@ async function getStreams(id, config = {}) {
   const displayName = (meta.name || '').replace(/\s*\(\d{4}\)\s*$/, '').trim();
 
   const results = await Promise.all(
-    episodes.map(ep => _getStreamFromEpisodePage(ep.link, config)
-      .then(streams => ({ ep, streams }))
-      .catch(err => { log.warn(`stream fetch error for ${ep.id}: ${err.message}`); return { ep, streams: [] }; })
-    )
+    episodes.map(ep => {
+      // If embeds are pre-parsed from the series page (Streamvix pattern), use them directly
+      if (ep.embeds && ep.embeds.length) {
+        return _getStreamsFromEmbeds(ep.embeds, config)
+          .then(streams => ({ ep, streams }))
+          .catch(err => { log.warn(`embed stream error for ${ep.id}: ${err.message}`); return { ep, streams: [] }; });
+      }
+      return _getStreamFromEpisodePage(ep.link, config)
+        .then(streams => ({ ep, streams }))
+        .catch(err => { log.warn(`stream fetch error for ${ep.id}: ${err.message}`); return { ep, streams: [] }; });
+    })
   );
 
   const rawStreams = [];
@@ -617,10 +697,80 @@ async function _getStreamFromEpisodePage(episodeLink, config = {}) {
 }
 
 /**
+ * SuperVideo P,A,C,K deobfuscation — ported from Streamvix.
+ * Reconstructs the HLS master playlist URL from the packed JS on the embed page.
+ */
+async function _resolveSupervideo(url, config = {}) {
+  try {
+    // Normalize: /e/<id> or /d/<id> → /<id>
+    const normalized = url.replace(/\/e\//, '/').replace(/\/d\//, '/');
+    const html = await fetchWithCloudscraper(normalized, { referer: normalized, timeout: 12_000, proxyUrl: config.proxyUrl });
+    if (!html) return null;
+
+    const m = html.match(/}\('(.+?)',.+,'(.+?)'\.split/s);
+    if (!m) return null;
+
+    const terms = m[2].split('|');
+    const fileIndex = terms.indexOf('file');
+    if (fileIndex === -1) return null;
+
+    let hfs = '';
+    for (let i = fileIndex; i < terms.length; i++) {
+      if (terms[i].includes('hfs')) { hfs = terms[i]; break; }
+    }
+    if (!hfs) return null;
+
+    const urlsetIndex = terms.indexOf('urlset');
+    const hlsIndex    = terms.indexOf('hls');
+    if (urlsetIndex === -1 || hlsIndex === -1 || hlsIndex <= urlsetIndex) return null;
+
+    const slice    = terms.slice(urlsetIndex + 1, hlsIndex);
+    const reversed = slice.reverse();
+    let base = `https://${hfs}.serversicuro.cc/hls/`;
+    if (reversed.length === 1) return base + ',' + reversed[0] + '.urlset/master.m3u8';
+    const len = reversed.length;
+    reversed.forEach((el, idx) => {
+      base += el + ',' + (idx === len - 1 ? '.urlset/master.m3u8' : '');
+    });
+    return base;
+  } catch (e) {
+    log.warn('supervideo resolve failed', { err: e.message });
+    return null;
+  }
+}
+
+/**
+ * Fetch streams directly from a list of embed URLs (Streamvix approach).
+ * Used when episode data-link embeds are pre-parsed from the series page.
+ */
+async function _getStreamsFromEmbeds(embeds, config = {}) {
+  const seenUrls = new Set();
+  const streams  = [];
+  for (const embedUrl of embeds.slice(0, 8)) {
+    let resolvedUrl = embedUrl;
+    if (!/\.(?:m3u8|mp4)(\?|$)/i.test(embedUrl)) {
+      const direct = await _resolveEmbedUrl(embedUrl, config);
+      if (direct) resolvedUrl = direct;
+    }
+    if (!resolvedUrl || seenUrls.has(resolvedUrl)) continue;
+    try { new URL(resolvedUrl); } catch { continue; }
+    seenUrls.add(resolvedUrl);
+    streams.push({ url: resolvedUrl, label: _hosterLabel(embedUrl) });
+  }
+  return streams;
+}
+
+/**
  * Fetch an embed player page and extract the direct .m3u8 / .mp4 stream URL.
  * Handles Vixcloud, SuperVideo, Streamtape, DropLoad and generic JWPlayer/VideoJS patterns.
  */
 async function _resolveEmbedUrl(embedUrl, config = {}) {
+  // SuperVideo: use dedicated P,A,C,K deobfuscator first
+  if (/supervideo/i.test(embedUrl)) {
+    const sv = await _resolveSupervideo(embedUrl, config);
+    if (sv) return sv;
+  }
+
   try {
     const html = await fetchWithCloudscraper(embedUrl, {
       referer: embedUrl,
