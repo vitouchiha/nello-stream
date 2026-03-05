@@ -243,6 +243,10 @@ async function getStreams(stremioId, config = {}) {
     return [];
   }
 
+  // Fetch series title for display (typically instant from metaCache)
+  const metaResult = await getMeta(seriesPart, config).catch(() => ({ meta: null }));
+  const seriesTitle = metaResult?.meta?.name || null;
+
   const cacheKey = `stream:${serieId}:${episodeId}`;
   const cached = streamCache.get(cacheKey);
 
@@ -285,10 +289,14 @@ async function getStreams(stremioId, config = {}) {
     'Origin': SITE_BASE,
   });
 
+  const titleLine = seriesTitle
+    ? `📁 ${seriesTitle} - Episode ${episodeId}`
+    : `📁 Episode ${episodeId}`;
+
   return [
     {
-      name: 'KissKH',
-      title: `Episode ${episodeId}`,
+      name: '🚀 KissKH',
+      description: `${titleLine}\n👤 KissKH\n🇰🇷`,
       url: finalUrl,
       subtitles,
       behaviorHints: {

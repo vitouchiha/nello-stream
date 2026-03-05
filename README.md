@@ -1,6 +1,6 @@
 # StreamFusion Mail
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.1.0-blue?style=flat-square)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-green?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvitouchiha%2Fstreamfusion-mail)
@@ -95,8 +95,8 @@ Stremio Client
 {
   "streams": [
     {
-      "name": "KissKH",
-      "title": "Episode 3",
+      "name": "🚀 KissKH",
+      "description": "📁 Crash Landing on You - Episode 3\n👤 KissKH\n🇰🇷",
       "url": "https://cdn.kisskh.co/stream/abc123.m3u8?v=XYZ",
       "subtitles": [
         { "lang": "it", "content": "1\r\n00:00:01,000 --> 00:00:04,000\r\nCiao mondo!\r\n" }

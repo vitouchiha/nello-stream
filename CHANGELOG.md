@@ -5,6 +5,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versi
 
 ---
 
+## [1.1.0] — 2026-03-05
+
+### Changed
+- **Stream display format** — entrambi i provider ora espongono le informazioni dello stream in un formato visivo unificato e leggibile su Stremio:
+  - `name` → emoji + nome provider (es. `🚀 KissKH`, `🚀 Rama`)
+  - `description` → 3 righe: `📁 Titolo serie - Episodio`, `👤 Sorgente`, `🇰🇷` / `🇮🇹`
+  - Rimosso campo `title` (sostituito da `description` multi-riga)
+- `src/providers/kisskh.js` — aggiunta chiamata `getMeta()` (istantanea via cache) in `getStreams()` per recuperare il titolo della serie da mostrare nella descrizione
+- `src/providers/rama.js` — usato `meta.name` già disponibile in `getStreams()` per la stessa finalità
+- `src/utils/cloudflare.js` — rimosso percorso FlareSolverr+proxy per il recupero del cookie `cf_clearance` (semplificazione, il path Puppeteer diretto è sufficiente); rimossa dipendenza `flareSolverrGetCookies`
+
+---
+
 ## [1.0.3] — 2026-03-04
 
 ### Fixed
