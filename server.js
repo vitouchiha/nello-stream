@@ -382,7 +382,17 @@ app.get('/debug/drammatica', requireDebugAuth, async (req, res) => {
       $('article a[href]').slice(0, 5).each((_, el) => firstHrefs.push($(el).attr('href')));
       const firstClasses = [];
       $('article').slice(0, 3).each((_, el) => firstClasses.push($(el).attr('class') || ''));
-      result.paths[path] = { ok: true, htmlLen: html.length, title, cfBlocked, articleCount, h2Links, firstHrefs, firstClasses, htmlPreview: html.slice(0, 600).replace(/\s+/g, ' '), ms: Date.now()-t0 };
+      const htmlFull = path === '/' ? html : '';
+      const redirectTarget = (() => {
+        const m2 = html.match(/(?:location\.href|location\.replace)\s*[=(]\s*['"`]([^'"`]+)['"`]/);
+        if (m2) return m2[1];
+        const m3 = html.match(/window\.location\s*=\s*['"`]([^'"`]+)['"`]/);
+        if (m3) return m3[1];
+        const m4 = html.match(/<meta[^>]+http-equiv=["']refresh["'][^>]+content=["'][^"']*url=([^"']+)/i);
+        if (m4) return m4[1];
+        return null;
+      })();
+      result.paths[path] = { ok: true, htmlLen: html.length, title, cfBlocked, articleCount, h2Links, firstHrefs, firstClasses, redirectTarget, htmlPreview: html.slice(0, 600).replace(/\s+/g, ' '), htmlFull: htmlFull || undefined, ms: Date.now()-t0 };
     } catch (err) {
       result.paths[path] = { ok: false, error: err.message, ms: Date.now()-t0 };
     }
