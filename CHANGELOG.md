@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versi
 
 ---
 
+## [1.1.1] — 2026-03-05
+
+### Fixed
+- **Rama** — titolo troncato in Stremio: rimosso l'anno `(YYYY)` da `meta.name` nella riga descrizione (rimane nel meta, non nella card dello stream)
+- **Rama** — flag corretto da 🇮🇹 a 🇰🇷: il contenuto è coreano con sottotitoli italiani, non italiano
+- **KissKH** — stessa pulizia anno da `seriesTitle` nella descrizione stream
+- Aggiunto `Sub ITA` in terza riga per entrambi i provider, al posto del solo flag
+
+---
+
 ## [1.1.0] — 2026-03-05
 
 ### Changed

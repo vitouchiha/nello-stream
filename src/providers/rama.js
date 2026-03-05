@@ -230,12 +230,13 @@ async function getStreams(id, config = {}) {
 
   // Fetch stream URLs lazily — only for the episode(s) we need
   const rawStreams = [];
+  const displayName = (meta.name || '').replace(/\s*\(\d{4}\)\s*$/, '').trim();
   for (const ep of episodes) {
     const streamUrl = await _getStreamFromEpisodePage(ep.link);
     if (streamUrl) {
       rawStreams.push({
         name: '🚀 Rama',
-        description: `📁 ${meta.name} - ${ep.title}\n👤 Rama Oriental Fansub\n🇮🇹`,
+        description: `📁 ${displayName} - ${ep.title}\n👤 Rama Oriental Fansub\n🇰🇷 Sub ITA`,
         url: streamUrl,
         behaviorHints: { bingeGroup: `streamfusion-rama-${seriesId}` },
       });

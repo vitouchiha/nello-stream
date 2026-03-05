@@ -289,14 +289,15 @@ async function getStreams(stremioId, config = {}) {
     'Origin': SITE_BASE,
   });
 
-  const titleLine = seriesTitle
-    ? `📁 ${seriesTitle} - Episode ${episodeId}`
+  const displayTitle = seriesTitle ? seriesTitle.replace(/\s*\(\d{4}\)\s*$/, '').trim() : null;
+  const titleLine = displayTitle
+    ? `📁 ${displayTitle} - Episode ${episodeId}`
     : `📁 Episode ${episodeId}`;
 
   return [
     {
       name: '🚀 KissKH',
-      description: `${titleLine}\n👤 KissKH\n🇰🇷`,
+      description: `${titleLine}\n👤 KissKH\n🇰🇷 Sub ITA`,
       url: finalUrl,
       subtitles,
       behaviorHints: {
