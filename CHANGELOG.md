@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versi
 
 ---
 
+## [1.3.1] — 2026-03-05
+
+### Fixed (Rama meta enrichment)
+- **Trama/Synopsis**: fixed broken selector `div.font-light > div:nth-child(1)` (looked for a child div that doesn’t exist) → now uses `div.font-light.text-spec` where Rama stores the synopsis text directly
+- **Generi**: old selector `a[href*="/genere/"]` captured the entire navigation sidebar (50+ genres); now scoped to the specific `li.list-none` row labelled “Genere:” → returns only the series genres (e.g. Boys Love, Drama, Romance, Sports, Youth)
+- **Cast**: replaced three non-working strategies with direct `[data-character] h4` selector that matches Rama’s actor card grid (e.g. Choi Jae Hyeok, Yeom Min Hyeok)
+
+### Added (Rama meta)
+- `imdbRating` field mapped from Rama’s “Punteggio:” li item (MyDramaList score, e.g. 8.0)
+- `director` field extracted from `a[href*="/regia/"]` links in the “Regia:” li
+- `runtime` field extracted from “Durata:” li item (e.g. “30 min”)
+- `country` field extracted from “Paese:” li item
+- Adult content flag emoji 🔞 appended to description when `Valutazione: 18+` is present
+
+---
+
 ## [1.3.0] — 2026-03-05
 
 ### Added

@@ -135,22 +135,6 @@ async function getMeta(id, config = {}) {
     || $('.anime-title, .drama-title').first().text().trim()
     || baseId.replace(/-/g, ' ');
 
-  // Status / episode count
-  const status = $('span.font-normal:nth-child(1)').text().trim();
-  let show = '';
-  let rating = '';
-  let adultFlag = '';
-
-  $('li.list-none').each((_, el) => {
-    const text = $(el).text().trim().replace(/\n/g, ' ').replace(/\s+/g, ' ');
-    if (text.includes('Episodi')) show = text;
-    if (text.includes('Valutazione')) {
-      rating = text;
-      if (/18\+|Restricted/i.test(text)) adultFlag = ' 🔞 ';
-    }
-    if (show && rating) return false;
-  });
-
   const poster = $('.anime-image > img, .series-poster img, .entry-image img').first().attr('src') || '';
 
   // Background: prefer og:image (usually wider banner), fallback to poster
@@ -158,45 +142,83 @@ async function getMeta(id, config = {}) {
     || $('meta[name="twitter:image"]').attr('content')
     || poster;
 
-  // Genres
-  const genres = [];
-  $('a[href*="/genere/"], a[href*="/genre/"], a[href*="/tag/"], .genres a, .genre a, .badge-genre').each((_, el) => {
-    const g = $(el).text().trim();
-    if (g && g.length < 40) genres.push(g);
+  // ── Parse all li.list-none info items in one pass ─────────────────────────
+  let adultFlag = '';
+  let imdbRating = '';
+  let runtime = '';
+  let director = [];
+  let country = '';
+  let status = '';
+
+  $('li.list-none').each((_, el) => {
+    const text = $(el).text().replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+    if (/^Valutazione:/i.test(text) && /18\+|Restricted/i.test(text)) adultFlag = ' 🔞';
+    if (/^Punteggio:/i.test(text)) {
+      const m = text.match(/([0-9]+(?:\.[0-9]+)?)/);
+      if (m) imdbRating = m[1];
+    }
+    if (/^Durata:/i.test(text)) {
+      const m = text.match(/(\d+)/);
+      if (m) runtime = `${m[1]} min`;
+    }
+    if (/^Stato:/i.test(text)) {
+      status = text.replace(/^Stato:\s*/i, '').trim();
+    }
+    if (/^Paese:/i.test(text)) {
+      country = text.replace(/^Paese:\s*/i, '').trim();
+    }
+    if (/^Regia:/i.test(text)) {
+      $(el).find('a').each((_, a) => {
+        const n = $(a).text().trim();
+        if (n && !director.includes(n)) director.push(n);
+      });
+    }
   });
 
-  // Cast — strategy 1: links with /attori/ /actor/ /cast/ paths
-  const cast = [];
-  $('a[href*="/attori/"], a[href*="/actor/"], a[href*="/cast/"]').each((_, el) => {
-    const c = $(el).text().trim();
-    if (c && c.length > 1 && c.length < 60 && !cast.includes(c)) cast.push(c);
+  // ── Genres — scoped to the "Genere:" li only (avoids grabbing nav sidebar) ─
+  const genres = [];
+  $('li.list-none').each((_, el) => {
+    const text = $(el).text().replace(/\s+/g, ' ').trim();
+    if (!/^Genere:/i.test(text)) return;
+    $(el).find('a[href*="/genere/"]').each((_, a) => {
+      const g = $(a).text().trim();
+      if (g && g.length < 40 && !genres.includes(g)) genres.push(g);
+    });
   });
-  // Cast — strategy 2: parse "Attori:" / "Cast:" / "Interpreti:" inside li.list-none
+
+  // ── Cast — Rama renders actors in grid cards with [data-character] ──────────
+  const cast = [];
+  $('[data-character]').each((_, el) => {
+    $(el).find('h4').each((_, h4) => {
+      const actorName = $(h4).text().trim();
+      if (actorName && actorName.length > 1 && actorName.length < 80 && !cast.includes(actorName)) {
+        cast.push(actorName);
+      }
+    });
+  });
+  // Fallback: parse "Attori:" line from li.list-none text
   if (!cast.length) {
-    $('li.list-none, .info-list li').each((_, el) => {
+    $('li.list-none').each((_, el) => {
       const text = $(el).text().replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-      if (/\b(Attori|Cast|Interpreti|Stars?)\b/i.test(text)) {
-        // extract names after the colon
-        const after = text.replace(/^[^:]+:\s*/, '');
-        after.split(/[,;]/).forEach(name => {
-          const n = name.trim();
-          if (n && n.length > 1 && n.length < 60 && !cast.includes(n)) cast.push(n);
+      if (/^(Attori|Cast|Interpreti|Stars?)\s*:/i.test(text)) {
+        text.replace(/^[^:]+:\s*/, '').split(/[,;]/).forEach(n => {
+          n = n.trim();
+          if (n && n.length > 1 && n.length < 80 && !cast.includes(n)) cast.push(n);
         });
       }
     });
   }
-  // Cast — strategy 3: any element with class containing 'cast' or 'actor'
-  if (!cast.length) {
-    $('[class*="cast"] a, [class*="actor"] a, [class*="actor"] .name, [class*="cast"] .name').each((_, el) => {
-      const c = $(el).text().trim();
-      if (c && c.length > 1 && c.length < 60 && !cast.includes(c)) cast.push(c);
-    });
-  }
 
-  const descBody = $('div.font-light > div:nth-child(1)').text().trim()
+  // ── Synopsis — the description text is directly in div.font-light.text-spec ─
+  // (NOT in a child div — the old selector `div.font-light > div:nth-child(1)` was wrong)
+  const synopsis = $('div.font-light.text-spec').first().text().trim()
+    || $('div[class*="font-light"]').first().text().trim()
     || $('.serie-description, .entry-content').first().text().trim();
-  const description = [status && `Stato: ${status}`, show, rating + adultFlag, descBody]
-    .filter(Boolean).join('\n');
+
+  const descParts = [];
+  if (synopsis) descParts.push(synopsis);
+  if (status) descParts.push(`📺 ${status}${adultFlag}`);
+  const description = descParts.join('\n\n');
 
   // Year from title tag
   let year = null;
@@ -212,8 +234,12 @@ async function getMeta(id, config = {}) {
     background: background || undefined,
     description,
     releaseInfo: year || '',
+    imdbRating: imdbRating || undefined,
     genres: genres.length ? genres : undefined,
     cast: cast.length ? cast : undefined,
+    director: director.length ? director : undefined,
+    runtime: runtime || undefined,
+    country: country || undefined,
     seriesUrl,
     baseId,
     year,
