@@ -494,8 +494,6 @@ Configura il proxy per sbloccare i contenuti da Vercel.</p>
 <div class="providers">
   <div class="ptag">🇰🇷 <b>KissKH</b> Asian Drama</div>
   <div class="ptag">🎞 <b>Rama</b> Korean Fansub</div>
-  <div class="ptag">🇰🇷 <b>Drammatica</b> Sub ITA</div>
-  <div class="ptag">🇰🇷 <b>Guardaserie</b> Sub ITA</div>
 </div>
 
 <div class="card" style="border-color:${proxyOk?'#34d399':'#f87171'}">
@@ -548,7 +546,7 @@ Configura il proxy per sbloccare i contenuti da Vercel.</p>
 <div class="card">
   <div class="card-title">🎥 TMDB <span class="badge">Metadata arricchito</span></div>
   <p style="font-size:.82rem;color:var(--muted);margin-bottom:14px">
-    Arricchisce poster, background, cast, generi e valutazione dei drama di Rama, Drammatica e Guardaserie
+    Arricchisce poster, background, cast, generi e valutazione dei drama di KissKH e Rama
     usando The Movie Database. Gratuito &mdash;
     <a href="https://www.themoviedb.org/settings/api" target="_blank" style="color:var(--accent-light)">genera la tua API key</a>.
   </p>
@@ -572,11 +570,9 @@ Configura il proxy per sbloccare i contenuti da Vercel.</p>
 
   <label style="margin-top:0">Provider attivi</label>
   <div class="radio-group" id="providerGroup">
-    <label class="ropt"><input type="radio" name="pv" value="all" ${(!f.providers || f.providers === 'all') ? 'checked' : ''}/> 🌐 Tutti</label>
+    <label class="ropt"><input type="radio" name="pv" value="all" ${(!f.providers || f.providers === 'all') ? 'checked' : ''}/> 🌐 Entrambi</label>
     <label class="ropt"><input type="radio" name="pv" value="kisskh" ${f.providers === 'kisskh' ? 'checked' : ''}/> <b>KissKH</b></label>
     <label class="ropt"><input type="radio" name="pv" value="rama" ${f.providers === 'rama' ? 'checked' : ''}/> <b>Rama</b></label>
-    <label class="ropt"><input type="radio" name="pv" value="drammatica" ${f.providers === 'drammatica' ? 'checked' : ''}/> <b>Drammatica</b></label>
-    <label class="ropt"><input type="radio" name="pv" value="guardaserie" ${f.providers === 'guardaserie' ? 'checked' : ''}/> <b>Guardaserie</b></label>
   </div>
   <div class="hint">Scegli da quale sorgente vuoi i flussi streaming.</div>
 
@@ -623,7 +619,7 @@ Configura il proxy per sbloccare i contenuti da Vercel.</p>
     if(c.mfpKey)        o.mfpk=c.mfpKey;
     if(c.proxyUrl)      o.px=c.proxyUrl;
     if(c.hideCatalogs)  o.hc=1;
-    var pvMap={kisskh:'k',rama:'r',drammatica:'d',guardaserie:'g'};
+    var pvMap={kisskh:'k',rama:'r'};
     if(c.providers && c.providers!=='all') o.pv=pvMap[c.providers]||c.providers;
     if(c.cinemeta)      o.cm=1;
     if(c.tmdbKey)       o.tm=c.tmdbKey;
