@@ -21,7 +21,7 @@
  */
 
 const puppeteerExtra = require('puppeteer-extra');
-const StealthPlugin  = require('safe-stealth');
+const StealthPlugin  = require('puppeteer-extra-plugin-stealth');
 const { createLogger } = require('./logger');
 
 puppeteerExtra.use(StealthPlugin());
