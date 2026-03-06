@@ -13,15 +13,15 @@ RUN wget -O /tmp/wireproxy.tar.gz https://github.com/pufferffish/wireproxy/relea
     && rm /tmp/wireproxy.tar.gz \
     && chmod +x /usr/local/bin/wireproxy
 
-RUN useradd -m -u 1000 user && mkdir -p /app/data /app/cache && chown -R user:user /app
+RUN mkdir -p /app/data /app/cache && chown -R node:node /app
 
-USER user
+USER node
 WORKDIR /app
 
-COPY --chown=user:user package.json ./
+COPY --chown=node:node package.json ./
 RUN npm install --omit=dev --ignore-scripts
 
-COPY --chown=user:user . .
+COPY --chown=node:node . .
 RUN chmod +x /app/start.sh && sed -i 's/\r$//' /app/start.sh
 
 ENV NODE_ENV=production \
