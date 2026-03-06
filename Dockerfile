@@ -20,7 +20,6 @@ WORKDIR /app
 
 COPY --chown=node:node package.json ./
 RUN npm install --omit=dev --ignore-scripts
-RUN npm install puppeteer-core puppeteer-extra puppeteer-extra-plugin-stealth
 
 COPY --chown=node:node . .
 RUN chmod +x /app/start.sh && sed -i 's/\r$//' /app/start.sh

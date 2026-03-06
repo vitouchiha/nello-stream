@@ -13,12 +13,16 @@
     "vercel-build": "npm install"
   },
   "dependencies": {
+    "@sparticuz/chromium": "^143.0.4",
     "axios": "^1.9.0",
     "cheerio": "^1.0.0",
     "cloudscraper": "^4.6.0",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "https-proxy-agent": "^7.0.6",
+    "puppeteer-core": "^24.38.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "request": "^2.88.2",
     "request-promise": "^4.2.6",
     "stremio-addon-sdk": "^1.1.4"
