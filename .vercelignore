@@ -1,0 +1,22 @@
+# Exclude from Vercel deployment bundle
+
+# Dev / local artifacts
+.env
+stack.env
+data/
+cache/
+*.log
+
+# Docker (solo per Mini PC, non serve su Vercel)
+Dockerfile
+docker-compose.yml
+stack.env.example
+.dockerignore
+
+# Test / docs
+README.md
+CHANGELOG.md
+
+# OS junk
+.DS_Store
+Thumbs.db
