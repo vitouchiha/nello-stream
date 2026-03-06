@@ -1,0 +1,11 @@
+node_modules/
+.env
+stack.env
+data/
+cache/
+*.log
+.DS_Store
+Thumbs.db
+.vercel
+dist/
+.env*.local

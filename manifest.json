@@ -1,0 +1,38 @@
+{
+  "id": "org.streamfusion.mail",
+  "version": "1.6.13",
+  "name": "StreamFusion Mail",
+  "description": "Aggregatore flussi streaming multi-provider per Stremio — Korean Drama & Asian Drama con sub ITA (KissKH, Rama)",
+  "logo": "https://i.imgur.com/i7VdVv7.png",
+  "background": "https://i.imgur.com/mtsxMk7.jpeg",
+  "catalogs": [
+    {
+      "type": "series",
+      "id": "kisskh_catalog",
+      "name": "Asian Drama (KissKH)",
+      "extra": [
+        { "name": "search", "isRequired": false },
+        { "name": "skip", "isRequired": false }
+      ]
+    },
+    {
+      "type": "series",
+      "id": "rama_catalog",
+      "name": "Korean Drama (Rama)",
+      "extra": [
+        { "name": "search", "isRequired": false },
+        { "name": "skip", "isRequired": false }
+      ]
+    }
+  ],
+  "resources": [
+    { "name": "catalog", "types": ["series"] },
+    { "name": "meta", "types": ["series"], "idPrefixes": ["kisskh_", "rama_"] },
+    { "name": "stream", "types": ["series"], "idPrefixes": ["kisskh_", "rama_"] }
+  ],
+  "types": ["series"],
+  "idPrefixes": ["kisskh_", "rama_"],
+  "behaviorHints": {
+    "configurable": true
+  }
+}
