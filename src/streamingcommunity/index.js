@@ -10,6 +10,12 @@ const { checkQualityFromText } = require('../quality_helper.js');
 const TMDB_API_KEY = "68e094699525b18a70bab2f86b1fa706";
 const USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
 
+function normalizeProviderType(type) {
+  const normalized = String(type || "").toLowerCase();
+  if (normalized === "series") return "tv";
+  return normalized;
+}
+
 function getCommonHeaders() {
   return {
     "User-Agent": USER_AGENT,
@@ -50,7 +56,7 @@ function getQualityFromName(qualityStr) {
 }
 
 async function getTmdbId(imdbId, type) {
-  const normalizedType = String(type).toLowerCase();
+  const normalizedType = normalizeProviderType(type);
   // const endpoint = normalizedType === "movie" ? "movie" : "tv"; // Unused
   const findUrl = `https://api.themoviedb.org/3/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
   try {
@@ -72,7 +78,7 @@ async function getTmdbId(imdbId, type) {
 
 async function getMetadata(id, type) {
   try {
-    const normalizedType = String(type).toLowerCase();
+    const normalizedType = normalizeProviderType(type);
     let url;
     if (String(id).startsWith("tt")) {
       url = `https://api.themoviedb.org/3/find/${id}?api_key=${TMDB_API_KEY}&external_source=imdb_id&language=it-IT`;
@@ -97,7 +103,7 @@ async function getMetadata(id, type) {
 }
 
 async function getStreams(id, type, season, episode, providerContext = null) {
-  const normalizedType = String(type).toLowerCase();
+  const normalizedType = normalizeProviderType(type);
   const baseUrl = getStreamingCommunityBaseUrl();
   const commonHeaders = getCommonHeaders();
   let tmdbId = id.toString();

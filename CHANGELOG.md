@@ -502,6 +502,14 @@ _Next planned improvements:_
 
 ---
 
+## [3.0.2] - 2026-03-07
+
+### Fixed
+- `StreamingCommunity` ora tratta `series` come alias di `tv`, quindi le richieste Cinemeta/Stremio per serie TV italiane non vengono più scartate a vuoto.
+- Ripristinato il caso `Mare Fuori` (`tt6864602:6:3`), che ora restituisce stream video dal provider EasyStreams `StreamingCommunity`.
+
+---
+
 ## [3.0.1] - 2026-03-07
 
 ### Changed
