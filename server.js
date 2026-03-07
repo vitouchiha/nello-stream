@@ -280,6 +280,124 @@ app.get('/debug/providers', requireDebugAuth, async (req, res) => {
   res.json(result);
 });
 
+app.get('/debug/providers-stream', requireDebugAuth, async (req, res) => {
+  const raw = String(req.query.id || req.query.imdb || 'tt0944947:1:1').trim();
+  const type = String(req.query.type || 'series').toLowerCase() === 'movie' ? 'movie' : 'series';
+  const parts = raw.split(':');
+  const imdbId = parts[0];
+  const season = Number(parts[1] || 1);
+  const episode = Number(parts[2] || 1);
+  const timeoutMs = Number(req.query.timeout || 25_000);
+
+  if (!/^tt\d+$/i.test(imdbId)) {
+    return res.status(400).json({ error: 'Use an IMDb id (tt...) in ?id=tt1234567:1:1' });
+  }
+
+  const withProbeTimeout = async (name, fn) => {
+    const t0 = Date.now();
+    try {
+      const timer = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(`timeout:${timeoutMs}`)), timeoutMs);
+      });
+      const streams = await Promise.race([Promise.resolve().then(fn), timer]);
+      const count = Array.isArray(streams) ? streams.length : 0;
+      return {
+        provider: name,
+        status: count > 0 ? 'ok' : 'no_match',
+        count,
+        ms: Date.now() - t0,
+        sampleNames: (Array.isArray(streams) ? streams : [])
+          .slice(0, 3)
+          .map(s => String(s?.name || '').trim())
+          .filter(Boolean),
+      };
+    } catch (err) {
+      const msg = String(err?.message || err);
+      return {
+        provider: name,
+        status: msg.startsWith('timeout:') ? 'timeout' : 'error',
+        count: 0,
+        ms: Date.now() - t0,
+        error: msg,
+      };
+    }
+  };
+
+  const providersApi = getProvidersApi();
+  const legacyConfig = {
+    cinemeta: true,
+    tmdbKey: process.env.TMDB_API_KEY || '6e0a84ca7b324763793422a6656d34ff',
+  };
+  const compositeId = type === 'movie' ? imdbId : `${imdbId}:${season}:${episode}`;
+
+  const tests = [
+    {
+      name: 'kisskh',
+      run: async () => (await providersApi?.handleStream?.(type, compositeId, { ...legacyConfig, providers: 'kisskh' }))?.streams || [],
+    },
+    {
+      name: 'rama',
+      run: async () => (await providersApi?.handleStream?.(type, compositeId, { ...legacyConfig, providers: 'rama' }))?.streams || [],
+    },
+    {
+      name: 'drammatica',
+      run: async () => (await providersApi?.handleStream?.(type, compositeId, { ...legacyConfig, providers: 'drammatica' }))?.streams || [],
+    },
+    {
+      name: 'guardaserie-legacy',
+      run: async () => (await providersApi?.handleStream?.(type, compositeId, { ...legacyConfig, providers: 'guardaserie' }))?.streams || [],
+    },
+    {
+      name: 'streamingcommunity',
+      run: async () => (await require('./src/streamingcommunity').getStreams(imdbId, type, season, episode)) || [],
+    },
+    {
+      name: 'guardahd',
+      run: async () => (await require('./src/guardahd').getStreams(imdbId, type, season, episode)) || [],
+    },
+    {
+      name: 'guardaserie-easystreams',
+      run: async () => (await require('./src/guardaserie').getStreams(imdbId, type, season, episode)) || [],
+    },
+    {
+      name: 'guardoserie',
+      run: async () => (await require('./src/guardoserie').getStreams(imdbId, type, season, episode)) || [],
+    },
+    {
+      name: 'animeunity',
+      run: async () => (await require('./src/animeunity').getStreams(imdbId, type, season, episode)) || [],
+    },
+    {
+      name: 'animeworld',
+      run: async () => (await require('./src/animeworld').getStreams(imdbId, type, season, episode)) || [],
+    },
+    {
+      name: 'animesaturn',
+      run: async () => (await require('./src/animesaturn').getStreams(imdbId, type, season, episode)) || [],
+    },
+  ];
+
+  const results = [];
+  for (const t of tests) {
+    results.push(await withProbeTimeout(t.name, t.run));
+  }
+
+  const summary = {
+    total: results.length,
+    ok: results.filter(r => r.status === 'ok').length,
+    noMatch: results.filter(r => r.status === 'no_match').length,
+    timeout: results.filter(r => r.status === 'timeout').length,
+    error: results.filter(r => r.status === 'error').length,
+    streamTotal: results.reduce((acc, r) => acc + (r.count || 0), 0),
+  };
+
+  res.json({
+    input: { id: raw, imdbId, type, season, episode, timeoutMs },
+    summary,
+    results,
+  });
+});
+
 app.get('/debug/flaresolverr', requireDebugAuth, async (req, res) => {
   const { getFlareSolverrUrl } = require('./src/utils/flaresolverr');
   const url = getFlareSolverrUrl();
