@@ -376,6 +376,8 @@ app.get('/debug/providers-stream', requireDebugAuth, async (req, res) => {
   const legacyConfig = {
     cinemeta: true,
     tmdbKey: process.env.TMDB_API_KEY || '6e0a84ca7b324763793422a6656d34ff',
+    enableLegacyEngine: false,
+    imdbJobTimeout: Math.max(1500, timeoutMs - 500),
   };
   const compositeId = type === 'movie' ? imdbId : `${imdbId}:${season}:${episode}`;
 

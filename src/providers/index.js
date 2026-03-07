@@ -38,6 +38,8 @@ const CATALOG_TIMEOUT  = Number(process.env.CATALOG_TIMEOUT)  || 12_000;
 const META_TIMEOUT     = Number(process.env.META_TIMEOUT)     || 12_000;
 const STREAM_TIMEOUT   = Number(process.env.STREAM_TIMEOUT)   || 30_000;
 const CINEMETA_TIMEOUT = 5_000;
+const IMDB_PROVIDER_TIMEOUT = Number(process.env.IMDB_PROVIDER_TIMEOUT) || 9_000;
+const ENABLE_LEGACY_ENGINE = String(process.env.ENABLE_LEGACY_ENGINE || '').trim() === '1';
 
 function _isProviderEnabled(config, providerName) {
   const p = config?.providers;
@@ -277,37 +279,37 @@ async function _fetchFromImdbId(rawId, type, config) {
   ]);
 
   const jobs = [];
-  if (useKisskh) jobs.push(_kisskhStreamsForTitle(title, seasonNum, episodeNum, config).catch(e => { log.warn(`kisskh title search failed: ${e.message}`); return []; }));
-  if (useRama) jobs.push(_ramaStreamsForTitle(title, episodeNum, config).catch(e => { log.warn(`rama title search failed: ${e.message}`); return []; }));
-  if (useDrammatica) jobs.push(_drammaticaStreamsForTitle(title, episodeNum, config).catch(e => { log.warn(`drammatica title search failed: ${e.message}`); return []; }));
-  if (useGuardaserie) jobs.push(_guardaserieStreamsForTitle(title, episodeNum, config).catch(e => { log.warn(`guardaserie title search failed: ${e.message}`); return []; }));
+  const imdbJobTimeout = Math.max(1_000, Number(config?.imdbJobTimeout) || IMDB_PROVIDER_TIMEOUT);
+  const runImdbJob = (label, fn) => withTimeout(Promise.resolve().then(fn), imdbJobTimeout, label).catch(e => {
+    log.warn(`${label} failed: ${e.message}`);
+    return [];
+  });
+
+  if (useKisskh) jobs.push(runImdbJob('kisskh.imdb', () => _kisskhStreamsForTitle(title, seasonNum, episodeNum, config)));
+  if (useRama) jobs.push(runImdbJob('rama.imdb', () => _ramaStreamsForTitle(title, episodeNum, config)));
+  if (useDrammatica) jobs.push(runImdbJob('drammatica.imdb', () => _drammaticaStreamsForTitle(title, episodeNum, config)));
+  if (useGuardaserie) jobs.push(runImdbJob('guardaserie.imdb', () => _guardaserieStreamsForTitle(title, episodeNum, config)));
   
   // Lookup integrale tramite orchestratore easystreams originale.
   if (useEasystreams) {
-    jobs.push(
-      withTimeout(
-        easystreams.getStreams(imdbId, type === 'movie' ? 'movie' : 'series', seasonNum, episodeNum),
-        STREAM_TIMEOUT,
-        'easystreams.getStreams'
-      ).catch(e => {
-        log.warn(`easystreams failed: ${e.message}`);
-        return [];
-      })
-    );
+    jobs.push(runImdbJob('easystreams.imdb', () => easystreams.getStreams(imdbId, type === 'movie' ? 'movie' : 'series', seasonNum, episodeNum)));
   }
 
-
-  const streamEngine = require('../stream_engine/engine');
-  jobs.push(
-    streamEngine.discover(title, rawId).then(streams => {
+  // Legacy stream_engine is experimental and still includes mock adapters.
+  // Keep it disabled by default to avoid IMDB route slowdowns/timeouts.
+  const useLegacyEngine = config?.enableLegacyEngine === true || ENABLE_LEGACY_ENGINE;
+  if (useLegacyEngine) {
+    jobs.push(runImdbJob('legacy-engine.imdb', async () => {
+      const streamEngine = require('../stream_engine/engine');
+      const streams = await streamEngine.discover(title, rawId);
       if (!streams) return [];
       return streams.map(s => ({
         name: s.provider ? s.provider.toUpperCase() : 'Engine',
         title: `[${(s.type || 'stream').toUpperCase()}] ${s.quality} - ${s.size}\nAudio: ${s.audio_lang} | Sub: ${s.subtitles && s.subtitles.join(',') || 'N/A'}`,
-        url: s.url
+        url: s.url,
       }));
-    }).catch(e => { log.warn(`Engine search failed: ${e.message}`); return []; })
-  );
+    }));
+  }
 
   const results = await Promise.all(jobs);
   return results.flat();
