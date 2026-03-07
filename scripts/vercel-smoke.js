@@ -70,6 +70,11 @@ function assert(condition, message) {
   }
 }
 
+function isTruthyEnv(name) {
+  const raw = String(process.env[name] || '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
 async function runOnce(baseUrl) {
   const expectedVersion = readLocalManifestVersion();
 
@@ -119,6 +124,12 @@ async function runOnce(baseUrl) {
     assert(stream.ok, `${route} returned HTTP ${stream.status}`);
     assert(Array.isArray(stream.json?.streams), `${route} did not return a streams array`);
     console.log(`OK ${route} -> streams=${stream.json.streams.length}`);
+
+    if (isTruthyEnv('VERCEL_SMOKE_REQUIRE_WEB_READY')) {
+      const webReady = stream.json.streams.filter((entry) => entry?.behaviorHints?.notWebReady !== true);
+      assert(webReady.length > 0, `${route} returned no web-ready streams`);
+      console.log(`OK ${route} -> webReady=${webReady.length}`);
+    }
   }
 }
 
