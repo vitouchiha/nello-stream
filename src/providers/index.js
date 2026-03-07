@@ -42,7 +42,7 @@ const IMDB_PROVIDER_TIMEOUT = Number(process.env.IMDB_PROVIDER_TIMEOUT) || 15_00
 const ENABLE_LEGACY_ENGINE = String(process.env.ENABLE_LEGACY_ENGINE || '').trim() === '1';
 const ENABLE_GUARDASERIE_LEGACY_IMDB = String(process.env.ENABLE_GUARDASERIE_LEGACY_IMDB || '').trim() === '1';
 const IMDB_EPISODE_CACHE_TTL = Number(process.env.IMDB_EPISODE_CACHE_TTL) || 6 * 60 * 60_000;
-const IMDB_NO_MATCH_CACHE_TTL = Number(process.env.IMDB_NO_MATCH_CACHE_TTL) || 15 * 60_000;
+const IMDB_NO_MATCH_CACHE_TTL = Number(process.env.IMDB_NO_MATCH_CACHE_TTL) || 60_000;
 
 const _imdbEpisodeCache = new Map();
 
@@ -426,13 +426,18 @@ async function _legacyProviderStreamsForImdb(opts) {
   const candidateList = Array.isArray(titleCandidates) && titleCandidates.length
     ? titleCandidates
     : [];
+  let hadTransientFailure = false;
 
   for (const title of candidateList) {
     const metas = await withTimeout(
       catalogFn(0, title, config),
       searchTimeout,
       `${provider}.search`
-    ).catch(() => []);
+    ).catch(() => null);
+    if (metas === null) {
+      hadTransientFailure = true;
+      continue;
+    }
     if (!Array.isArray(metas) || metas.length === 0) continue;
 
     const best = _bestMatch(metas, title);
@@ -442,7 +447,10 @@ async function _legacyProviderStreamsForImdb(opts) {
       metaFn(best.id, config),
       META_TIMEOUT,
       `${provider}.getMeta`
-    ).catch(() => ({ meta: null }));
+    ).catch(() => {
+      hadTransientFailure = true;
+      return { meta: null };
+    });
 
     const videos = Array.isArray(meta?.videos) ? meta.videos : [];
     if (!videos.length) continue;
@@ -456,14 +464,19 @@ async function _legacyProviderStreamsForImdb(opts) {
       streamsFn(ep.id, config),
       STREAM_TIMEOUT,
       `${provider}.getStreams`
-    ).catch(() => []);
+    ).catch(() => {
+      hadTransientFailure = true;
+      return [];
+    });
 
     if (Array.isArray(streams) && streams.length > 0) {
       return streams;
     }
   }
 
-  _cacheSet(_imdbEpisodeCache, cacheKey, '__NO_MATCH__', IMDB_NO_MATCH_CACHE_TTL);
+  if (!hadTransientFailure) {
+    _cacheSet(_imdbEpisodeCache, cacheKey, '__NO_MATCH__', IMDB_NO_MATCH_CACHE_TTL);
+  }
   return [];
 }
 
