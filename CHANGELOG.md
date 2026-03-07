@@ -491,6 +491,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versi
 
 ---
 
+## [3.0.5] - 2026-03-07
+
+### Fixed
+- Rafforzato il layer extractor condiviso dei provider EasyStreams con helper PAC.KER centralizzati e fallback piu tolleranti per `MixDrop`, `DropLoad`, `SuperVideo`, `Upstream` e `VixCloud`.
+- `VixCloud` ora ricostruisce anche le varianti `masterPlaylist` viste nei resolver di riferimento, migliorando il recupero degli HLS da embed/script diversi.
+- I provider EasyStreams che ricevono `addonBaseUrl` normalizzano ora i flussi HLS/headered verso un playback piu compatibile con Stremio Web, invece di lasciarli nascosti come `notWebReady` quando il proxy interno puo gestirli.
+- Il formatter non penalizza piu i link MP4 diretti solo per la presenza di header opzionali, riducendo i casi di stream invisibili nella UI web.
+
+### Changed
+- Aggiunto dispatch centralizzato `extractFromUrl(...)` per riusare il registry extractor nei provider italiani e ridurre parsing host-specific duplicato.
+- Lo smoke test remoto Vercel verifica ora anche che il `manifest` pubblico continui a esporre gli stream IMDb/Cinemeta di default.
+
+---
 ## Unreleased
 
 _Next planned improvements:_

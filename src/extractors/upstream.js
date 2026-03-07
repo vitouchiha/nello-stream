@@ -1,8 +1,15 @@
-const { USER_AGENT, unPack } = require('./common');
+const {
+  USER_AGENT,
+  extractPackedValue,
+  getRefererBase,
+  normalizeExtractorUrl,
+} = require('./common');
 
 async function extractUpstream(url, refererBase = 'https://upstream.to/') {
   try {
-    if (url.startsWith("//")) url = "https:" + url;
+    url = normalizeExtractorUrl(url);
+    if (!url) return null;
+    if (!refererBase) refererBase = getRefererBase(url, 'https://upstream.to/');
     const response = await fetch(url, {
       headers: {
         "User-Agent": USER_AGENT,
@@ -11,26 +18,24 @@ async function extractUpstream(url, refererBase = 'https://upstream.to/') {
     });
     if (!response.ok) return null;
     const html = await response.text();
-    const packedRegex = /eval\(function\(p,a,c,k,e,d\)\s*\{.*?\}\s*\('(.*?)',(\d+),(\d+),'(.*?)'\.split\('\|'\)/;
-    const match = packedRegex.exec(html);
-    if (match) {
-      const p = match[1];
-      const a = parseInt(match[2]);
-      const c = parseInt(match[3]);
-      const k = match[4].split("|");
-      const unpacked = unPack(p, a, c, k, null, {});
-      const fileMatch = unpacked.match(/file:"(.*?)"/);
-      if (fileMatch) {
-        let streamUrl = fileMatch[1];
-        if (streamUrl.startsWith("//")) streamUrl = "https:" + streamUrl;
-        return {
-          url: streamUrl,
-          headers: {
-            "User-Agent": USER_AGENT,
-            "Referer": "https://upstream.to/"
-          }
-        };
-      }
+
+    const packed = extractPackedValue(html, [
+      /file\s*:\s*"([^"]+)"/i,
+      /file\s*:\s*'([^']+)'/i,
+      /sources\s*:\s*\[\s*\{\s*file\s*:\s*"([^"]+)"/i,
+    ]);
+
+    if (packed && packed.value) {
+      const streamUrl = normalizeExtractorUrl(packed.value, url);
+      if (!streamUrl) return null;
+
+      return {
+        url: streamUrl,
+        headers: {
+          "User-Agent": USER_AGENT,
+          "Referer": refererBase
+        }
+      };
     }
     return null;
   } catch (e) {

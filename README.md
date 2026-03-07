@@ -1,7 +1,7 @@
 # StreamFusion Mail
 
 <!-- release:meta:start -->
-- Release: `v3.0.4`
+- Release: `v3.0.5`
 - Date: `2026-03-07`
 - Remote smoke target: `https://streamfusion-mail.vercel.app`
 <!-- release:meta:end -->
@@ -12,9 +12,10 @@ Addon Stremio per drama asiatici e coreani con cataloghi KissKH e Rama, metadata
 
 - Cataloghi Stremio da KissKH e Rama.
 - Supporto Cinemeta / IMDb per risolvere stream da ID `tt*`.
+- Layer extractor condiviso per host italiani (`MixDrop`, `DropLoad`, `SuperVideo`, `VixCloud`, `Loadm`) con fallback piu robusti.
 - Metadata arricchiti via TMDB quando la chiave e configurata.
 - Supporto proxy HTTP, FlareSolverr e MediaFlow Proxy.
-- Proxy HLS interno per rendere web-ready gli stream `StreamingCommunity` su Stremio Web.
+- Proxy HLS interno per rendere web-ready gli stream headered/HLS su Stremio Web quando il playback passa dall'addon.
 - Dashboard addon servita da `/dashboard`.
 
 ## Deploy
@@ -48,6 +49,7 @@ Per ogni aggiornamento:
 - aggiorna la dashboard in `web/landing/index.html`
 - aggiunge l'entry mancante in `CHANGELOG.md`
 - esegue lo smoke test remoto sul deploy Vercel
+- verifica anche che il `manifest` remoto continui a esporre gli stream IMDb/Cinemeta di default
 - puo verificare anche la web-readiness del titolo di smoke se `VERCEL_SMOKE_REQUIRE_WEB_READY=1`
 
 Nel mio workflow operativo, dopo ogni modifica faccio anche commit e push su GitHub.

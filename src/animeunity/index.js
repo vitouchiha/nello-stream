@@ -1069,7 +1069,10 @@ async function getStreams(id, type, season, episode, providerContext = null) {
     }
 
     return deduped
-      .map((stream) => formatStream(stream, "AnimeUnity"))
+      .map((stream) => formatStream({
+        ...stream,
+        addonBaseUrl: providerContext?.addonBaseUrl
+      }, "AnimeUnity"))
       .filter(Boolean);
   } catch (error) {
     console.error("[AnimeUnity] getStreams failed:", error.message);

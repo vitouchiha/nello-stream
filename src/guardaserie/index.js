@@ -28,7 +28,7 @@ function getMappingApiUrl() {
 }
 const USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
 
-const { extractMixDrop, extractDropLoad, extractSuperVideo, extractUqload, extractUpstream } = require('../extractors');
+const { extractFromUrl } = require('../extractors');
 require('../fetch_helper.js');
 const { checkQualityFromPlaylist } = require('../quality_helper.js');
 const { formatStream } = require('../formatter.js');
@@ -613,99 +613,44 @@ function getStreams(id, type, season, episode, providerContext = null) {
       const streamPromises = links.map((link) => __async(null, null, function* () {
         try {
           const displayName = `${title} ${season}x${episode}`;
+          const extractedStreams = yield extractFromUrl(link, {
+            refererBase: getGuardaserieBaseUrl(),
+          });
+          if (!extractedStreams.length) return [];
 
-          let streamUrl = null;
-          let playerName = "Unknown";
-
-          if (link.includes("dropload")) {
-            const extracted = yield extractDropLoad(link);
-            if (extracted && extracted.url) {
-              let quality = "HD";
-              if (extracted.url.includes('.m3u8')) {
-                const detected = yield checkQualityFromPlaylist(extracted.url, extracted.headers || {});
-                if (detected) quality = detected;
-              } else {
-                const lowerUrl = extracted.url.toLowerCase();
-                if (lowerUrl.includes("1080") || lowerUrl.includes("fhd")) quality = "1080p";
-                else if (lowerUrl.includes("720") || lowerUrl.includes("hd")) quality = "720p";
-                else if (lowerUrl.includes("480") || lowerUrl.includes("sd")) quality = "480p";
-                else if (lowerUrl.includes("360")) quality = "360p";
-              }
-
-              const normalizedQuality = getQualityFromName(quality);
-
-              return {
-                url: extracted.url,
-                headers: extracted.headers,
-                name: `Guardaserie - DropLoad`,
-                title: displayName,
-                quality: normalizedQuality,
-                type: "direct"
-              };
+          return extractedStreams.map((extracted) => __async(null, null, function* () {
+            let quality = "HD";
+            if (extracted.url.includes('.m3u8')) {
+              const detected = yield checkQualityFromPlaylist(extracted.url, extracted.headers || {});
+              if (detected) quality = detected;
+            } else {
+              const lowerUrl = extracted.url.toLowerCase();
+              if (lowerUrl.includes("4k") || lowerUrl.includes("2160")) quality = "4K";
+              else if (lowerUrl.includes("1080") || lowerUrl.includes("fhd")) quality = "1080p";
+              else if (lowerUrl.includes("720") || lowerUrl.includes("hd")) quality = "720p";
+              else if (lowerUrl.includes("480") || lowerUrl.includes("sd")) quality = "480p";
+              else if (lowerUrl.includes("360")) quality = "360p";
             }
-          } else if (link.includes("supervideo")) {
-            const streamUrl = yield extractSuperVideo(link);
-            playerName = "SuperVideo";
-            if (streamUrl) {
-              let quality = "HD";
-              if (streamUrl.includes('.m3u8')) {
-                const detected = yield checkQualityFromPlaylist(streamUrl);
-                if (detected) quality = detected;
-              } else {
-                const lowerUrl = streamUrl.toLowerCase();
-                if (lowerUrl.includes("4k") || lowerUrl.includes("2160")) quality = "4K";
-                else if (lowerUrl.includes("1080") || lowerUrl.includes("fhd")) quality = "1080p";
-                else if (lowerUrl.includes("720") || lowerUrl.includes("hd")) quality = "720p";
-                else if (lowerUrl.includes("480") || lowerUrl.includes("sd")) quality = "480p";
-                else if (lowerUrl.includes("360")) quality = "360p";
-              }
 
-              const normalizedQuality = getQualityFromName(quality);
-
-              return {
-                url: streamUrl,
-                name: `Guardaserie - ${playerName}`,
-                title: displayName,
-                quality: normalizedQuality,
-                type: "direct"
-              };
-            }
-          } else if (link.includes("mixdrop")) {
-            const extracted = yield extractMixDrop(link);
-            if (extracted && extracted.url) {
-              let quality = "HD";
-              if (extracted.url.includes('.m3u8')) {
-                const detected = yield checkQualityFromPlaylist(extracted.url, extracted.headers || {});
-                if (detected) quality = detected;
-              } else {
-                const lowerUrl = extracted.url.toLowerCase();
-                if (lowerUrl.includes("4k") || lowerUrl.includes("2160")) quality = "4K";
-                else if (lowerUrl.includes("1080") || lowerUrl.includes("fhd")) quality = "1080p";
-                else if (lowerUrl.includes("720") || lowerUrl.includes("hd")) quality = "720p";
-                else if (lowerUrl.includes("480") || lowerUrl.includes("sd")) quality = "480p";
-                else if (lowerUrl.includes("360")) quality = "360p";
-              }
-
-              const normalizedQuality = getQualityFromName(quality);
-
-              return {
-                url: extracted.url,
-                headers: extracted.headers,
-                name: `Guardaserie - MixDrop`,
-                title: displayName,
-                quality: normalizedQuality,
-                type: "direct"
-              };
-            }
-          }
+            const normalizedQuality = getQualityFromName(quality);
+            return {
+              url: extracted.url,
+              headers: extracted.headers,
+              name: `Guardaserie - ${extracted.name || 'Player'}`,
+              title: displayName,
+              quality: normalizedQuality,
+              type: "direct",
+              addonBaseUrl: providerContext?.addonBaseUrl
+            };
+          }));
         } catch (e) {
           console.error(`[Guardaserie] Error extracting link ${link}:`, e);
         }
-        return null;
+        return [];
       }));
-      const results = yield Promise.all(streamPromises);
+      const nestedResults = yield Promise.all(streamPromises);
+      const results = (yield Promise.all(nestedResults.flat())).filter(Boolean);
       return results
-        .filter((r) => r !== null)
         .map(s => formatStream(s, "Guardaserie"))
         .filter(s => s !== null);
     } catch (e) {

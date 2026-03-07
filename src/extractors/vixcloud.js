@@ -1,80 +1,144 @@
-const { USER_AGENT } = require('./common');
+const {
+  USER_AGENT,
+  getRefererBase,
+  normalizeExtractorUrl,
+} = require('./common');
 const { checkQualityFromPlaylist } = require('../quality_helper.js');
 
+function extractScriptBlocks(html) {
+  const blocks = [];
+  const regex = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
+  let match;
+  while ((match = regex.exec(String(html || ''))) !== null) {
+    if (match[1]) blocks.push(match[1]);
+  }
+  return blocks;
+}
+
+function extractLegacyPlaylistData(source) {
+  const text = String(source || '');
+  const tokenMatch = /'token'\s*:\s*'([^']+)'/.exec(text) || /token\s*:\s*"([^"]+)"/.exec(text);
+  const expiresMatch = /'expires'\s*:\s*'([^']+)'/.exec(text) || /expires\s*:\s*"([^"]+)"/.exec(text);
+  const urlMatch = /url\s*:\s*'([^']+)'/.exec(text) || /url\s*:\s*"([^"]+)"/.exec(text);
+  if (!tokenMatch || !expiresMatch || !urlMatch) return null;
+
+  return {
+    baseUrl: urlMatch[1],
+    token: tokenMatch[1],
+    expires: expiresMatch[1],
+  };
+}
+
+function extractMasterPlaylistData(source) {
+  const text = String(source || '');
+  const patterns = [
+    /masterPlaylist\s*=\s*\{[\s\S]*?url\s*:\s*['"]([^'"]+)['"][\s\S]*?params\s*:\s*\{[\s\S]*?token\s*:\s*['"]([^'"]+)['"][\s\S]*?expires\s*:\s*['"]([^'"]+)['"][\s\S]*?\}/i,
+    /masterPlaylist\s*:\s*\{[\s\S]*?url\s*:\s*['"]([^'"]+)['"][\s\S]*?params\s*:\s*\{[\s\S]*?token\s*:\s*['"]([^'"]+)['"][\s\S]*?expires\s*:\s*['"]([^'"]+)['"][\s\S]*?\}/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    if (!match) continue;
+    return {
+      baseUrl: match[1],
+      token: match[2],
+      expires: match[3],
+    };
+  }
+
+  const blockMatch =
+    /masterPlaylist\s*=\s*(\{[\s\S]*?\})\s*;?/i.exec(text) ||
+    /masterPlaylist\s*:\s*(\{[\s\S]*?\})\s*[,\n]/i.exec(text);
+  if (!blockMatch) return null;
+
+  const block = blockMatch[1];
+  const urlMatch = /url\s*:\s*['"]([^'"]+)['"]/i.exec(block);
+  const tokenMatch = /token\s*:\s*['"]([^'"]+)['"]/i.exec(block);
+  const expiresMatch = /expires\s*:\s*['"]([^'"]+)['"]/i.exec(block);
+  if (!urlMatch || !tokenMatch || !expiresMatch) return null;
+
+  return {
+    baseUrl: urlMatch[1],
+    token: tokenMatch[1],
+    expires: expiresMatch[1],
+  };
+}
+
+function buildPlaylistUrl(baseUrl, token, expires, canPlayFhd) {
+  let finalUrl = String(baseUrl || '').trim();
+  if (!finalUrl) return null;
+
+  if (finalUrl.includes('?b=1')) {
+    finalUrl = `${finalUrl}&token=${encodeURIComponent(token)}&expires=${encodeURIComponent(expires)}`;
+  } else {
+    finalUrl = `${finalUrl}${finalUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}&expires=${encodeURIComponent(expires)}`;
+  }
+
+  const parts = finalUrl.split('?');
+  const path = parts[0];
+  const query = parts.length > 1 ? `?${parts.slice(1).join('?')}` : '';
+  finalUrl = /\.m3u8$/i.test(path) ? `${path}${query}` : `${path}.m3u8${query}`;
+
+  if (canPlayFhd && !/[?&]h=1(?:&|$)/i.test(finalUrl)) {
+    finalUrl += `${finalUrl.includes('?') ? '&' : '?'}h=1`;
+  }
+
+  return finalUrl;
+}
+
 async function extractVixCloud(url) {
-    try {
-        const response = await fetch(url, {
-            headers: {
-                "User-Agent": USER_AGENT,
-                "Referer": "https://vixcloud.co/"
-            }
-        });
+  try {
+    const embedUrl = normalizeExtractorUrl(url);
+    if (!embedUrl) return [];
 
-        if (!response.ok) return null;
-        const html = await response.text();
+    const referer = getRefererBase(embedUrl, 'https://vixcloud.co/');
+    const response = await fetch(embedUrl, {
+      headers: {
+        "User-Agent": USER_AGENT,
+        "Referer": referer
+      }
+    });
 
-        const streams = [];
+    if (!response.ok) return [];
+    const html = await response.text();
+    const canPlayFhd = /window\.canPlayFHD\s*=\s*true/i.test(html);
+    const candidates = [html, ...extractScriptBlocks(html)];
 
-
-        // Extract HLS (streams) using Python extractor logic
-        const tokenRegex = /'token':\s*'(\w+)'/;
-        const expiresRegex = /'expires':\s*'(\d+)'/;
-        const urlRegex = /url:\s*'([^']+)'/;
-        const fhdRegex = /window\.canPlayFHD\s*=\s*true/;
-
-        const tokenMatch = tokenRegex.exec(html);
-        const expiresMatch = expiresRegex.exec(html);
-        const urlMatch = urlRegex.exec(html);
-        const fhdMatch = fhdRegex.test(html);
-
-        if (tokenMatch && expiresMatch && urlMatch) {
-            const token = tokenMatch[1];
-            const expires = expiresMatch[1];
-            let serverUrl = urlMatch[1];
-
-            let finalUrl = "";
-            // Logic from Python extractor
-            if (serverUrl.includes("?b=1")) {
-                finalUrl = `${serverUrl}&token=${token}&expires=${expires}`;
-            } else {
-                finalUrl = `${serverUrl}?token=${token}&expires=${expires}`;
-            }
-
-            if (fhdMatch) {
-                finalUrl += "&h=1";
-            }
-
-            // Insert .m3u8 before query params
-            const parts = finalUrl.split('?');
-            finalUrl = parts[0] + '.m3u8';
-            if (parts.length > 1) {
-                finalUrl += '?' + parts.slice(1).join('?');
-            }
-
-            let quality = "Auto";
-            const detectedQuality = await checkQualityFromPlaylist(finalUrl, {
-                "User-Agent": USER_AGENT,
-                "Referer": "https://vixcloud.co/"
-            });
-            if (detectedQuality) quality = detectedQuality;
-
-            streams.push({
-                url: finalUrl,
-                quality: quality,
-                type: "m3u8",
-                headers: {
-                    "User-Agent": USER_AGENT,
-                    "Referer": "https://vixcloud.co/"
-                }
-            });
-        }
-
-        return streams;
-
-    } catch (e) {
-        console.error("[VixCloud] Extraction error:", e);
-        return [];
+    let playlistData = null;
+    for (const source of candidates) {
+      playlistData = extractMasterPlaylistData(source) || extractLegacyPlaylistData(source);
+      if (playlistData) break;
     }
+
+    if (!playlistData) return [];
+
+    const finalUrl = buildPlaylistUrl(
+      normalizeExtractorUrl(playlistData.baseUrl, embedUrl),
+      playlistData.token,
+      playlistData.expires,
+      canPlayFhd
+    );
+    if (!finalUrl) return [];
+
+    const headers = {
+      "User-Agent": USER_AGENT,
+      "Referer": referer
+    };
+
+    let quality = "Auto";
+    const detectedQuality = await checkQualityFromPlaylist(finalUrl, headers);
+    if (detectedQuality) quality = detectedQuality;
+
+    return [{
+      url: finalUrl,
+      quality,
+      type: "m3u8",
+      headers
+    }];
+  } catch (e) {
+    console.error("[VixCloud] Extraction error:", e);
+    return [];
+  }
 }
 
 module.exports = { extractVixCloud };
