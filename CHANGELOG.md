@@ -491,6 +491,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versi
 
 ---
 
+## [3.0.8] - 2026-03-07
+
+### Changed
+- I manifest configurati usano ora un `id` stabile ma diverso dal manifest base, cosi Stremio non confonde installazioni personalizzate, installazioni base e versioni vecchie ancora presenti.
+- I manifest configurati espongono anche il nome `Nello Drama Config`, cosi risultano visibili e distinguibili nella UI addon di Stremio.
+
+---
 ## [3.0.7] - 2026-03-07
 
 ### Changed
