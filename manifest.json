@@ -35,6 +35,36 @@
           "isRequired": false
         }
       ]
+    },
+    {
+      "type": "series",
+      "id": "drammatica_catalog",
+      "name": "Nello: Drammatica",
+      "extra": [
+        {
+          "name": "search",
+          "isRequired": false
+        },
+        {
+          "name": "skip",
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "type": "series",
+      "id": "guardaserie_catalog",
+      "name": "Nello: GuardaSerie",
+      "extra": [
+        {
+          "name": "search",
+          "isRequired": false
+        },
+        {
+          "name": "skip",
+          "isRequired": false
+        }
+      ]
     }
   ],
   "resources": [
@@ -51,7 +81,9 @@
       ],
       "idPrefixes": [
         "kisskh_",
-        "rama_"
+        "rama_",
+        "drammatica_",
+        "guardaserie_"
       ]
     },
     {
@@ -61,7 +93,9 @@
       ],
       "idPrefixes": [
         "kisskh_",
-        "rama_"
+        "rama_",
+        "drammatica_",
+        "guardaserie_"
       ]
     }
   ],
@@ -70,7 +104,9 @@
   ],
   "idPrefixes": [
     "kisskh_",
-    "rama_"
+    "rama_",
+    "drammatica_",
+    "guardaserie_"
   ],
   "behaviorHints": {
     "configurable": true
