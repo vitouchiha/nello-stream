@@ -71,13 +71,15 @@
     {
       "name": "catalog",
       "types": [
-        "series"
+        "series",
+        "movie"
       ]
     },
     {
       "name": "meta",
       "types": [
-        "series"
+        "series",
+        "movie"
       ],
       "idPrefixes": [
         "kisskh_",
@@ -89,7 +91,8 @@
     {
       "name": "stream",
       "types": [
-        "series"
+        "series",
+        "movie"
       ],
       "idPrefixes": [
         "kisskh_",
@@ -100,7 +103,8 @@
     }
   ],
   "types": [
-    "series"
+    "series",
+    "movie"
   ],
   "idPrefixes": [
     "kisskh_",
