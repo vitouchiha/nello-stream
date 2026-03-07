@@ -1,7 +1,7 @@
 # StreamFusion Mail
 
 <!-- release:meta:start -->
-- Release: `v3.0.6`
+- Release: `v3.0.7`
 - Date: `2026-03-07`
 - Remote smoke target: `https://streamfusion-mail.vercel.app`
 <!-- release:meta:end -->
@@ -30,7 +30,7 @@ Deploy rapido su Vercel:
 Il link di installazione consigliato usa ora un path versionato:
 
 ```text
-https://<tuo-deploy>.vercel.app/install/v3.0.6/manifest.json
+https://<tuo-deploy>.vercel.app/install/v3.0.7/manifest.json
 ```
 
 Questo forza Stremio a scaricare un transport URL nuovo quando serve invalidare la cache del manifest.
@@ -81,4 +81,5 @@ VERCEL_BASE_URL=https://tuo-addon.vercel.app npm run test:vercel
 - I test locali non sono il percorso preferito per il rilascio: la validazione va fatta sul deploy Vercel.
 - La landing addon `/configure` usa `manifest.json` a runtime, quindi la versione mostrata segue il manifest corrente.
 - La landing `/configure` genera un URL install versionato `/install/vX.Y.Z/manifest.json` per ridurre i problemi di cache lato Stremio.
+- Le risposte `/stream/...` usano `Cache-Control: no-store` per evitare che Vercel o Stremio riutilizzino stream scaduti o risultati vuoti gia cachati.
 - Il `manifest` base espone Cinemeta/IMDb di default, quindi gli stream EasyStreams su ID `tt*` funzionano anche senza URL configurata.

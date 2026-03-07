@@ -491,6 +491,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versi
 
 ---
 
+## [3.0.7] - 2026-03-07
+
+### Changed
+- Gli endpoint `/stream/...` non vengono piu messi in cache su Vercel, cosi Stremio non puo riutilizzare risposte stale o URL HLS gia scaduti.
+- Aggiunto log strutturato `stream response` con `count` e `webReady` per diagnosticare subito cosa restituisce il backend a ogni richiesta stream.
+- Lo smoke test remoto verifica anche che le risposte stream espongano `Cache-Control: no-store`.
+
+---
 ## [3.0.6] - 2026-03-07
 
 ### Added

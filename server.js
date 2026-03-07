@@ -360,8 +360,19 @@ app.get([
     const providersApi = getProvidersApi();
     if (!providersApi?.handleStream) return stremioJson(res, { streams: [] });
     const result = await providersApi.handleStream(req.params.type, req.params.id, config);
-    const age = result.streams && result.streams.length > 0 ? 3600 : 0;
-    stremioJson(res, result, { maxAge: age });
+    const streams = Array.isArray(result?.streams) ? result.streams : [];
+    const webReadyCount = streams.filter((entry) => entry?.behaviorHints?.notWebReady !== true).length;
+    log.info('stream response', {
+      type: req.params.type,
+      id: req.params.id,
+      release: req.params.release || null,
+      configured: Boolean(req.params.config),
+      count: streams.length,
+      webReady: webReadyCount,
+    });
+    // Stream payloads are short-lived and can contain expiring URLs or flaky provider results.
+    // Never cache them at the edge, otherwise Stremio can keep seeing stale empty responses.
+    stremioJson(res, result, { maxAge: 0 });
   } catch (err) {
     log.error(`streamRoute: ${err.message}`);
     stremioJson(res, { streams: [] });

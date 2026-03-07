@@ -151,6 +151,9 @@ async function runOnce(baseUrl) {
     assert(stream.ok, `${route} returned HTTP ${stream.status}`);
     assert(Array.isArray(stream.json?.streams), `${route} did not return a streams array`);
     console.log(`OK ${route} -> streams=${stream.json.streams.length}`);
+    const cacheControl = String(stream.headers.get('cache-control') || '');
+    assert(cacheControl.includes('no-store'), `${route} cache-control must include no-store`);
+    console.log(`OK ${route} -> cacheControl=${cacheControl}`);
 
     if (isTruthyEnv('VERCEL_SMOKE_REQUIRE_WEB_READY')) {
       const webReady = stream.json.streams.filter((entry) => entry?.behaviorHints?.notWebReady !== true);
