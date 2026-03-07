@@ -1,4 +1,9 @@
-const { USER_AGENT, unPack } = require('./common');
+const {
+  USER_AGENT,
+  extractPackedValue,
+  getUrlOrigin,
+  normalizeExtractorUrl,
+} = require('./common');
 
 function isMixDropDisabled() {
   if (typeof global !== 'undefined' && global && global.DISABLE_MIXDROP === true) {
@@ -20,7 +25,8 @@ async function extractMixDrop(url, refererBase = 'https://m1xdrop.net/') {
   if (isMixDropDisabled()) return null;
 
   try {
-    if (url.startsWith("//")) url = "https:" + url;
+    url = normalizeExtractorUrl(url);
+    if (!url) return null;
     
     const response = await fetch(url, {
       headers: {
@@ -30,27 +36,26 @@ async function extractMixDrop(url, refererBase = 'https://m1xdrop.net/') {
     });
     if (!response.ok) return null;
     const html = await response.text();
-    const packedRegex = /eval\(function\(p,a,c,k,e,d\)\s*\{.*?\}\s*\('(.*?)',(\d+),(\d+),'(.*?)'\.split\('\|'\),(\d+),(\{\})\)\)/;
-    const match = packedRegex.exec(html);
-    if (match) {
-      const p = match[1];
-      const a = parseInt(match[2]);
-      const c = parseInt(match[3]);
-      const k = match[4].split("|");
-      const unpacked = unPack(p, a, c, k, null, {});
-      const wurlMatch = unpacked.match(/wurl="([^"]+)"/);
-      if (wurlMatch) {
-        let streamUrl = wurlMatch[1];
-        if (streamUrl.startsWith("//")) streamUrl = "https:" + streamUrl;
-        return {
-          url: streamUrl,
-          headers: {
-            'User-Agent': USER_AGENT,
-            'Referer': 'https://m1xdrop.net/',
-            'Origin': 'https://m1xdrop.net'
-          }
-        };
-      }
+
+    const packed = extractPackedValue(html, [
+      /MDCore\.wurl\s*=\s*"([^"]+)"/i,
+      /MDCore\.wurl\s*=\s*'([^']+)'/i,
+      /wurl\s*=\s*"([^"]+)"/i,
+    ]);
+
+    if (packed && packed.value) {
+      const streamUrl = normalizeExtractorUrl(packed.value, url);
+      if (!streamUrl) return null;
+
+      const origin = getUrlOrigin(url) || 'https://m1xdrop.net';
+      return {
+        url: streamUrl,
+        headers: {
+          'User-Agent': USER_AGENT,
+          'Referer': `${origin}/`,
+          'Origin': origin
+        }
+      };
     }
     return null;
   } catch (e) {

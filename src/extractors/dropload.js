@@ -1,12 +1,16 @@
-const { USER_AGENT, unPack } = require('./common');
+const {
+  USER_AGENT,
+  extractPackedValue,
+  getRefererBase,
+  getUrlOrigin,
+  normalizeExtractorUrl,
+} = require('./common');
 
 async function extractDropLoad(url, refererBase = null) {
   try {
-    if (url.startsWith("//")) url = "https:" + url;
-    if (!refererBase) {
-      const match = url.match(/^(https?:\/\/[^\/]+)/i);
-      refererBase = (match ? match[1] : '') + "/";
-    }
+    url = normalizeExtractorUrl(url);
+    if (!url) return null;
+    if (!refererBase) refererBase = getRefererBase(url);
     const response = await fetch(url, {
       headers: {
         "User-Agent": USER_AGENT,
@@ -15,31 +19,25 @@ async function extractDropLoad(url, refererBase = null) {
     });
     if (!response.ok) return null;
     const html = await response.text();
-    const regex = /eval\(function\(p,a,c,k,e,d\)\s*\{.*?\}\s*\('(.*?)',(\d+),(\d+),'(.*?)'\.split\('\|'\)/;
-    const match = regex.exec(html);
-    if (match) {
-      const p = match[1];
-      const a = parseInt(match[2]);
-      const c = parseInt(match[3]);
-      const k = match[4].split("|");
-      const unpacked = unPack(p, a, c, k, null, {});
-      const fileMatch = unpacked.match(/file:"(.*?)"/);
-      if (fileMatch) {
-        let streamUrl = fileMatch[1];
-        if (streamUrl.startsWith("//")) streamUrl = "https:" + streamUrl;
-        
-        const originMatch = url.match(/^(https?:\/\/[^\/]+)/i);
-        const origin = originMatch ? originMatch[1] : '';
-        
-        return {
-          url: streamUrl,
-          headers: {
-            "User-Agent": USER_AGENT,
-            "Referer": url,
-            "Origin": origin
-          }
-        };
-      }
+
+    const packed = extractPackedValue(html, [
+      /sources:\s*\[\s*\{\s*file:\s*"([^"]+)"/i,
+      /file\s*:\s*"([^"]+)"/i,
+      /file\s*:\s*'([^']+)'/i,
+    ]);
+
+    if (packed && packed.value) {
+      const streamUrl = normalizeExtractorUrl(packed.value, url);
+      if (!streamUrl) return null;
+
+      return {
+        url: streamUrl,
+        headers: {
+          "User-Agent": USER_AGENT,
+          "Referer": url,
+          "Origin": getUrlOrigin(url)
+        }
+      };
     }
     return null;
   } catch (e) {

@@ -191,7 +191,7 @@ async function getStreams(id, type, season, episode, config = {}) {
         }
         if (providerName === 'guardahd') {
             promises.push(
-                guardahd.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode)
+                guardahd.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext)
                     .then(s => ({ provider: 'GuardaHD', streams: s, status: 'fulfilled' }))
                     .catch(e => ({ provider: 'GuardaHD', error: e, status: 'rejected' }))
             );

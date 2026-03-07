@@ -75,6 +75,21 @@ function isTruthyEnv(name) {
   return raw === '1' || raw === 'true' || raw === 'yes';
 }
 
+function manifestSupportsImdbStreams(manifest) {
+  const topLevel = Array.isArray(manifest?.idPrefixes) && manifest.idPrefixes.includes('tt');
+  const streamResource = Array.isArray(manifest?.resources)
+    ? manifest.resources.find((entry) =>
+        entry &&
+        typeof entry === 'object' &&
+        entry.name === 'stream' &&
+        Array.isArray(entry.idPrefixes) &&
+        entry.idPrefixes.includes('tt')
+      )
+    : null;
+
+  return Boolean(topLevel || streamResource);
+}
+
 async function runOnce(baseUrl) {
   const expectedVersion = readLocalManifestVersion();
 
@@ -88,6 +103,7 @@ async function runOnce(baseUrl) {
   const manifest = await fetchJson(baseUrl, '/manifest.json');
   assert(manifest.ok, `/manifest.json returned HTTP ${manifest.status}`);
   assert(manifest.json && manifest.json.id && manifest.json.version, '/manifest.json is missing id/version');
+  assert(manifestSupportsImdbStreams(manifest.json), '/manifest.json is missing default IMDb/Cinemeta stream support');
   if (expectedVersion) {
     assert(
       manifest.json.version === expectedVersion,

@@ -1073,7 +1073,10 @@ async function getStreams(id, type, season, episode, providerContext = null) {
     }
 
     return deduped
-      .map((stream) => formatStream(stream, "AnimeSaturn"))
+      .map((stream) => formatStream({
+        ...stream,
+        addonBaseUrl: providerContext?.addonBaseUrl
+      }, "AnimeSaturn"))
       .filter(Boolean);
   } catch (error) {
     console.error("[AnimeSaturn] getStreams failed:", error.message);

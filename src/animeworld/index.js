@@ -1013,7 +1013,10 @@ async function getStreams(id, type, season, episode, providerContext = null) {
     }
 
     return deduped
-      .map((stream) => formatStream(stream, "AnimeWorld"))
+      .map((stream) => formatStream({
+        ...stream,
+        addonBaseUrl: providerContext?.addonBaseUrl
+      }, "AnimeWorld"))
       .filter(Boolean);
   } catch (error) {
     console.error("[AnimeWorld] getStreams failed:", error.message);

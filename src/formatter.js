@@ -1,4 +1,4 @@
-const { isHlsProxyPlaybackUrl } = require('./utils/hlsProxy');
+const { buildProxyUrl, isHlsProxyPlaybackUrl } = require('./utils/hlsProxy');
 
 function isMp4Url(rawUrl, depth = 0) {
     const url = String(rawUrl || '').trim();
@@ -34,10 +34,33 @@ function isMp4Url(rawUrl, depth = 0) {
 
 function shouldSetNotWebReady(url, headers, behaviorHints = {}) {
     if (behaviorHints.notWebReady === false) return false;
+    if (behaviorHints.notWebReady === true && !isMp4Url(url)) return true;
     if (isHlsProxyPlaybackUrl(url)) return false;
+    if (isMp4Url(url)) return false;
     const proxyHeaders = behaviorHints.proxyHeaders && behaviorHints.proxyHeaders.request;
     if (proxyHeaders && Object.keys(proxyHeaders).length > 0) return true;
     if (headers && Object.keys(headers).length > 0) return true;
+    return true;
+}
+
+function cloneBehaviorHints(behaviorHints = {}) {
+    const next = { ...behaviorHints };
+    if (behaviorHints.proxyHeaders && typeof behaviorHints.proxyHeaders === 'object') {
+        next.proxyHeaders = { ...behaviorHints.proxyHeaders };
+        if (behaviorHints.proxyHeaders.request && typeof behaviorHints.proxyHeaders.request === 'object') {
+            next.proxyHeaders.request = { ...behaviorHints.proxyHeaders.request };
+        }
+    }
+    return next;
+}
+
+function hasHeaders(headers) {
+    return !!(headers && typeof headers === 'object' && Object.keys(headers).length > 0);
+}
+
+function shouldProxyForWebPlayback(url, headers, addonBaseUrl) {
+    if (!addonBaseUrl || !hasHeaders(headers)) return false;
+    if (isHlsProxyPlaybackUrl(url)) return false;
     return !isMp4Url(url);
 }
 
@@ -104,8 +127,10 @@ function formatStream(stream, providerName) {
     }
 
     // Move headers to behaviorHints if present, but keep original for compatibility
-    const behaviorHints = stream.behaviorHints || {};
+    const behaviorHints = cloneBehaviorHints(stream.behaviorHints || {});
+    const addonBaseUrl = String(stream.addonBaseUrl || stream.providerContext?.addonBaseUrl || '').trim();
     let finalHeaders = stream.headers;
+    let finalUrl = stream.url;
 
     if (behaviorHints.proxyHeaders && behaviorHints.proxyHeaders.request) {
         finalHeaders = behaviorHints.proxyHeaders.request;
@@ -113,14 +138,28 @@ function formatStream(stream, providerName) {
         finalHeaders = behaviorHints.headers;
     }
 
+    if (shouldProxyForWebPlayback(finalUrl, finalHeaders, addonBaseUrl)) {
+        const proxiedUrl = buildProxyUrl(addonBaseUrl, finalUrl, finalHeaders);
+        if (proxiedUrl) {
+            finalUrl = proxiedUrl;
+            finalHeaders = null;
+            delete behaviorHints.proxyHeaders;
+            delete behaviorHints.headers;
+            behaviorHints.notWebReady = false;
+        }
+    }
+
     if (finalHeaders) {
         behaviorHints.proxyHeaders = behaviorHints.proxyHeaders || {};
         behaviorHints.proxyHeaders.request = finalHeaders;
         // Also support "headers" in behaviorHints directly (Stremio extension)
         behaviorHints.headers = finalHeaders;
+    } else {
+        delete behaviorHints.proxyHeaders;
+        delete behaviorHints.headers;
     }
 
-    behaviorHints.notWebReady = shouldSetNotWebReady(stream.url, finalHeaders, behaviorHints);
+    behaviorHints.notWebReady = shouldSetNotWebReady(finalUrl, finalHeaders, behaviorHints);
 
     const finalName = pName;
     let finalTitle = `📁 ${stream.title || 'Stream'}`;
@@ -129,6 +168,7 @@ function formatStream(stream, providerName) {
 
     return {
         ...stream, // Keep original properties
+        url: finalUrl,
         name: finalName,
         title: finalTitle,
         // Metadata for Stremio UI reconstruction (safer names for RN)

@@ -502,6 +502,7 @@ async function getStreams(id, type, season, episode, providerContext = null) {
                     title: displayName,
                     quality: normalizedQuality,
                     type: "direct",
+                    addonBaseUrl: providerContext?.addonBaseUrl,
                     behaviorHints: s.behaviorHints
                 }, 'Guardoserie'));
             }
@@ -517,7 +518,8 @@ async function getStreams(id, type, season, episode, providerContext = null) {
                     name: `Guardoserie - Uqload`,
                     title: displayName,
                     quality: normalizedQuality,
-                    type: "direct"
+                    type: "direct",
+                    addonBaseUrl: providerContext?.addonBaseUrl
                 }, 'Guardoserie'));
             }
         } else if (playerLink.includes('dropload')) {
@@ -536,7 +538,8 @@ async function getStreams(id, type, season, episode, providerContext = null) {
                     name: `Guardoserie - DropLoad`,
                     title: displayName,
                     quality: normalizedQuality,
-                    type: "direct"
+                    type: "direct",
+                    addonBaseUrl: providerContext?.addonBaseUrl
                 }, 'Guardoserie'));
             }
         }

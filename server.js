@@ -916,7 +916,7 @@ function buildPage(host, config) {
         <div class="input-grp">
           <label>URL Proxy MediaFlow (Opzionale)</label>
           <input type="url" id="m_url" placeholder="https://nome-mediaflow.com" value="${esc(f.mfpUrl)}"/>
-          <div class="hint">Opzionale: il proxy HLS interno copre StreamingCommunity anche su Stremio Web; MediaFlow resta utile per altri provider.</div>
+          <div class="hint">Opzionale: il proxy interno rende web-ready i flussi HLS/headered piu comuni; MediaFlow resta utile per i casi che richiedono un proxy esterno.</div>
         </div>
         <div class="input-grp">
           <label>IP Bypass Proxy Personale</label>
