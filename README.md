@@ -1,7 +1,7 @@
 # StreamFusion Mail
 
 <!-- release:meta:start -->
-- Release: `v3.0.3`
+- Release: `v3.0.4`
 - Date: `2026-03-07`
 - Remote smoke target: `https://streamfusion-mail.vercel.app`
 <!-- release:meta:end -->
@@ -70,3 +70,4 @@ VERCEL_BASE_URL=https://tuo-addon.vercel.app npm run test:vercel
 
 - I test locali non sono il percorso preferito per il rilascio: la validazione va fatta sul deploy Vercel.
 - La landing addon `/configure` usa `manifest.json` a runtime, quindi la versione mostrata segue il manifest corrente.
+- Il `manifest` base espone Cinemeta/IMDb di default, quindi gli stream EasyStreams su ID `tt*` funzionano anche senza URL configurata.
