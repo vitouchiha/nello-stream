@@ -502,6 +502,15 @@ _Next planned improvements:_
 
 ---
 
+## [3.0.3] - 2026-03-07
+
+### Fixed
+- `StreamingCommunity` ora converte gli stream HLS con header obbligatori in URL proxati dall'addon, cosi Stremio Web non li scarta piu come `notWebReady`.
+- Aggiunto proxy HLS interno con token firmati e rewrite di playlist, segmenti e chiavi HLS per supportare la riproduzione web senza esporre header custom al client.
+- Lo smoke test remoto Vercel puo ora fallire anche su stream non web-ready quando `VERCEL_SMOKE_REQUIRE_WEB_READY=1`.
+
+---
+
 ## [3.0.2] - 2026-03-07
 
 ### Fixed

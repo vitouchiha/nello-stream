@@ -20,9 +20,17 @@
 
 require('dotenv').config();
 
+const axios = require('axios');
 const express  = require('express');
 const manifest = require('./manifest.json');
 const { decodeConfig, isValidConfig, DEFAULT_CONFIG } = require('./src/utils/config');
+const { getProxyAgent, randomUA } = require('./src/utils/fetcher');
+const {
+  HLS_PROXY_PATH,
+  isLikelyHlsPlaylist,
+  parseProxyToken,
+  rewritePlaylist,
+} = require('./src/utils/hlsProxy');
 const { createLogger } = require('./src/utils/logger');
 
 const log = createLogger('server');
@@ -30,6 +38,7 @@ const log = createLogger('server');
 // ─── Express App ─────────────────────────────────────────────────────────────
 
 const app = express();
+app.set('trust proxy', true);
 
 let _providersApi = null;
 function getProvidersApi() {
@@ -95,6 +104,27 @@ function clientIpFrom(req) {
   return req.headers['x-real-ip'] || req.socket?.remoteAddress || '';
 }
 
+function addonBaseUrlFrom(req) {
+  return `${req.protocol}://${req.get('host')}`;
+}
+
+function copyProxyResponseHeaders(res, headers = {}) {
+  const passthrough = [
+    'content-type',
+    'content-length',
+    'content-range',
+    'accept-ranges',
+    'etag',
+    'last-modified',
+  ];
+
+  for (const key of passthrough) {
+    const value = headers[key];
+    if (!value) continue;
+    res.setHeader(key, value);
+  }
+}
+
 /** Stremio JSON response with optional Cache-Control */
 function stremioJson(res, data, { maxAge = 0 } = {}) {
   if (maxAge > 0) {
@@ -106,6 +136,98 @@ function stremioJson(res, data, { maxAge = 0 } = {}) {
   res.setHeader('Content-Type', 'application/json');
   res.json(data);
 }
+
+app.get(HLS_PROXY_PATH, async (req, res) => {
+  const token = String(req.query.token || '').trim();
+  if (!token) {
+    return res.status(400).json({ error: 'Missing proxy token' });
+  }
+
+  let proxyTarget;
+  try {
+    proxyTarget = parseProxyToken(token);
+  } catch (err) {
+    log.warn(`hlsProxy invalid token: ${err.message}`);
+    return res.status(400).json({ error: 'Invalid proxy token' });
+  }
+
+  try {
+    const proxyAgent = getProxyAgent();
+    const upstream = await axios.get(proxyTarget.url, {
+      responseType: 'stream',
+      timeout: Number(process.env.HLS_PROXY_TIMEOUT) || 20_000,
+      headers: {
+        'User-Agent': proxyTarget.headers['User-Agent'] || randomUA(),
+        'Accept': proxyTarget.headers['Accept'] || '*/*',
+        ...(proxyTarget.headers['Accept-Language']
+          ? { 'Accept-Language': proxyTarget.headers['Accept-Language'] }
+          : {}),
+        ...(proxyTarget.headers['Referer']
+          ? { 'Referer': proxyTarget.headers['Referer'] }
+          : {}),
+        ...(proxyTarget.headers['Origin']
+          ? { 'Origin': proxyTarget.headers['Origin'] }
+          : {}),
+        'Accept-Encoding': 'identity',
+      },
+      ...(proxyAgent ? { httpsAgent: proxyAgent, httpAgent: proxyAgent, proxy: false } : {}),
+    });
+
+    const contentType = String(upstream.headers['content-type'] || '');
+    if (!isLikelyHlsPlaylist(proxyTarget.url, contentType)) {
+      res.status(upstream.status);
+      res.setHeader('Cache-Control', 'no-store');
+      copyProxyResponseHeaders(res, upstream.headers);
+      upstream.data.on('error', (err) => {
+        log.error(`hlsProxy upstream stream error: ${err.message}`);
+        if (!res.headersSent) {
+          res.status(502).end('Proxy stream error');
+          return;
+        }
+        res.destroy(err);
+      });
+      upstream.data.pipe(res);
+      return;
+    }
+
+    const chunks = [];
+    upstream.data.setEncoding('utf8');
+    upstream.data.on('data', (chunk) => chunks.push(chunk));
+    upstream.data.on('error', (err) => {
+      log.error(`hlsProxy playlist read error: ${err.message}`);
+      if (!res.headersSent) {
+        res.status(502).json({ error: 'Playlist proxy error' });
+      }
+    });
+    upstream.data.on('end', () => {
+      try {
+        const rewritten = rewritePlaylist(
+          chunks.join(''),
+          proxyTarget.url,
+          proxyTarget.headers,
+          addonBaseUrlFrom(req),
+          proxyTarget.expiresAt
+        );
+        res.status(upstream.status);
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+        res.send(rewritten);
+      } catch (err) {
+        log.error(`hlsProxy rewrite error: ${err.message}`);
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Playlist rewrite error' });
+        }
+      }
+    });
+  } catch (err) {
+    log.error(`hlsProxy failed: ${err.message}`);
+    const status = err?.response?.status;
+    if (status) {
+      return res.status(status).json({ error: `Upstream returned HTTP ${status}` });
+    }
+    return res.status(502).json({ error: 'Proxy upstream failed' });
+  }
+});
 
 // ─── Stremio Protocol Routes ─────────────────────────────────────────────────
 // Both default (no config prefix) and /:config prefixed variants.
@@ -177,7 +299,7 @@ app.get([
   '/:config/catalog/:type/:id/:extra.json',
   '/:config/catalog/:type/:id.json',
 ], async (req, res) => {
-  const config = { ...cfgFrom(req.params.config), clientIp: clientIpFrom(req) };
+  const config = { ...cfgFrom(req.params.config), clientIp: clientIpFrom(req), addonBaseUrl: addonBaseUrlFrom(req) };
   const extra  = parseExtra(req.params.extra);
   try {
     const providersApi = getProvidersApi();
@@ -196,7 +318,7 @@ app.get([
   '/meta/:type/:id.json',
   '/:config/meta/:type/:id.json',
 ], async (req, res) => {
-  const config = { ...cfgFrom(req.params.config), clientIp: clientIpFrom(req) };
+  const config = { ...cfgFrom(req.params.config), clientIp: clientIpFrom(req), addonBaseUrl: addonBaseUrlFrom(req) };
   try {
     const providersApi = getProvidersApi();
     if (!providersApi?.handleMeta) return stremioJson(res, { meta: null });
@@ -215,7 +337,7 @@ app.get([
   '/stream/:type/:id.json',
   '/:config/stream/:type/:id.json',
 ], async (req, res) => {
-  const config = { ...cfgFrom(req.params.config), clientIp: clientIpFrom(req) };
+  const config = { ...cfgFrom(req.params.config), clientIp: clientIpFrom(req), addonBaseUrl: addonBaseUrlFrom(req) };
   try {
     const providersApi = getProvidersApi();
     if (!providersApi?.handleStream) return stremioJson(res, { streams: [] });
@@ -625,7 +747,7 @@ app.get('/debug/drammatica', requireDebugAuth, async (req, res) => {
 
 app.get('/', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(buildPage(req.protocol + '://' + req.get('host'), null, null, _serverStatus()));
+  res.send(buildPage(addonBaseUrlFrom(req), null, null, _serverStatus()));
 });
 
   app.get('/dashboard', (req, res) => {
@@ -642,7 +764,7 @@ app.get('/', (req, res) => {
     if (!isValidConfig(req.params.config)) return next();
     const cfg = decodeConfig(req.params.config);
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(buildPage(req.protocol + '://' + req.get('host'), cfg, req.params.config, _serverStatus()));
+  res.send(buildPage(addonBaseUrlFrom(req), cfg, req.params.config, _serverStatus()));
 });
 
 // Stremio "Configure" button opens: transportUrl.replace('/manifest.json','') + '/configure'
@@ -652,7 +774,7 @@ app.get(['/configure', '/:config/configure'], (req, res, next) => {
   if (raw && !isValidConfig(raw)) return next();
   const cfg = raw ? decodeConfig(raw) : null;
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(buildPage(req.protocol + '://' + req.get('host'), cfg, raw || null, _serverStatus()));
+  res.send(buildPage(addonBaseUrlFrom(req), cfg, raw || null, _serverStatus()));
 });
 
 function _serverStatus() {
@@ -676,9 +798,9 @@ function esc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
 }
 
-function buildPage(req, host) {
+function buildPage(host, config) {
   const v = manifest.version;
-  const f = req.config || {};
+  const f = config || {};
   function esc(s) { return (s || '').replace(/"/g, '&quot;'); }
   
   return `<!DOCTYPE html>
@@ -794,7 +916,7 @@ function buildPage(req, host) {
         <div class="input-grp">
           <label>URL Proxy MediaFlow (Opzionale)</label>
           <input type="url" id="m_url" placeholder="https://nome-mediaflow.com" value="${esc(f.mfpUrl)}"/>
-          <div class="hint">Usato per sbloccare i flussi HLS se supportato dal server.</div>
+          <div class="hint">Opzionale: il proxy HLS interno copre StreamingCommunity anche su Stremio Web; MediaFlow resta utile per altri provider.</div>
         </div>
         <div class="input-grp">
           <label>IP Bypass Proxy Personale</label>
@@ -807,11 +929,11 @@ function buildPage(req, host) {
         <div class="card-title">🎭 Impostazioni Catalogo</div>
         <div class="checks">
           <label class="check-label">
-            <input type="checkbox" id="h_cat" ${f.hideCats?'checked':''}/> 
+            <input type="checkbox" id="h_cat" ${f.hideCatalogs ? 'checked' : ''}/> 
             Nascondi cloni delle sezioni (Mostra solo le principali Cinemeta)
           </label>
           <label class="check-label">
-            <input type="checkbox" id="c_mode" ${f.cinemetaMode !== false ? 'checked' : ''}/> 
+            <input type="checkbox" id="c_mode" ${f.cinemeta !== false ? 'checked' : ''}/> 
             Attiva compatibilità con IMDb/Cinemeta (Consigliato)
           </label>
         </div>

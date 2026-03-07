@@ -1,3 +1,5 @@
+const { isHlsProxyPlaybackUrl } = require('./utils/hlsProxy');
+
 function isMp4Url(rawUrl, depth = 0) {
     const url = String(rawUrl || '').trim();
     if (!url) return false;
@@ -31,6 +33,8 @@ function isMp4Url(rawUrl, depth = 0) {
 }
 
 function shouldSetNotWebReady(url, headers, behaviorHints = {}) {
+    if (behaviorHints.notWebReady === false) return false;
+    if (isHlsProxyPlaybackUrl(url)) return false;
     const proxyHeaders = behaviorHints.proxyHeaders && behaviorHints.proxyHeaders.request;
     if (proxyHeaders && Object.keys(proxyHeaders).length > 0) return true;
     if (headers && Object.keys(headers).length > 0) return true;

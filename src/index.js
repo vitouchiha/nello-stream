@@ -115,7 +115,7 @@ function isLikelyAnimeRequest(type) {
     return normalizedType === 'anime';
 }
 
-function buildProviderRequestContext(context) {
+function buildProviderRequestContext(context, config = {}) {
     if (!context) return null;
     return {
         __requestContext: true,
@@ -125,11 +125,14 @@ function buildProviderRequestContext(context) {
         seasonProvided: context.seasonProvided === true,
         kitsuId: context.kitsuId,
         tmdbId: context.tmdbId,
-        imdbId: context.imdbId
+        imdbId: context.imdbId,
+        addonBaseUrl: String(config.addonBaseUrl || '').trim(),
+        mfpUrl: String(config.mfpUrl || '').trim(),
+        mfpKey: String(config.mfpKey || '').trim()
     };
 }
 
-async function getStreams(id, type, season, episode) {
+async function getStreams(id, type, season, episode, config = {}) {
     const streams = [];
     const normalizedType = String(type || '').toLowerCase();
     const parsedNormalizedSeason = Number.parseInt(season, 10);
@@ -144,7 +147,7 @@ async function getStreams(id, type, season, episode) {
         Number.isInteger(parsedCanonicalSeason) && parsedCanonicalSeason >= 0
             ? parsedCanonicalSeason
             : 1;
-    const sharedContext = buildProviderRequestContext(providerContext);
+    const sharedContext = buildProviderRequestContext(providerContext, config);
     const promises = [];
     const likelyAnime = isLikelyAnimeRequest(normalizedType);
 

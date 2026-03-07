@@ -5,6 +5,8 @@ function getStreamingCommunityBaseUrl() {
 }
 
 const { formatStream } = require('../formatter.js');
+const { wrapStreamUrl } = require('../utils/mediaflow.js');
+const { buildProxyUrl, sanitizeProxyHeaders } = require('../utils/hlsProxy');
 require('../fetch_helper.js');
 const { checkQualityFromText } = require('../quality_helper.js');
 const TMDB_API_KEY = "68e094699525b18a70bab2f86b1fa706";
@@ -27,6 +29,38 @@ function getCommonHeaders() {
     "Sec-Fetch-Site": "none",
     "Sec-Fetch-User": "?1",
     "Upgrade-Insecure-Requests": "1"
+  };
+}
+
+function getPlaybackHeaders() {
+  return sanitizeProxyHeaders(getCommonHeaders());
+}
+
+function buildPlaybackUrl(streamUrl, providerContext = null) {
+  const playbackHeaders = getPlaybackHeaders();
+  const addonBaseUrl = String(providerContext?.addonBaseUrl || '').trim();
+  const mfpUrl = String(providerContext?.mfpUrl || '').trim();
+
+  if (mfpUrl) {
+    return {
+      url: wrapStreamUrl(streamUrl, providerContext, playbackHeaders),
+      headers: null,
+      forceWebReady: true,
+    };
+  }
+
+  if (addonBaseUrl) {
+    return {
+      url: buildProxyUrl(addonBaseUrl, streamUrl, playbackHeaders),
+      headers: null,
+      forceWebReady: true,
+    };
+  }
+
+  return {
+    url: streamUrl,
+    headers: playbackHeaders,
+    forceWebReady: false,
   };
 }
 
@@ -205,14 +239,22 @@ async function getStreams(id, type, season, episode, providerContext = null) {
       }
 
       const normalizedQuality = getQualityFromName(quality);
+      const playback = buildPlaybackUrl(streamUrl, providerContext);
       const result = {
         name: `StreamingCommunity`,
         title: finalDisplayName,
-        url: streamUrl,
+        url: playback.url,
         quality: normalizedQuality,
         type: "direct",
-        headers: commonHeaders
+        headers: playback.headers
       };
+
+      if (playback.forceWebReady) {
+        result.behaviorHints = {
+          ...(result.behaviorHints || {}),
+          notWebReady: false,
+        };
+      }
 
       return [formatStream(result, "StreamingCommunity")].filter(s => s !== null);
     } else {

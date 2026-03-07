@@ -1,7 +1,7 @@
 # StreamFusion Mail
 
 <!-- release:meta:start -->
-- Release: `v3.0.2`
+- Release: `v3.0.3`
 - Date: `2026-03-07`
 - Remote smoke target: `https://streamfusion-mail.vercel.app`
 <!-- release:meta:end -->
@@ -14,6 +14,7 @@ Addon Stremio per drama asiatici e coreani con cataloghi KissKH e Rama, metadata
 - Supporto Cinemeta / IMDb per risolvere stream da ID `tt*`.
 - Metadata arricchiti via TMDB quando la chiave e configurata.
 - Supporto proxy HTTP, FlareSolverr e MediaFlow Proxy.
+- Proxy HLS interno per rendere web-ready gli stream `StreamingCommunity` su Stremio Web.
 - Dashboard addon servita da `/dashboard`.
 
 ## Deploy
@@ -32,6 +33,7 @@ Env utili:
 - `TMDB_API_KEY`: chiave TMDB globale
 - `VERCEL_BASE_URL`: URL pubblico del deploy usato dallo smoke test remoto
 - `VERCEL_SMOKE_STREAM_ID`: opzionale, abilita un controllo remoto anche su un endpoint `/stream/...`
+- `VERCEL_SMOKE_REQUIRE_WEB_READY`: se impostato, lo smoke remoto richiede almeno uno stream `notWebReady !== true`
 
 ## Workflow
 
@@ -46,6 +48,7 @@ Per ogni aggiornamento:
 - aggiorna la dashboard in `web/landing/index.html`
 - aggiunge l'entry mancante in `CHANGELOG.md`
 - esegue lo smoke test remoto sul deploy Vercel
+- puo verificare anche la web-readiness del titolo di smoke se `VERCEL_SMOKE_REQUIRE_WEB_READY=1`
 
 Nel mio workflow operativo, dopo ogni modifica faccio anche commit e push su GitHub.
 

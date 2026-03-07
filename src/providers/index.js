@@ -313,7 +313,13 @@ async function _fetchFromImdbId(rawId, type, config) {
   
   // Lookup integrale tramite orchestratore easystreams originale.
   if (useEasystreams) {
-    jobs.push(runImdbJob('easystreams.imdb', () => easystreams.getStreams(imdbId, type === 'movie' ? 'movie' : 'series', seasonNum, episodeNum)));
+    jobs.push(runImdbJob('easystreams.imdb', () => easystreams.getStreams(
+      imdbId,
+      type === 'movie' ? 'movie' : 'series',
+      seasonNum,
+      episodeNum,
+      config
+    )));
   }
 
   // Legacy stream_engine is experimental and still includes mock adapters.
