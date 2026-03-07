@@ -31,7 +31,7 @@ const DEFAULT_CONFIG = {
   proxyUrl:     '',
   hideCatalogs: false,
   providers:    'all',
-  cinemeta:     false,
+  cinemeta:     true,
   // Default TMDB key — active for all users unless they supply their own.
   // Provides poster HD, cast, genres, IMDB title lookup for Cinemeta streams.
   tmdbKey:        '6e0a84ca7b324763793422a6656d34ff',

@@ -502,6 +502,14 @@ _Next planned improvements:_
 
 ---
 
+## [3.0.4] - 2026-03-07
+
+### Fixed
+- Il `manifest` base ora abilita Cinemeta/IMDb di default, quindi Stremio Web interroga anche i provider EasyStreams su ID `tt*` senza richiedere una URL addon configurata.
+- Allineato `DEFAULT_CONFIG.cinemeta` con la landing `/configure`, che gia proponeva Cinemeta come opzione predefinita consigliata.
+
+---
+
 ## [3.0.3] - 2026-03-07
 
 ### Fixed
