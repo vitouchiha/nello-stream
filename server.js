@@ -22,6 +22,7 @@
 require('dotenv').config();
 
 const axios = require('axios');
+const crypto = require('crypto');
 const express  = require('express');
 const manifest = require('./manifest.json');
 const { decodeConfig, isValidConfig, DEFAULT_CONFIG } = require('./src/utils/config');
@@ -111,6 +112,39 @@ function addonBaseUrlFrom(req) {
 
 function currentInstallReleaseTag() {
   return `v${manifest.version}`;
+}
+
+function normalizeManifestConfig(config = {}) {
+  return {
+    mfpUrl: String(config.mfpUrl || '').trim(),
+    mfpKey: String(config.mfpKey || '').trim(),
+    proxyUrl: String(config.proxyUrl || '').trim(),
+    hideCatalogs: Boolean(config.hideCatalogs),
+    providers: String(config.providers || 'all').trim() || 'all',
+    cinemeta: Boolean(config.cinemeta),
+    tmdbKey: String(config.tmdbKey || DEFAULT_CONFIG.tmdbKey || '').trim(),
+    rpdbKey: String(config.rpdbKey || '').trim(),
+    topPosterKey: String(config.topPosterKey || '').trim(),
+  };
+}
+
+function isDefaultManifestConfig(config = {}) {
+  return JSON.stringify(normalizeManifestConfig(config)) === JSON.stringify(normalizeManifestConfig(DEFAULT_CONFIG));
+}
+
+function buildManifestId(config = {}) {
+  const baseId = String(manifest.id || 'org.nello.drama').trim() || 'org.nello.drama';
+  if (isDefaultManifestConfig(config)) return baseId;
+  const digest = crypto
+    .createHash('sha1')
+    .update(JSON.stringify(normalizeManifestConfig(config)))
+    .digest('hex')
+    .slice(0, 12);
+  return `${baseId}.cfg${digest}`;
+}
+
+function buildManifestName(config = {}) {
+  return isDefaultManifestConfig(config) ? manifest.name : `${manifest.name} Config`;
 }
 
 function copyProxyResponseHeaders(res, headers = {}) {
@@ -267,6 +301,8 @@ function buildManifest(config) {
     // Default: simple format, no Cinemeta support
     return {
       ...manifest,
+      id: buildManifestId(config),
+      name: buildManifestName(config),
       catalogs: hideCatalogs ? [] : catalogs,
     };
   }
@@ -277,6 +313,8 @@ function buildManifest(config) {
 
   return {
     ...manifest,
+    id: buildManifestId(config),
+    name: buildManifestName(config),
     catalogs:   hideCatalogs ? [] : catalogs,
     types:      streamTypes,
     idPrefixes: streamPrefixes,
