@@ -23,13 +23,8 @@ const rama            = require('./rama');
 const drammatica      = require('./drammatica');
 const guardaserie     = require('./guardaserie');
 
-// Nuovi provider da easystreams
-const streamingcommunity = require('../streamingcommunity');
-const guardahd        = require('../guardahd');
-const guardoserie     = require('../guardoserie');
-const animeunity      = require('../animeunity');
-const animeworld      = require('../animeworld');
-const animesaturn     = require('../animesaturn');
+// Orchestratore completo easystreams (include tutti i provider originali)
+const easystreams = require('../index');
 
 const { withTimeout } = require('../utils/fetcher');
 const { titleSimilarity } = require('../utils/titleHelper');
@@ -53,6 +48,11 @@ function _isProviderEnabled(config, providerName) {
     return p === providerName;
   }
   return false;
+}
+
+function _isAnyProviderEnabled(config, providerNames) {
+  if (!Array.isArray(providerNames) || providerNames.length === 0) return false;
+  return providerNames.some(name => _isProviderEnabled(config, name));
 }
 
 function _fallbackMetaForId(id, type = 'series') {
@@ -262,13 +262,19 @@ async function _fetchFromImdbId(rawId, type, config) {
   const useDrammatica = _isProviderEnabled(config, 'drammatica');
   const useGuardaserie = _isProviderEnabled(config, 'guardaserie');
   
-  // Providers from easystreams - work with direct IMDB/TMDB IDs
-  const useStreamingCommunity = _isProviderEnabled(config, 'streamingcommunity');
-  const useGuardaHD = _isProviderEnabled(config, 'guardahd');
-  const useGuardoserie = _isProviderEnabled(config, 'guardoserie');
-  const useAnimeUnity = _isProviderEnabled(config, 'animeunity');
-  const useAnimeWorld = _isProviderEnabled(config, 'animeworld');
-  const useAnimeSaturn = _isProviderEnabled(config, 'animesaturn');
+  // Provider easystreams completi (guardahd, guardaserie, guardoserie,
+  // animeunity, animeworld, animesaturn, streamingcommunity)
+  const useEasystreams = _isAnyProviderEnabled(config, [
+    'all',
+    'easystreams',
+    'streamingcommunity',
+    'guardahd',
+    'guardaserie-es',
+    'guardoserie',
+    'animeunity',
+    'animeworld',
+    'animesaturn',
+  ]);
 
   const jobs = [];
   if (useKisskh) jobs.push(_kisskhStreamsForTitle(title, seasonNum, episodeNum, config).catch(e => { log.warn(`kisskh title search failed: ${e.message}`); return []; }));
@@ -276,13 +282,19 @@ async function _fetchFromImdbId(rawId, type, config) {
   if (useDrammatica) jobs.push(_drammaticaStreamsForTitle(title, episodeNum, config).catch(e => { log.warn(`drammatica title search failed: ${e.message}`); return []; }));
   if (useGuardaserie) jobs.push(_guardaserieStreamsForTitle(title, episodeNum, config).catch(e => { log.warn(`guardaserie title search failed: ${e.message}`); return []; }));
   
-  // Direct ID lookup for easystreams providers
-  if (useStreamingCommunity) jobs.push(withTimeout(streamingcommunity.getStreams(imdbId, type, seasonNum, episodeNum), STREAM_TIMEOUT, 'streamingcommunity.getStreams').catch(e => { log.warn(`streamingcommunity failed: ${e.message}`); return []; }));
-  if (useGuardaHD && type === 'movie') jobs.push(withTimeout(guardahd.getStreams(imdbId, type, seasonNum, episodeNum), STREAM_TIMEOUT, 'guardahd.getStreams').catch(e => { log.warn(`guardahd failed: ${e.message}`); return []; }));
-  if (useGuardoserie && type === 'series') jobs.push(withTimeout(guardoserie.getStreams(imdbId, type, seasonNum, episodeNum), STREAM_TIMEOUT, 'guardoserie.getStreams').catch(e => { log.warn(`guardoserie failed: ${e.message}`); return []; }));
-  if (useAnimeUnity && type === 'series') jobs.push(withTimeout(animeunity.getStreams(imdbId, type, seasonNum, episodeNum), STREAM_TIMEOUT, 'animeunity.getStreams').catch(e => { log.warn(`animeunity failed: ${e.message}`); return []; }));
-  if (useAnimeWorld && type === 'series') jobs.push(withTimeout(animeworld.getStreams(imdbId, type, seasonNum, episodeNum), STREAM_TIMEOUT, 'animeworld.getStreams').catch(e => { log.warn(`animeworld failed: ${e.message}`); return []; }));
-  if (useAnimeSaturn && type === 'series') jobs.push(withTimeout(animesaturn.getStreams(imdbId, type, seasonNum, episodeNum), STREAM_TIMEOUT, 'animesaturn.getStreams').catch(e => { log.warn(`animesaturn failed: ${e.message}`); return []; }));
+  // Lookup integrale tramite orchestratore easystreams originale.
+  if (useEasystreams) {
+    jobs.push(
+      withTimeout(
+        easystreams.getStreams(imdbId, type === 'movie' ? 'movie' : 'series', seasonNum, episodeNum),
+        STREAM_TIMEOUT,
+        'easystreams.getStreams'
+      ).catch(e => {
+        log.warn(`easystreams failed: ${e.message}`);
+        return [];
+      })
+    );
+  }
 
 
   const streamEngine = require('../stream_engine/engine');

@@ -106,12 +106,13 @@ function decodeConfig(encoded) {
     const json = _decrypt(encoded);
     const obj = JSON.parse(json);
     const pvMap = { k: 'kisskh', r: 'rama', d: 'drammatica', g: 'guardaserie', a: 'all' };
+    const decodedProviders = typeof obj.pv === 'string' ? (pvMap[obj.pv] || obj.pv) : 'all';
     return {
       mfpUrl:       (obj.mfp  || '').trim(),
       mfpKey:       (obj.mfpk || '').trim(),
       proxyUrl:     (obj.px   || '').trim(),
       hideCatalogs: !!obj.hc,
-      providers:    pvMap[obj.pv] || 'all',
+      providers:    decodedProviders,
       cinemeta:     !!obj.cm,
       tmdbKey:        (obj.tm   || DEFAULT_CONFIG.tmdbKey).trim(),
       rpdbKey:        (obj.rp   || '').trim(),
@@ -122,12 +123,13 @@ function decodeConfig(encoded) {
     try {
       const obj = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
       const pvMap = { k: 'kisskh', r: 'rama', d: 'drammatica', g: 'guardaserie', a: 'all' };
+      const decodedProviders = typeof obj.pv === 'string' ? (pvMap[obj.pv] || obj.pv) : 'all';
       return {
         mfpUrl:       (obj.mfp  || '').trim(),
         mfpKey:       (obj.mfpk || '').trim(),
         proxyUrl:     (obj.px   || '').trim(),
         hideCatalogs: !!obj.hc,
-        providers:    pvMap[obj.pv] || 'all',
+        providers:    decodedProviders,
         cinemeta:     !!obj.cm,
         tmdbKey:        (obj.tm   || DEFAULT_CONFIG.tmdbKey).trim(),
         rpdbKey:        (obj.rp   || '').trim(),
