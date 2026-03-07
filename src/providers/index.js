@@ -17,9 +17,11 @@
  *   "rama_catalog"    → Rama
  */
 
-const axios         = require('axios');
-const kisskh        = require('./kisskh');
-const rama          = require('./rama');
+const axios           = require('axios');
+const kisskh          = require('./kisskh');
+const rama            = require('./rama');
+const drammatica      = require('./drammatica');
+const guardaserie     = require('./guardaserie');
 const { withTimeout } = require('../utils/fetcher');
 const { titleSimilarity } = require('../utils/titleHelper');
 const { findTitleByImdbId } = require('../utils/tmdb');
@@ -33,8 +35,22 @@ const META_TIMEOUT     = Number(process.env.META_TIMEOUT)     || 12_000;
 const STREAM_TIMEOUT   = Number(process.env.STREAM_TIMEOUT)   || 30_000;
 const CINEMETA_TIMEOUT = 5_000;
 
+function _isProviderEnabled(config, providerName) {
+  const p = config?.providers;
+  if (!p || p === 'all') return true;
+  if (Array.isArray(p)) return p.includes(providerName);
+  if (typeof p === 'string') {
+    if (p.includes(',')) return p.split(',').map(s => s.trim()).includes(providerName);
+    return p === providerName;
+  }
+  return false;
+}
+
 function _fallbackMetaForId(id, type = 'series') {
-  const clean = String(id || '').replace(/^(kisskh_|rama_)/, '').replace(/[-_]+/g, ' ').trim();
+  const clean = String(id || '')
+    .replace(/^(kisskh_|rama_|drammatica_|guardaserie_)/, '')
+    .replace(/[-_]+/g, ' ')
+    .trim();
   return {
     id,
     type,
@@ -70,6 +86,16 @@ async function handleCatalog(type, catalogId, extra = {}, config = {}) {
       return { metas };
     }
 
+    if (catalogId === 'drammatica_catalog') {
+      const metas = await withTimeout(drammatica.getCatalog(skip, search, config), CATALOG_TIMEOUT, 'drammatica.getCatalog');
+      return { metas };
+    }
+
+    if (catalogId === 'guardaserie_catalog') {
+      const metas = await withTimeout(guardaserie.getCatalog(skip, search, config), CATALOG_TIMEOUT, 'guardaserie.getCatalog');
+      return { metas };
+    }
+
   } catch (err) {
     log.error(`catalog failed: ${err.message}`, { type, catalogId });
   }
@@ -101,16 +127,33 @@ async function handleMeta(type, id, config = {}) {
 
     if (id.startsWith('rama_')) {
       result = await withTimeout(rama.getMeta(id, config), META_TIMEOUT, 'rama.getMeta');
+      if (!result?.meta) result = { meta: _fallbackMetaForId(id, 'series') };
       const videos = Array.isArray(result?.meta?.videos) ? result.meta.videos.length : 0;
       log.info('meta response', { id, provider: 'rama', hasMeta: !!result?.meta, videos });
-      return result || { meta: null };
+      return result;
+    }
+
+    if (id.startsWith('drammatica_')) {
+      result = await withTimeout(drammatica.getMeta(id, config), META_TIMEOUT, 'drammatica.getMeta');
+      if (!result?.meta) result = { meta: _fallbackMetaForId(id, 'series') };
+      const videos = Array.isArray(result?.meta?.videos) ? result.meta.videos.length : 0;
+      log.info('meta response', { id, provider: 'drammatica', hasMeta: !!result?.meta, videos });
+      return result;
+    }
+
+    if (id.startsWith('guardaserie_')) {
+      result = await withTimeout(guardaserie.getMeta(id, config), META_TIMEOUT, 'guardaserie.getMeta');
+      if (!result?.meta) result = { meta: _fallbackMetaForId(id, 'series') };
+      const videos = Array.isArray(result?.meta?.videos) ? result.meta.videos.length : 0;
+      log.info('meta response', { id, provider: 'guardaserie', hasMeta: !!result?.meta, videos });
+      return result;
     }
 
   } catch (err) {
     log.error(`meta failed: ${err.message}`, { type, id });
-    if (id.startsWith('kisskh_')) {
+    if (id.startsWith('kisskh_') || id.startsWith('rama_') || id.startsWith('drammatica_') || id.startsWith('guardaserie_')) {
       const fallback = { meta: _fallbackMetaForId(id, 'series') };
-      log.warn('meta fallback served after error', { id, provider: 'kisskh' });
+      log.warn('meta fallback served after error', { id });
       return fallback;
     }
   }
@@ -205,12 +248,28 @@ async function _fetchFromImdbId(rawId, type, config) {
   log.info(`title resolved: "${title}"`, { imdbId });
 
   // 2. Search providers for the title, respecting `config.providers`
-  const useKisskh     = !config.providers || config.providers === 'all' || config.providers === 'kisskh';
-  const useRama       = !config.providers || config.providers === 'all' || config.providers === 'rama';
+  const useKisskh = _isProviderEnabled(config, 'kisskh');
+  const useRama = _isProviderEnabled(config, 'rama');
+  const useDrammatica = _isProviderEnabled(config, 'drammatica');
+  const useGuardaserie = _isProviderEnabled(config, 'guardaserie');
 
   const jobs = [];
-  if (useKisskh)      jobs.push(_kisskhStreamsForTitle(title, seasonNum, episodeNum, config).catch(e => { log.warn(`kisskh title search failed: ${e.message}`); return []; }));
-  if (useRama)        jobs.push(_ramaStreamsForTitle(title, episodeNum, config).catch(e => { log.warn(`rama title search failed: ${e.message}`); return []; }));
+  if (useKisskh) jobs.push(_kisskhStreamsForTitle(title, seasonNum, episodeNum, config).catch(e => { log.warn(`kisskh title search failed: ${e.message}`); return []; }));
+  if (useRama) jobs.push(_ramaStreamsForTitle(title, episodeNum, config).catch(e => { log.warn(`rama title search failed: ${e.message}`); return []; }));
+  if (useDrammatica) jobs.push(_drammaticaStreamsForTitle(title, episodeNum, config).catch(e => { log.warn(`drammatica title search failed: ${e.message}`); return []; }));
+  if (useGuardaserie) jobs.push(_guardaserieStreamsForTitle(title, episodeNum, config).catch(e => { log.warn(`guardaserie title search failed: ${e.message}`); return []; }));
+
+  const streamEngine = require('../stream_engine/engine');
+  jobs.push(
+    streamEngine.discover(title, rawId).then(streams => {
+      if (!streams) return [];
+      return streams.map(s => ({
+        name: s.provider ? s.provider.toUpperCase() : 'Engine',
+        title: `[${(s.type || 'stream').toUpperCase()}] ${s.quality} - ${s.size}\nAudio: ${s.audio_lang} | Sub: ${s.subtitles && s.subtitles.join(',') || 'N/A'}`,
+        url: s.url
+      }));
+    }).catch(e => { log.warn(`Engine search failed: ${e.message}`); return []; })
+  );
 
   const results = await Promise.all(jobs);
   return results.flat();
@@ -280,6 +339,48 @@ async function _ramaStreamsForTitle(title, episodeNum, config) {
   }
 
   return withTimeout(rama.getStreams(ep.id, config), STREAM_TIMEOUT, 'rama.getStreams').catch(() => []);
+}
+
+async function _drammaticaStreamsForTitle(title, episodeNum, config) {
+  const SEARCH_TIMEOUT = 10_000;
+  const results = await withTimeout(drammatica.getCatalog(0, title, config), SEARCH_TIMEOUT, 'drammatica.search').catch(() => []);
+  if (!results || !results.length) return [];
+
+  const best = _bestMatch(results, title);
+  if (!best) return [];
+  log.info(`drammatica best match: "${best.name}" (${best.id})`, { title });
+
+  const { meta } = await withTimeout(drammatica.getMeta(best.id, config), META_TIMEOUT, 'drammatica.getMeta').catch(() => ({ meta: null }));
+  if (!meta || !meta.videos || !meta.videos.length) return [];
+
+  const ep = _matchEpisode(meta.videos, 1, episodeNum);
+  if (!ep) {
+    log.warn(`drammatica: no matching episode e${episodeNum} in "${best.name}"`);
+    return [];
+  }
+
+  return withTimeout(drammatica.getStreams(ep.id, config), STREAM_TIMEOUT, 'drammatica.getStreams').catch(() => []);
+}
+
+async function _guardaserieStreamsForTitle(title, episodeNum, config) {
+  const SEARCH_TIMEOUT = 10_000;
+  const results = await withTimeout(guardaserie.getCatalog(0, title, config), SEARCH_TIMEOUT, 'guardaserie.search').catch(() => []);
+  if (!results || !results.length) return [];
+
+  const best = _bestMatch(results, title);
+  if (!best) return [];
+  log.info(`guardaserie best match: "${best.name}" (${best.id})`, { title });
+
+  const { meta } = await withTimeout(guardaserie.getMeta(best.id, config), META_TIMEOUT, 'guardaserie.getMeta').catch(() => ({ meta: null }));
+  if (!meta || !meta.videos || !meta.videos.length) return [];
+
+  const ep = _matchEpisode(meta.videos, 1, episodeNum);
+  if (!ep) {
+    log.warn(`guardaserie: no matching episode e${episodeNum} in "${best.name}"`);
+    return [];
+  }
+
+  return withTimeout(guardaserie.getStreams(ep.id, config), STREAM_TIMEOUT, 'guardaserie.getStreams').catch(() => []);
 }
 
 /**
@@ -393,11 +494,19 @@ async function _fetchFromProvider(id, type, config = {}) {
   if (id.startsWith('rama_')) {
     return withTimeout(rama.getStreams(id, config), STREAM_TIMEOUT, 'rama.getStreams');
   }
+  if (id.startsWith('drammatica_')) {
+    return withTimeout(drammatica.getStreams(id, config), STREAM_TIMEOUT, 'drammatica.getStreams');
+  }
+  if (id.startsWith('guardaserie_')) {
+    return withTimeout(guardaserie.getStreams(id, config), STREAM_TIMEOUT, 'guardaserie.getStreams');
+  }
   // Unknown prefix — try all providers in parallel and merge
   log.warn('unknown id prefix, trying all providers', { id });
   const allResults = await Promise.allSettled([
     withTimeout(kisskh.getStreams(`kisskh_${id}`, config), STREAM_TIMEOUT, 'kisskh.getStreams.fallback'),
     withTimeout(rama.getStreams(`rama_${id}`, config), STREAM_TIMEOUT, 'rama.getStreams.fallback'),
+    withTimeout(drammatica.getStreams(`drammatica_${id}`, config), STREAM_TIMEOUT, 'drammatica.getStreams.fallback'),
+    withTimeout(guardaserie.getStreams(`guardaserie_${id}`, config), STREAM_TIMEOUT, 'guardaserie.getStreams.fallback'),
   ]);
 
   return allResults

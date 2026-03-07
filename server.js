@@ -655,12 +655,12 @@ document.addEventListener('DOMContentLoaded', function() {
         var cMode = document.getElementById('c_mode') ? document.getElementById('c_mode').checked : false;
         
         var c = {
-            proxyUrl: pUrl,
-            mfpUrl: mUrl,
-            providers: ['kisskh', 'rama'],
-            hideCats: hCat,
-            cinemetaMode: cMode,
-            tmdbKey: '04a60155a01ff61453266bd9a367448e'
+            px: pUrl,
+            mfp: mUrl,
+            pv: 'a',
+            hc: hCat ? 1 : 0,
+            cm: cMode ? 1 : 0,
+            tm: '6e0a84ca7b324763793422a6656d34ff'
         };
         
         // Base64 configuration string
