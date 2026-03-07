@@ -620,42 +620,58 @@ function buildPage(req, host) {
   </div>
 
 <script>
-(function(){
-  function b64e(str) {
-    return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function(a,p){
-      return String.fromCharCode(parseInt(p, 16));
-    })).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-  }
-  var frm = document.getElementById('cfgForm');
-  frm.onsubmit = function(e) {
-    e.preventDefault();
-    var c = {
-      proxyUrl: document.getElementById('p_url').value.trim(),
-      mfpUrl: document.getElementById('m_url').value.trim(),
-      providers: ['kisskh', 'rama'],
-      hideCats: document.getElementById('h_cat').checked,
-      cinemetaMode: document.getElementById('c_mode').checked,
-      tmdbKey: '04a60155a01ff61453266bd9a367448e'
-    };
-    var enc = b64e(JSON.stringify(c));
-    var base = window.location.origin;
-    var finalUrl = enc ? base + '/' + enc + '/manifest.json' : base + '/manifest.json';
-    var stremioUrl = finalUrl.replace(/^https?:/, 'stremio:');
+document.addEventListener('DOMContentLoaded', function() {
+    var frm = document.getElementById('cfgForm');
+    if (!frm) return;
     
-    document.getElementById('res').classList.add('show');
-    document.getElementById('udisp').textContent = finalUrl;
-    document.getElementById('_actInst').href = stremioUrl;
-    
-    document.getElementById('_actCp').onclick = function(){
-      navigator.clipboard.writeText(finalUrl).then(function(){
-        var msg = document.getElementById('okmsg');
-        msg.style.display = 'block';
-        setTimeout(function(){ msg.style.display='none'; }, 3000);
-      });
-    };
-  };
-})();
-</script>
+    // Prevent default form submission and generate correct URL
+    frm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        function b64e(str) {
+            return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function(a,p){
+                return String.fromCharCode(parseInt(p, 16));
+            })).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+        }
+        
+        var pUrl = document.getElementById('p_url') ? document.getElementById('p_url').value.trim() : '';
+        var mUrl = document.getElementById('m_url') ? document.getElementById('m_url').value.trim() : '';
+        var hCat = document.getElementById('h_cat') ? document.getElementById('h_cat').checked : false;
+        var cMode = document.getElementById('c_mode') ? document.getElementById('c_mode').checked : false;
+        
+        var c = {
+            proxyUrl: pUrl,
+            mfpUrl: mUrl,
+            providers: ['kisskh', 'rama'],
+            hideCats: hCat,
+            cinemetaMode: cMode,
+            tmdbKey: '04a60155a01ff61453266bd9a367448e'
+        };
+        
+        // Base64 configuration string
+        var enc = b64e(JSON.stringify(c));
+        var base = window.location.origin;
+        var finalUrl = enc ? (base + '/' + enc + '/manifest.json') : (base + '/manifest.json');
+        
+        // Translate format for stremio apps
+        var stremioUrl = finalUrl.replace(/^https?:/, 'stremio:');
+        
+        var res = document.getElementById('res');
+        res.style.display = 'block';
+        res.classList.add('show');
+        
+        document.getElementById('udisp').textContent = finalUrl;
+        document.getElementById('_actInst').href = stremioUrl;
+        
+        document.getElementById('_actCp').onclick = function(){
+            navigator.clipboard.writeText(finalUrl).then(function(){
+                var msg = document.getElementById('okmsg');
+                msg.style.display = 'block';
+                setTimeout(function(){ msg.style.display='none'; }, 3000);
+            });
+        };
+    });
+});</script>
 </body>
 </html>`;
 }
