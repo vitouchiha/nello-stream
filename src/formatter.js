@@ -59,7 +59,7 @@ function hasHeaders(headers) {
 }
 
 function shouldProxyForWebPlayback(url, headers, addonBaseUrl) {
-    if (!addonBaseUrl || !hasHeaders(headers)) return false;
+    if (!addonBaseUrl) return false;
     if (isHlsProxyPlaybackUrl(url)) return false;
     return !isMp4Url(url);
 }
