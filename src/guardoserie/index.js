@@ -582,7 +582,14 @@ async function getStreams(id, type, season, episode, providerContext = null) {
             }
         }
 
-        return streams;
+        // Deduplicate streams by provider name + quality to avoid duplicate mirrors
+        const uniqueKeys = new Set();
+        return streams.filter(s => {
+            const key = `${s.name}-${s.qualityTag || s.quality || 'HD'}`;
+            if (uniqueKeys.has(key)) return false;
+            uniqueKeys.add(key);
+            return true;
+        });
     } catch (e) {
         console.error(`[Guardoserie] Error:`, e);
         return [];

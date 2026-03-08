@@ -719,11 +719,12 @@ function getStreams(id, type, season, episode, providerContext = null) {
       const nestedResults = yield Promise.all(streamPromises);
       let results = (yield Promise.all(nestedResults.flat())).filter(Boolean);
       
-      // Deduplicate streams by URL
-      const uniqueUrls = new Set();
+      // Deduplicate streams by provider name + quality to avoid duplicate SuperVideo/Mixdrop mirrors
+      const uniqueKeys = new Set();
       results = results.filter(s => {
-          if (!s.url || uniqueUrls.has(s.url)) return false;
-          uniqueUrls.add(s.url);
+          const key = `${s.name}-${s.quality}`;
+          if (uniqueKeys.has(key)) return false;
+          uniqueKeys.add(key);
           return true;
       });
 
