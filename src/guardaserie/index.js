@@ -64,6 +64,61 @@ function getQualityFromName(qualityStr) {
   return 'Unknown';
 }
 
+function normalizeEpisodeLink(rawLink) {
+  const value = String(rawLink || '').trim();
+  if (!value || value === '#') return null;
+  if (value.startsWith('//')) return `https:${value}`;
+  if (value.startsWith('/')) return `${getGuardaserieBaseUrl()}${value}`;
+  if (/^https?:/i.test(value)) return value;
+  return null;
+}
+
+function collectEpisodeLinks(showHtml, season, episode) {
+  const links = new Set();
+  const episodeIds = [
+    `serie-${season}_${episode}`,
+    `serie-${season}_${String(episode).padStart(2, '0')}`,
+  ];
+
+  for (const episodeId of episodeIds) {
+    const blockRegex = new RegExp(`<li[^>]*>[\\s\\S]*?<a[^>]+id="${episodeId}"[\\s\\S]*?<\\/li>`, "i");
+    const blockMatch = showHtml.match(blockRegex);
+    if (!blockMatch) continue;
+    for (const match of blockMatch[0].matchAll(/data-link="([^"]+)"/g)) {
+      const normalized = normalizeEpisodeLink(match[1]);
+      if (normalized) links.add(normalized);
+    }
+    if (links.size > 0) return Array.from(links);
+  }
+
+  const episodeStr = `${season}x${episode}`;
+  const episodeStrPadded = `${season}x${String(episode).padStart(2, '0')}`;
+  let episodeRegex = new RegExp(`data-num="${episodeStr}"`, "i");
+  let episodeMatch = episodeRegex.exec(showHtml);
+
+  if (!episodeMatch) {
+    episodeRegex = new RegExp(`data-num="${episodeStrPadded}"`, "i");
+    episodeMatch = episodeRegex.exec(showHtml);
+  }
+
+  if (!episodeMatch) return [];
+
+  const searchFromIndex = episodeMatch.index;
+  const mirrorsStartIndex = showHtml.indexOf('<div class="mirrors">', searchFromIndex);
+  if (mirrorsStartIndex === -1) return [];
+
+  const mirrorsEndIndex = showHtml.indexOf("</div>", mirrorsStartIndex);
+  if (mirrorsEndIndex === -1) return [];
+
+  const mirrorsHtml = showHtml.substring(mirrorsStartIndex, mirrorsEndIndex);
+  for (const match of mirrorsHtml.matchAll(/data-link="([^"]+)"/g)) {
+    const normalized = normalizeEpisodeLink(match[1]);
+    if (normalized) links.add(normalized);
+  }
+
+  return Array.from(links);
+}
+
 function getImdbId(tmdbId, type) {
   return __async(this, null, function* () {
     try {
@@ -567,47 +622,10 @@ function getStreams(id, type, season, episode, providerContext = null) {
       season = effectiveSeason;
       episode = effectiveEpisode;
       const episodeStr = `${season}x${episode}`;
-      const episodeStrPadded = `${season}x${episode.toString().padStart(2, '0')}`;
-
-      let episodeRegex = new RegExp(`data-num="${episodeStr}"`, "i");
-      let episodeMatch = episodeRegex.exec(showHtml);
-
-      if (!episodeMatch) {
-        episodeRegex = new RegExp(`data-num="${episodeStrPadded}"`, "i");
-        episodeMatch = episodeRegex.exec(showHtml);
-      }
-
-      // Also try to find episode in text content if data-num is missing or different format
-      if (!episodeMatch && season === 1) {
-        // Guardaserie might use "Episodio X" or just "X"
-        // But usually they have the data-num attribute for the player loader
-
-        // Try to find text "1x250"
-        const textRegex = new RegExp(`${season}x${episode}`, "i");
-        if (textRegex.test(showHtml)) {
-          console.log(`[Guardaserie] Found text match for ${season}x${episode}, but no data-num. Scanning for links...`);
-          // If we find text match, we might need to parse differently.
-          // But for now let's just log.
-        }
-      }
-
-      if (!episodeMatch) {
+      const links = collectEpisodeLinks(showHtml, season, episode);
+      if (!links.length) {
         console.log(`[Guardaserie] Episode ${episodeStr} not found`);
         return [];
-      }
-      const searchFromIndex = episodeMatch.index;
-      const mirrorsStartIndex = showHtml.indexOf('<div class="mirrors">', searchFromIndex);
-      if (mirrorsStartIndex === -1) {
-        console.log("[Guardaserie] Mirrors div not found");
-        return [];
-      }
-      const mirrorsEndIndex = showHtml.indexOf("</div>", mirrorsStartIndex);
-      const mirrorsHtml = showHtml.substring(mirrorsStartIndex, mirrorsEndIndex);
-      const linkRegex = /data-link="([^"]+)"/g;
-      const links = [];
-      let linkMatch;
-      while ((linkMatch = linkRegex.exec(mirrorsHtml)) !== null) {
-        links.push(linkMatch[1]);
       }
       console.log(`[Guardaserie] Found ${links.length} potential links`);
       const streamPromises = links.map((link) => __async(null, null, function* () {
