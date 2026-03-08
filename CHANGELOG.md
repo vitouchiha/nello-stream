@@ -491,6 +491,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versi
 
 ---
 
+## [3.0.12] - 2026-03-08
+
+### Changed
+- Il formatter proxy ora anche gli stream HLS/non-MP4 senza header custom quando `addonBaseUrl` e disponibile, invece di lasciare molti mirror EasyStreams come `notWebReady`.
+- Questo rende web-ready anche i `Guardaserie - SuperVideo` gia estratti correttamente dal backend.
+
+---
 ## [3.0.11] - 2026-03-08
 
 ### Changed
