@@ -504,6 +504,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) Â· Ver
 
 ---
 
+## [3.0.17] - 2026-03-08
+
+### Changed
+- Release sync automatica: README, dashboard addon e smoke test remoto Vercel allineati.
+
+---
 ## [3.0.14] - 2026-03-08
 
 ### Changed

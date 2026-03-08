@@ -184,6 +184,28 @@ async function handleStream(type, id, config = {}) {
   // Cinemeta / IMDB ID — e.g. "tt1234567:1:1"
   if (id.startsWith('tt')) {
     streams = await _fetchFromImdbId(id, type, config);
+  } else if (id.startsWith('tmdb:') || id.startsWith('kitsu:')) {
+    const useEasystreams = _isAnyProviderEnabled(config, [
+      'all', 'easystreams', 'streamingcommunity', 'guardahd', 'guardaserie', 'guardoserie', 'animeunity', 'animeworld', 'animesaturn'
+    ]);
+    
+    if (useEasystreams) {
+      const parts = id.split(':');
+      let baseId, seasonNum = null, episodeNum = null;
+      if (id.startsWith('tmdb:')) {
+        baseId = `tmdb:${parts[1]}`;
+        seasonNum = parts[2] ? Number(parts[2]) : null;
+        episodeNum = parts[3] ? Number(parts[3]) : null;
+      } else {
+        baseId = `kitsu:${parts[1]}`;
+        seasonNum = 1; // Kitsu IDs typically treat movies/series seasons as 1 unless mapped.
+        episodeNum = parts[2] ? Number(parts[2]) : 1;
+      }
+
+      streams = await easystreams.getStreams(
+        baseId, type === 'movie' ? 'movie' : 'series', seasonNum, episodeNum, config
+      );
+    }
   } else {
     const results = await Promise.allSettled([
       _fetchFromProvider(id, type, config),
