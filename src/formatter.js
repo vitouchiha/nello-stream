@@ -161,10 +161,16 @@ function formatStream(stream, providerName) {
 
     behaviorHints.notWebReady = shouldSetNotWebReady(finalUrl, finalHeaders, behaviorHints);
 
-    const finalName = pName;
+    const providerLabel = pName || (typeof providerName === 'string' ? providerName.charAt(0).toUpperCase() + providerName.slice(1) : 'Provider');
+    
+    // finalName is the resolution/quality displayed in bold. Like EasyStreams.
+    const finalName = quality && quality !== 'Unknow' ? `🚀 ${quality}` : `🚀 ${providerLabel}`;
+    
+    // finalTitle is the rich multi-line description
     let finalTitle = `📁 ${stream.title || 'Stream'}`;
-    if (desc) finalTitle += ` | ${desc}`;
-    if (language) finalTitle += ` | ${language}`;
+    finalTitle += `\n📡 ${providerLabel}`;
+    if (language) finalTitle += `\n🗣 ${language} 🔍 StreamFusion`;
+    if (desc) finalTitle += `\n📝 ${desc}`;
 
     const responseStream = {
         url: finalUrl,
