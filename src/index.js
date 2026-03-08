@@ -37,7 +37,7 @@ async function fetchMappingByRoute(route, value, season) {
     if (Number.isInteger(season) && season >= 0) {
         url += `?season=${season}`;
     }
-    return fetchJsonWithTimeout(url, 2000);
+    return fetchJsonWithTimeout(url, 6000);
 }
 
 async function fetchMappingByKitsu(kitsuId, season) {
@@ -48,7 +48,7 @@ async function fetchMappingByKitsu(kitsuId, season) {
     if (Number.isInteger(season) && season >= 0) {
         url += `?season=${season}`;
     }
-    return fetchJsonWithTimeout(url, 2000);
+    return fetchJsonWithTimeout(url, 6000);
 }
 
 function applyMappingHintsToContext(context, payload) {
@@ -150,23 +150,25 @@ async function resolveProviderRequestContext(id, type, season, seasonProvided = 
                 const byKitsu = await fetchMappingByKitsu(context.kitsuId, context.requestedSeason);
                 if (byKitsu) applyMappingHintsToContext(context, byKitsu);
             }
-        } else if (/^tt\d+$/i.test(idStr)) {
+        } else if (/^tt\d+$/i.test(idStr.split(':')[0])) {
+            const rawImdbId = idStr.split(':')[0];
             context.idType = 'imdb';
-            context.imdbId = idStr;
-            const byImdb = await fetchMappingByRoute('imdb', idStr, context.requestedSeason);
+            context.imdbId = rawImdbId;
+            const byImdb = await fetchMappingByRoute('imdb', rawImdbId, context.requestedSeason);
             if (byImdb) {
                 applyMappingHintsToContext(context, byImdb);
             }
 
             if (!context.tmdbId) {
-                const fallbackTmdbId = await fetchTmdbIdFromImdb(idStr, String(type || '').toLowerCase());
+                const fallbackTmdbId = await fetchTmdbIdFromImdb(rawImdbId, String(type || '').toLowerCase());
                 if (fallbackTmdbId !== null && fallbackTmdbId !== undefined) {
                     context.tmdbId = String(fallbackTmdbId);
                 }
             }
-        } else if (/^\d+$/.test(idStr)) {
+        } else if (/^\d+$/.test(idStr.split(':')[0])) {
+            const rawTmdbId = idStr.split(':')[0];
             context.idType = 'tmdb-numeric';
-            context.tmdbId = idStr;
+            context.tmdbId = rawTmdbId;
             if (context.tmdbId) {
                 const byTmdb = await fetchMappingByRoute('tmdb', context.tmdbId, context.requestedSeason);
                 if (byTmdb) applyMappingHintsToContext(context, byTmdb);
