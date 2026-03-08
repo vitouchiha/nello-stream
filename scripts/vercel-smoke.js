@@ -90,6 +90,19 @@ function manifestSupportsImdbStreams(manifest) {
   return Boolean(topLevel || streamResource);
 }
 
+function buildLegacyConfigToken() {
+  return Buffer
+    .from(JSON.stringify({
+      px: '',
+      mfp: '',
+      pv: 'a',
+      hc: 0,
+      cm: 1,
+      tm: '6e0a84ca7b324763793422a6656d34ff',
+    }))
+    .toString('base64url');
+}
+
 async function runOnce(baseUrl) {
   const expectedVersion = readLocalManifestVersion();
   const versionedPrefix = expectedVersion ? `/install/v${expectedVersion}` : '';
@@ -121,6 +134,31 @@ async function runOnce(baseUrl) {
       `${versionedPrefix}/manifest.json version mismatch`
     );
     console.log(`OK ${versionedPrefix}/manifest.json`);
+
+    const configuredPrefix = `/${buildLegacyConfigToken()}${versionedPrefix}`;
+    const configuredManifest = await fetchJson(baseUrl, `${configuredPrefix}/manifest.json`);
+    assert(configuredManifest.ok, `${configuredPrefix}/manifest.json returned HTTP ${configuredManifest.status}`);
+    assert(
+      configuredManifest.json && configuredManifest.json.version === expectedVersion,
+      `${configuredPrefix}/manifest.json version mismatch`
+    );
+    assert(
+      configuredManifest.json.id !== manifest.json.id,
+      `${configuredPrefix}/manifest.json must expose a distinct configured addon id`
+    );
+    assert(
+      String(configuredManifest.json.name || '').includes('Config'),
+      `${configuredPrefix}/manifest.json must expose a configured addon name`
+    );
+    console.log(`OK ${configuredPrefix}/manifest.json -> ${configuredManifest.json.id}`);
+
+    const versionedConfigure = await fetchText(baseUrl, `${versionedPrefix}/configure`);
+    assert(versionedConfigure.ok, `${versionedPrefix}/configure returned HTTP ${versionedConfigure.status}`);
+    console.log(`OK ${versionedPrefix}/configure`);
+
+    const configuredConfigure = await fetchText(baseUrl, `${configuredPrefix}/configure`);
+    assert(configuredConfigure.ok, `${configuredPrefix}/configure returned HTTP ${configuredConfigure.status}`);
+    console.log(`OK ${configuredPrefix}/configure`);
   }
 
   const status = await fetchJson(baseUrl, '/api/status');

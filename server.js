@@ -132,9 +132,13 @@ function isDefaultManifestConfig(config = {}) {
   return JSON.stringify(normalizeManifestConfig(config)) === JSON.stringify(normalizeManifestConfig(DEFAULT_CONFIG));
 }
 
-function buildManifestId(config = {}) {
+function shouldUseConfiguredManifestIdentity(config = {}, options = {}) {
+  return Boolean(options.forceConfiguredIdentity) || !isDefaultManifestConfig(config);
+}
+
+function buildManifestId(config = {}, options = {}) {
   const baseId = String(manifest.id || 'org.nello.drama').trim() || 'org.nello.drama';
-  if (isDefaultManifestConfig(config)) return baseId;
+  if (!shouldUseConfiguredManifestIdentity(config, options)) return baseId;
   const digest = crypto
     .createHash('sha1')
     .update(JSON.stringify(normalizeManifestConfig(config)))
@@ -143,8 +147,8 @@ function buildManifestId(config = {}) {
   return `${baseId}.cfg${digest}`;
 }
 
-function buildManifestName(config = {}) {
-  return isDefaultManifestConfig(config) ? manifest.name : `${manifest.name} Config`;
+function buildManifestName(config = {}, options = {}) {
+  return shouldUseConfiguredManifestIdentity(config, options) ? `${manifest.name} Config` : manifest.name;
 }
 
 function copyProxyResponseHeaders(res, headers = {}) {
@@ -284,7 +288,7 @@ app.get(HLS_PROXY_PATH, async (req, res) => {
  *     on Cinemeta items (getMeta returns null for tt* — Stremio must NOT call us)
  *   • stream handles kisskh_*, rama_*, AND tt* → Cinemeta → KissKH/Rama flow works
  */
-function buildManifest(config) {
+function buildManifest(config, options = {}) {
   const { hideCatalogs = false, providers = 'all', cinemeta = false } = config || {};
 
   // Filter catalogs by provider setting
@@ -301,8 +305,8 @@ function buildManifest(config) {
     // Default: simple format, no Cinemeta support
     return {
       ...manifest,
-      id: buildManifestId(config),
-      name: buildManifestName(config),
+      id: buildManifestId(config, options),
+      name: buildManifestName(config, options),
       catalogs: hideCatalogs ? [] : catalogs,
     };
   }
@@ -313,8 +317,8 @@ function buildManifest(config) {
 
   return {
     ...manifest,
-    id: buildManifestId(config),
-    name: buildManifestName(config),
+    id: buildManifestId(config, options),
+    name: buildManifestName(config, options),
     catalogs:   hideCatalogs ? [] : catalogs,
     types:      streamTypes,
     idPrefixes: streamPrefixes,
@@ -337,7 +341,8 @@ app.get([
   '/:config/install/:release/manifest.json',
 ], (req, res) => {
   const config = cfgFrom(req.params.config);
-  stremioJson(res, buildManifest(config));
+  const forceConfiguredIdentity = Boolean(req.params.config && isValidConfig(req.params.config));
+  stremioJson(res, buildManifest(config, { forceConfiguredIdentity }));
 });
 
 // Catalog — handles optional /skip=N extra segment
@@ -836,7 +841,14 @@ app.get('/', (req, res) => {
 
 // Stremio "Configure" button opens: transportUrl.replace('/manifest.json','') + '/configure'
 // (some Stremio versions append /configure explicitly — handle both)
-app.get(['/configure', '/:config/configure'], (req, res, next) => {
+app.get([
+  '/configure',
+  '/:config/configure',
+  '/install/:release',
+  '/install/:release/configure',
+  '/:config/install/:release',
+  '/:config/install/:release/configure',
+], (req, res, next) => {
   const raw = req.params.config;
   if (raw && !isValidConfig(raw)) return next();
   const cfg = raw ? decodeConfig(raw) : null;

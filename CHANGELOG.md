@@ -491,6 +491,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versi
 
 ---
 
+## [3.0.13] - 2026-03-08
+
+### Fixed
+- Le installazioni configurate hanno ora sempre un `manifest.id` distinto dal manifest base, anche quando la config coincide con i default. Questo evita collisioni tra addon base e addon configurato in Stremio Web.
+- Le route `/install/vX.Y.Z`, `/install/vX.Y.Z/configure` e le varianti `/:config/install/vX.Y.Z/...` ora servono correttamente la landing/config page. Il pulsante Configure di Stremio non cade piu su `404`.
+
+---
 ## [3.0.12] - 2026-03-08
 
 ### Changed
