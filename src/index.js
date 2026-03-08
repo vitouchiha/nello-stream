@@ -188,61 +188,50 @@ async function getStreams(id, type, season, episode, config = {}) {
         selectedProviders.push('streamingcommunity', 'guardahd', 'guardoserie');
     }
 
-    for (const providerName of [...new Set(selectedProviders)]) {
-        if (providerName === 'streamingcommunity') {
-            promises.push(
-                streamingcommunity.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext)
-                    .then(s => ({ provider: 'StreamingCommunity', streams: s, status: 'fulfilled' }))
-                    .catch(e => ({ provider: 'StreamingCommunity', error: e, status: 'rejected' }))
-            );
-            continue;
-        }
-        if (providerName === 'guardahd') {
-            promises.push(
-                guardahd.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext)
-                    .then(s => ({ provider: 'GuardaHD', streams: s, status: 'fulfilled' }))
-                    .catch(e => ({ provider: 'GuardaHD', error: e, status: 'rejected' }))
-            );
-            continue;
-        }
-        if (providerName === 'guardaserie') {
-            promises.push(
-                guardaserie.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext)
-                    .then(s => ({ provider: 'Guardaserie', streams: s, status: 'fulfilled' }))
-                    .catch(e => ({ provider: 'Guardaserie', error: e, status: 'rejected' }))
-            );
-            continue;
-        }
-        if (providerName === 'animeunity') {
-            promises.push(
-                animeunity.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext)
-                    .then(s => ({ provider: 'AnimeUnity', streams: s, status: 'fulfilled' }))
-                    .catch(e => ({ provider: 'AnimeUnity', error: e, status: 'rejected' }))
-            );
-            continue;
-        }
-        if (providerName === 'animeworld') {
-            promises.push(
-                animeworld.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext)
-                    .then(s => ({ provider: 'AnimeWorld', streams: s, status: 'fulfilled' }))
-                    .catch(e => ({ provider: 'AnimeWorld', error: e, status: 'rejected' }))
-            );
-            continue;
-        }
-        if (providerName === 'animesaturn') {
-            promises.push(
-                animesaturn.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext)
-                    .then(s => ({ provider: 'AnimeSaturn', streams: s, status: 'fulfilled' }))
-                    .catch(e => ({ provider: 'AnimeSaturn', error: e, status: 'rejected' }))
-            );
-            continue;
-        }
-        if (providerName === 'guardoserie') {
-            promises.push(
-                guardoserie.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext)
-                    .then(s => ({ provider: 'Guardoserie', streams: s, status: 'fulfilled' }))
-                    .catch(e => ({ provider: 'Guardoserie', error: e, status: 'rejected' }))
-            );
+// Utility to set timeout per provider so one slow provider doesn't block the rest
+      const withProviderTimeout = (providerName, promise, timeoutMs = 12000) => {
+          let timeoutHandle;
+          const timeoutPromise = new Promise((resolve) => {
+              timeoutHandle = setTimeout(() => {
+                  console.warn(`[Easystreams] Provider ${providerName} timed out after ${timeoutMs}ms`);
+                  resolve({ provider: providerName, streams: [], status: 'fulfilled' });
+              }, timeoutMs);
+          });
+
+          return Promise.race([
+              promise.then(s => ({ provider: providerName, streams: s, status: 'fulfilled' }))
+                     .catch(e => ({ provider: providerName, error: e, status: 'rejected' })),
+              timeoutPromise
+          ]).finally(() => clearTimeout(timeoutHandle));
+      };
+
+      for (const providerName of [...new Set(selectedProviders)]) {
+          if (providerName === 'streamingcommunity') {
+              promises.push(withProviderTimeout('StreamingCommunity', streamingcommunity.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext), 14000));
+              continue;
+          }
+          if (providerName === 'guardahd') {
+              promises.push(withProviderTimeout('GuardaHD', guardahd.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext)));
+              continue;
+          }
+          if (providerName === 'guardaserie') {
+              promises.push(withProviderTimeout('Guardaserie', guardaserie.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext)));
+              continue;
+          }
+          if (providerName === 'animeunity') {
+              promises.push(withProviderTimeout('AnimeUnity', animeunity.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext)));
+              continue;
+          }
+          if (providerName === 'animeworld') {
+              promises.push(withProviderTimeout('AnimeWorld', animeworld.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext)));
+              continue;
+          }
+          if (providerName === 'animesaturn') {
+              promises.push(withProviderTimeout('AnimeSaturn', animesaturn.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext)));
+              continue;
+          }
+          if (providerName === 'guardoserie') {
+              promises.push(withProviderTimeout('Guardoserie', guardoserie.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext)));
         }
     }
 
