@@ -1,3 +1,6 @@
+## [3.0.19] - 2026-03-09
+- Feat: Aggiunto formatter globale con tema Cane per tutti i provider.
+
 ## [3.0.18] - 2026-03-09
 
 ### Fixed
@@ -649,3 +652,4 @@ _Next planned improvements:_
 ---
 
 
+dummy
