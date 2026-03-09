@@ -1,4 +1,6 @@
 const guardahd = require('./guardahd/index');
+const toonitalia = require('./toonitalia/index');
+const loonex = require('./loonex/index');
 const guardaserie = require('./guardaserie/index');
 const guardoserie = require('./guardoserie/index');
 const streamingcommunity = require('./streamingcommunity/index');
@@ -240,24 +242,24 @@ async function getStreams(id, type, season, episode, config = {}) {
     const selectedProviders = [];
     if (normalizedType === 'movie') {
         if (likelyAnime || isKitsuRequest) {
-            selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'guardoserie', 'streamingcommunity', 'guardahd');
+            selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'guardoserie', 'streamingcommunity', 'guardahd');
         } else {
-            selectedProviders.push('streamingcommunity', 'guardahd', 'guardoserie');
+            selectedProviders.push('streamingcommunity', 'guardahd', 'guardoserie', 'toonitalia', 'loonex');
         }
     } else if (normalizedType === 'anime') {
-        selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'guardaserie', 'guardoserie');
+        selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'guardaserie', 'guardoserie');
     } else if (normalizedType === 'tv' || normalizedType === 'series') {
         if (likelyAnime || isKitsuRequest) {
-            selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'guardaserie', 'guardoserie', 'streamingcommunity');
+            selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'guardaserie', 'guardoserie', 'streamingcommunity');
         } else {
             if (isImdbRequest) {
-                selectedProviders.push('streamingcommunity', 'guardaserie', 'guardoserie');
+                selectedProviders.push('streamingcommunity', 'guardaserie', 'guardoserie', 'toonitalia', 'loonex');
             } else {
-                selectedProviders.push('streamingcommunity', 'guardaserie', 'guardoserie', 'animeunity', 'animeworld', 'animesaturn');
+                selectedProviders.push('streamingcommunity', 'guardaserie', 'guardoserie', 'animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex');
             }
         }
     } else {
-        selectedProviders.push('streamingcommunity', 'guardahd', 'guardoserie');
+        selectedProviders.push('streamingcommunity', 'guardahd', 'guardoserie', 'toonitalia', 'loonex');
     }
 
 // Utility to set timeout per provider so one slow provider doesn't block the rest
@@ -302,7 +304,15 @@ async function getStreams(id, type, season, episode, config = {}) {
               promises.push(withProviderTimeout('AnimeSaturn', animesaturn.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext)));
               continue;
           }
-          if (providerName === 'guardoserie') {
+          if (providerName === 'toonitalia') {
+                promises.push(withProviderTimeout('ToonItalia', toonitalia.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext)));
+                continue;
+            }
+            if (providerName === 'loonex') {
+                promises.push(withProviderTimeout('Loonex', loonex.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext)));
+                continue;
+            }
+            if (providerName === 'guardoserie') {
               promises.push(withProviderTimeout('Guardoserie', guardoserie.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext)));
         }
     }

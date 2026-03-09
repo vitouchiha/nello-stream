@@ -6,6 +6,7 @@ const { formatStream } = require("../formatter.js");
 const { checkQualityFromPlaylist } = require("../quality_helper.js");
 const { getProviderUrl } = require("../provider_urls.js");
 const { createTimeoutSignal } = require("../fetch_helper.js");
+const { fetchWithCloudscraper } = require("../utils/fetcher.js");
 
 function getUnityBaseUrl() {
   return getProviderUrl("animeunity");
@@ -301,26 +302,42 @@ async function fetchResource(url, options = {}) {
   if (running) return running;
 
   const task = (async () => {
-    const response = await fetchWithTimeout(
-      url,
-      {
-        method,
-        headers: {
-          "user-agent": USER_AGENT,
-          "accept-language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
-          ...headers
+    let payload;
+
+    if (method === "GET" && !body) {
+      const referer = headers.referer || getUnityBaseUrl();
+      const htmlText = await fetchWithCloudscraper(url, {
+        retries: 2,
+        timeout: timeoutMs,
+        referer: referer
+      });
+      if (htmlText === null) {
+        throw new Error(`HTTP 403/Cloudflare failure for ${url}`);
+      }
+      
+      payload = as === "json" ? JSON.parse(htmlText) : htmlText;
+    } else {
+      const response = await fetchWithTimeout(
+        url,
+        {
+          method,
+          headers: {
+            "user-agent": USER_AGENT,
+            "accept-language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
+            ...headers
+          },
+          body,
+          redirect: "follow"
         },
-        body,
-        redirect: "follow"
-      },
-      timeoutMs
-    );
+        timeoutMs
+      );
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
+      }
+
+      payload = as === "json" ? await response.json() : await response.text();
     }
-
-    const payload = as === "json" ? await response.json() : await response.text();
     if (ttlMs > 0) setCached(caches.http, key, payload, ttlMs);
     return payload;
   })();

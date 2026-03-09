@@ -60,12 +60,12 @@ async function extractSuperVideo(url, options = {}) {
         proxyUrl,
       });
       if (!html || html.includes("Cloudflare") || html.includes("Just a moment")) {
-        console.log(`[Extractors] SuperVideo cloudscraper fallback failed, retrying with browser`);
-        html = await fetchWithBrowser(embedUrl, refererBase);
-        if (!html || html.includes("Cloudflare") || html.includes("Just a moment")) {
-          console.log(`[Extractors] SuperVideo browser fallback failed`);
-          return null;
-        }
+        console.log(`[Extractors] SuperVideo cloudscraper fallback failed, returning external url to save Browserless quota`);
+        return {
+           url: embedUrl,
+           name: 'SuperVideo',
+           isExternal: true
+        };
       }
     }
 
@@ -106,7 +106,7 @@ async function fetchWithBrowser(url, refererBase) {
       waitUntil: 'domcontentloaded',
       timeout: 25_000,
     });
-    await page.waitForTimeout(2_500).catch(() => {});
+    await new Promise(r => setTimeout(r, 2500));
     const html = await page.content();
     await page.close().catch(() => {});
     return html;

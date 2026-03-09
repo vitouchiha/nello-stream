@@ -4,6 +4,7 @@ const {
   normalizeExtractorUrl,
 } = require('./common');
 const { checkQualityFromPlaylist } = require('../quality_helper.js');
+const { fetchWithCloudscraper } = require('../utils/fetcher');
 
 function extractScriptBlocks(html) {
   const blocks = [];
@@ -92,6 +93,7 @@ async function extractVixCloud(url) {
     if (!embedUrl) return [];
 
     const referer = getRefererBase(embedUrl, 'https://vixcloud.co/');
+    let html = null;
     const response = await fetch(embedUrl, {
       headers: {
         "User-Agent": USER_AGENT,
@@ -99,8 +101,21 @@ async function extractVixCloud(url) {
       }
     });
 
-    if (!response.ok) return [];
-    const html = await response.text();
+    if (response.ok) {
+      html = await response.text();
+    }
+    
+    if (!html || html.includes("Cloudflare") || response.status === 403) {
+      console.log(`[Extractors] VixCloud returned 403/Cloudflare, retrying with cloudscraper`);
+      html = await fetchWithCloudscraper(embedUrl, {
+        retries: 1,
+        timeout: 12000,
+        referer: referer
+      });
+    }
+
+    if (!html) return [];
+
     const canPlayFhd = /window\.canPlayFHD\s*=\s*true/i.test(html);
     const candidates = [html, ...extractScriptBlocks(html)];
 
