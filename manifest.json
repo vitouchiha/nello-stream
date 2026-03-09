@@ -1,15 +1,15 @@
 {
   "id": "org.nello.drama",
   "version": "3.0.19",
-  "name": "Nello Drama",
-  "description": "Il motore di aggregazione definitivo per i Drama in streaming su Stremio con sub ITA. Ottimizzato per Vercel.",
-  "logo": "https://i.imgur.com/i7VdVv7.png",
-  "background": "https://i.imgur.com/mtsxMk7.jpeg",
+  "name": "Nello Stream",
+  "description": "Il motore di aggregazione definitivo ispirato a Nello 🐶 per i Drama in streaming su Stremio con sub ITA.",
+  "logo": "https://raw.githubusercontent.com/vitouchiha/streamfusion-mail/master/public/nello_logo.png",
+  "background": "https://raw.githubusercontent.com/vitouchiha/streamfusion-mail/master/public/nello_bg.jpg",
   "catalogs": [
     {
       "type": "series",
       "id": "kisskh_catalog",
-      "name": "Nello: Asian Drama",
+      "name": "Nello 🐾: Asian Drama",
       "extra": [
         {
           "name": "search",
@@ -24,7 +24,7 @@
     {
       "type": "series",
       "id": "rama_catalog",
-      "name": "Nello: Korean Drama",
+      "name": "Nello 🐾: Korean Drama",
       "extra": [
         {
           "name": "search",

@@ -24,6 +24,7 @@ require('dotenv').config();
 const axios = require('axios');
 const crypto = require('crypto');
 const express  = require('express');
+const path = require('path');
 const manifest = require('./manifest.json');
 const { decodeConfig, isValidConfig, DEFAULT_CONFIG } = require('./src/utils/config');
 const { getProxyAgent, randomUA } = require('./src/utils/fetcher');
@@ -41,6 +42,10 @@ const log = createLogger('server');
 
 const app = express();
 app.set('trust proxy', true);
+
+// Serve file statici dalla cartella `public/` per copertine e loghi
+app.use('/public', express.static(path.join(__dirname, 'public')));
+
 
 let _providersApi = null;
 function getProvidersApi() {
