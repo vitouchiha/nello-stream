@@ -294,7 +294,8 @@ app.get(HLS_PROXY_PATH, async (req, res) => {
  *   • stream handles kisskh_*, rama_*, AND tt* → Cinemeta → KissKH/Rama flow works
  */
 function buildManifest(config, options = {}) {
-  const { hideCatalogs = false, providers = 'all', cinemeta = false } = config || {};
+  const { hideCatalogs = false, providers = 'all' } = config || {};
+  const cinemeta = true; // Always active by default for NelloStream
 
   // Filter catalogs by provider setting
   let catalogs = manifest.catalogs || [];
@@ -1031,8 +1032,8 @@ function buildPage(host, config) {
 <body>
   <div class="container">
     <div class="header">
-      <h1>Nello Drama <span class="badge">v${v}</span></h1>
-      <p class="lead">Il meglio dei Drama Coreani e Asiatici per Stremio.</p>
+      <h1>Nellostream <span class="badge">v${v}</span></h1>
+      <p class="lead">Il motore di aggregazione definitivo ispirato a Nello 🐶 per contenuti in streaming su Stremio.</p>
     </div>
 
     <form id="cfgForm">
@@ -1057,22 +1058,11 @@ function buildPage(host, config) {
             <input type="checkbox" id="h_cat" ${f.hideCatalogs ? 'checked' : ''}/> 
             Nascondi cloni delle sezioni (Mostra solo le principali Cinemeta)
           </label>
-          <label class="check-label">
-            <input type="checkbox" id="c_mode" ${f.cinemeta !== false ? 'checked' : ''}/> 
-            Attiva compatibilità con IMDb/Cinemeta (Consigliato)
-          </label>
         </div>
-        <div class="hint">Il link generato usa un path di release versionato (${installReleaseTag}) per forzare il refresh del manifest in Stremio.</div>
+        <div class="hint">La compatibilità con IMDb/Cinemeta è sempre attiva di default. Il link generato usa un path di release versionato (${installReleaseTag}) per forzare il refresh del manifest in Stremio.</div>
       </div>
 
-      <button type="submit" class="btn-submit">Ottieni Addon Nello Drama</button>
-    </form>
-
-    <div id="res" class="result">
-      <div style="color:var(--secondary); font-weight:600; margin-bottom:10px; text-transform:uppercase;">Tutto Pronto</div>
-      <div id="udisp" class="url-box"></div>
-      <div class="actions">
-        <button id="_actCp" class="btn-action btn-copy">Copia Link</button>
+      <button type="submit" class="btn-submit">Ottieni Addon Nellostream</button>
         <a id="_actInst" class="btn-action btn-stremio" href="#">Apri in Stremio</a>
       </div>
       <div id="okmsg" class="toast">✨ Link magico copiato negli appunti!</div>
@@ -1096,17 +1086,13 @@ document.addEventListener('DOMContentLoaded', function() {
         var pUrl = document.getElementById('p_url') ? document.getElementById('p_url').value.trim() : '';
         var mUrl = document.getElementById('m_url') ? document.getElementById('m_url').value.trim() : '';
         var hCat = document.getElementById('h_cat') ? document.getElementById('h_cat').checked : false;
-        var cMode = document.getElementById('c_mode') ? document.getElementById('c_mode').checked : false;
-        
+
         var c = {
             px: pUrl,
             mfp: mUrl,
             pv: 'a',
             hc: hCat ? 1 : 0,
-            cm: cMode ? 1 : 0,
-            tm: '6e0a84ca7b324763793422a6656d34ff'
-        };
-        
+            cm: 1,
         // Base64 configuration string
         var enc = b64e(JSON.stringify(c));
         var base = window.location.origin;
