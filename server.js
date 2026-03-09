@@ -1063,6 +1063,13 @@ function buildPage(host, config) {
       </div>
 
       <button type="submit" class="btn-submit">Ottieni Addon Nellostream</button>
+    </form>
+
+    <div id="res" class="result">
+      <div style="color:var(--secondary); font-weight:600; margin-bottom:10px; text-transform:uppercase;">Tutto Pronto</div>
+      <div id="udisp" class="url-box"></div>
+      <div class="actions">
+        <button id="_actCp" class="btn-action btn-copy">Copia Link</button>
         <a id="_actInst" class="btn-action btn-stremio" href="#">Apri in Stremio</a>
       </div>
       <div id="okmsg" class="toast">✨ Link magico copiato negli appunti!</div>
@@ -1092,7 +1099,9 @@ document.addEventListener('DOMContentLoaded', function() {
             mfp: mUrl,
             pv: 'a',
             hc: hCat ? 1 : 0,
-            cm: 1,
+            cm: 1
+        };
+
         // Base64 configuration string
         var enc = b64e(JSON.stringify(c));
         var base = window.location.origin;
