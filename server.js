@@ -49,8 +49,14 @@ function getProvidersApi() {
     _providersApi = require('./src/providers/index');
     return _providersApi;
   } catch (err) {
-    log.error('providers bootstrap failed: ' + err.message);
-    return null;
+    log.error('providers bootstrap failed: ' + err.stack);
+    return {
+      isError: true,
+      errorStack: err.stack,
+      handleStream: async () => ({ streams: [{ title: 'Bootstrap Error', url: '#', description: err.stack.substring(0, 1000) }] }),
+      handleCatalog: async () => ({ metas: [] }),
+      handleMeta: async () => ({ meta: null })
+    };
   }
 }
 
