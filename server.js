@@ -938,20 +938,20 @@ function buildPage(host, config) {
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;800&display=swap" rel="stylesheet">
   <style>
     :root {
-      --primary: #ff7eb3;
-      --secondary: #00f2fe;
-      --bg: #09090b;
-      --bg-card: rgba(255, 255, 255, 0.03);
+      --primary: #f28c28; /* Arancione caldo */
+      --secondary: #d4a373; /* Beige/sabbia */
+      --bg: #2d2621; /* Marrone scuro/grigio caldo */
+      --bg-card: rgba(255, 255, 255, 0.05); /* Leggermente più visibile sul bg scuro */
       --glass-border: rgba(255, 255, 255, 0.1);
-      --text: #f8fafc;
-      --text-muted: #94a3b8;
+      --text: #fefae0; /* Bianco caldo/avorio */
+      --text-muted: #d4a373; /* Colore secondario per i testi meno evidenti */
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       background-color: var(--bg);
-      background-image: 
-        radial-gradient(circle at 15% 50%, rgba(255, 126, 179, 0.12), transparent 25%),
-        radial-gradient(circle at 85% 30%, rgba(0, 242, 254, 0.1), transparent 25%);
+      background-image:
+        radial-gradient(circle at 15% 50%, rgba(242, 140, 40, 0.12), transparent 25%),
+        radial-gradient(circle at 85% 30%, rgba(212, 163, 115, 0.1), transparent 25%);
       color: var(--text);
       font-family: 'Poppins', sans-serif;
       min-height: 100vh;
@@ -978,7 +978,7 @@ function buildPage(host, config) {
     }
     .badge {
       display: inline-block; vertical-align: super;
-      background: rgba(255, 126, 179, 0.15); border: 1px solid rgba(255, 126, 179, 0.3);
+      background: rgba(242, 140, 40, 0.15); border: 1px solid rgba(242, 140, 40, 0.3);
       color: var(--primary); padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; font-weight: 600;
     }
     .lead { color: var(--text-muted); font-size: 0.95rem; line-height: 1.6; }
@@ -991,22 +991,22 @@ function buildPage(host, config) {
       padding: 14px 16px; color: #fff; font-size: 0.95rem; font-family: 'Poppins', sans-serif;
       transition: all 0.2s ease; outline: none;
     }
-    input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(255, 126, 179, 0.15); }
-    .hint { font-size: 0.75rem; color: #64748b; margin-top: 8px; line-height: 1.4; }
+    input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(242, 140, 40, 0.15); }
+    .hint { font-size: 0.75rem; color: #a4968c; margin-top: 8px; line-height: 1.4; }
     .checks { display: flex; flex-direction: column; gap: 12px; margin-top: 5px; }
     .check-label {
-      display: flex; align-items: center; gap: 12px; font-size: 0.9rem; color: #cbd5e1; cursor: pointer;
-      background: #18191c; padding: 12px 16px; border-radius: 10px; border: 1px solid #272a30; transition: 0.2s;
+      display: flex; align-items: center; gap: 12px; font-size: 0.9rem; color: #fefae0; cursor: pointer;
+      background: #18191c; padding: 12px 16px; border-radius: 10px; border: 1px solid #3c3028; transition: 0.2s;
     }
-    .check-label:hover { border-color: #475569; }
+    .check-label:hover { border-color: #d4a373; }
     .check-label input { width: 18px; height: 18px; accent-color: var(--primary); }
     .btn-submit {
       width: 100%; padding: 16px; margin-top: 10px;
       background: linear-gradient(135deg, var(--primary), var(--secondary));
       color: #000; border: none; border-radius: 12px; font-family: 'Poppins', sans-serif; font-size: 1.1rem;
-      font-weight: 700; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 8px 20px rgba(255, 126, 179, 0.3);
+      font-weight: 700; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 8px 20px rgba(242, 140, 40, 0.3);
     }
-    .btn-submit:hover { transform: translateY(-2px); box-shadow: 0 12px 25px rgba(255, 126, 179, 0.4); }
+    .btn-submit:hover { transform: translateY(-2px); box-shadow: 0 12px 25px rgba(242, 140, 40, 0.4); }
     .btn-submit:active { transform: translateY(1px); }
     .result {
       display: none; background: rgba(0,0,0,0.3); border: 1px solid var(--secondary); border-radius: 16px;
@@ -1022,9 +1022,9 @@ function buildPage(host, config) {
       flex: 1; padding: 14px; border-radius: 10px; text-align: center; text-decoration: none;
       font-weight: 600; font-size: 0.95rem; cursor: pointer; border: none; font-family: 'Poppins', sans-serif;
     }
-    .btn-stremio { background: linear-gradient(135deg, var(--secondary), #0093E9); color: #000; }
+    .btn-stremio { background: linear-gradient(135deg, var(--secondary), #f28c28); color: #000; }
     .btn-stremio:hover { opacity: 0.9; }
-    .btn-copy { background: #1e293b; color: #f8fafc; border: 1px solid #334155; }
+    .btn-copy { background: #3c3028; color: var(--text); border: 1px solid #d4a373; }
     .toast { display: none; text-align: center; color: var(--secondary); font-size: 0.85rem; margin-top: 12px; font-weight: 500; }
     @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
   </style>
