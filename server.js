@@ -553,6 +553,21 @@ app.get('/debug-title/:imdbId', async (req, res) => {
         trace.push({ step: 'proxy_search_test', error: 'CF_WORKER_URL not set' });
       }
     } catch (e) { trace.push({ step: 'proxy_search_test', error: e.message?.substring(0, 300) }); }
+      // Test GET request via proxy
+      try {
+        const gsUrl = getProviderUrl('guardoserie');
+        const getTestUrl = `${cfUrl.replace(/\/$/, '')}/?url=${encodeURIComponent(gsUrl + '/serie/scrubs/')}`;
+        const getResp = await fetch(getTestUrl, { headers: { 'x-worker-auth': cfAuth } });
+        const getTxt = await getResp.text();
+        trace.push({ step: 'proxy_get_test', status: getResp.status, len: getTxt.length, hasEpisode: getTxt.includes('episodio') });
+      } catch (e) { trace.push({ step: 'proxy_get_test', error: e.message?.substring(0, 200) }); }
+      // Also test DIRECT GET (no proxy)
+      try {
+        const gsUrl = getProviderUrl('guardoserie');
+        const directResp = await fetch(`${gsUrl}/serie/scrubs/`, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Accept': 'text/html' } });
+        const directTxt = await directResp.text();
+        trace.push({ step: 'direct_get_test', status: directResp.status, len: directTxt.length, hasEpisode: directTxt.includes('episodio'), snippet: directTxt.substring(0, 80) });
+      } catch (e) { trace.push({ step: 'direct_get_test', error: e.message?.substring(0, 200) }); }
     // Direct guardoserie test
     try {
       const guardoserie = require('./src/guardoserie/index');
