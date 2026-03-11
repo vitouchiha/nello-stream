@@ -533,8 +533,6 @@ app.get('/debug-title/:imdbId', async (req, res) => {
     } catch (e) { trace.push({ step: 'tmdb', error: e.message }); }
     // Test guardoserie via proxyFetch directly
     try {
-      const gsModule = require('./src/guardoserie/index');
-      // Use the internal proxyFetch if exposed, else test manually
       const cfUrl = (process.env.CF_WORKER_URL || '').trim();
       const cfAuth = (process.env.CF_WORKER_AUTH || '').trim();
       if (cfUrl) {
@@ -547,12 +545,21 @@ app.get('/debug-title/:imdbId', async (req, res) => {
         params.set('body', body);
         params.set('contentType', 'application/x-www-form-urlencoded; charset=UTF-8');
         const proxyTestUrl = `${cfUrl.replace(/\/$/, '')}/?${params.toString()}`;
-        const proxyResp = await axios.get(proxyTestUrl, { headers: { 'x-worker-auth': cfAuth }, timeout: 15000 });
-        trace.push({ step: 'proxy_search_test', status: proxyResp.status, len: (proxyResp.data||'').length, snippet: String(proxyResp.data).substring(0, 150) });
+        // Use native fetch to avoid axios status error
+        const proxyResp = await require('node-fetch')(proxyTestUrl, { headers: { 'x-worker-auth': cfAuth }, timeout: 15000 }).catch(() => null);
+        if (!proxyResp) {
+          // Fallback to native fetch
+          const nativeResp = await fetch(proxyTestUrl, { headers: { 'x-worker-auth': cfAuth } });
+          const txt = await nativeResp.text();
+          trace.push({ step: 'proxy_search_test', status: nativeResp.status, len: txt.length, snippet: txt.substring(0, 200) });
+        } else {
+          const txt = await proxyResp.text();
+          trace.push({ step: 'proxy_search_test', status: proxyResp.status, len: txt.length, snippet: txt.substring(0, 200) });
+        }
       } else {
         trace.push({ step: 'proxy_search_test', error: 'CF_WORKER_URL not set' });
       }
-    } catch (e) { trace.push({ step: 'proxy_search_test', error: e.message?.substring(0, 200) }); }
+    } catch (e) { trace.push({ step: 'proxy_search_test', error: e.message?.substring(0, 300) }); }
     // Direct guardoserie test
     try {
       const guardoserie = require('./src/guardoserie/index');
