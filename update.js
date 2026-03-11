@@ -1,0 +1,1 @@
+const fs=require('fs'); let c=JSON.parse(fs.readFileSync('src/config/toonitalia-normalizations.json','utf8')); c.title_aliases['guru guru - il girotondo della magia'] = 'guru guru il girotondo della magia'; delete c.title_aliases['Guru Guru - Il girotondo della magia']; fs.writeFileSync('src/config/toonitalia-normalizations.json', JSON.stringify(c, null, 2));

@@ -1,0 +1,1 @@
+fetch(https://cb01net.lol/serietv/?s=our+universe).then(r=>r.text()).then(t=>console.log(require(cheerio).load(t)(h3 > a).first().text()))

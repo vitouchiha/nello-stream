@@ -508,6 +508,38 @@ app.get([
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 
+app.get('/debug-title/:imdbId', async (req, res) => {
+  const { imdbId } = req.params;
+  const trace = [];
+  const config = { ...cfgFrom(), clientIp: clientIpFrom(req), addonBaseUrl: addonBaseUrlFrom(req) };
+  trace.push({ step: 'config.tmdbKey', value: config.tmdbKey ? `${config.tmdbKey.substring(0,8)}...` : '(empty)' });
+  try {
+    const axios = require('axios');
+    const { findTitleByImdbId } = require('./src/utils/tmdb');
+    const { getProviderUrl } = require('./src/provider_urls');
+    trace.push({ step: 'guardoserie_url', value: getProviderUrl('guardoserie') });
+    // Cinemeta
+    try {
+      const cResp = await axios.get(`https://v3-cinemeta.strem.io/meta/series/${imdbId}.json`, { timeout: 5000 });
+      const cName = cResp.data?.meta?.name || null;
+      trace.push({ step: 'cinemeta', title: cName, metaKeys: Object.keys(cResp.data?.meta || {}).length });
+    } catch (e) { trace.push({ step: 'cinemeta', error: e.message }); }
+    // TMDB
+    try {
+      const tKey = config.tmdbKey || process.env.TMDB_API_KEY || '';
+      const tTitle = tKey ? await findTitleByImdbId(imdbId, tKey) : null;
+      trace.push({ step: 'tmdb', title: tTitle, keyPresent: !!tKey });
+    } catch (e) { trace.push({ step: 'tmdb', error: e.message }); }
+    // IMDb page
+    try {
+      const iResp = await axios.get(`https://www.imdb.com/title/${imdbId}/`, { timeout: 7000, headers: { 'User-Agent': 'Mozilla/5.0' } });
+      const og = iResp.data.match(/<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i);
+      trace.push({ step: 'imdb_page', title: og?.[1] || null });
+    } catch (e) { trace.push({ step: 'imdb_page', error: e.message }); }
+    res.json({ imdbId, trace });
+  } catch (e) { res.json({ imdbId, error: e.message, trace }); }
+});
+
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', version: manifest.version, ts: new Date().toISOString(), providersLoaded: !!_providersApi, bootstrapError: _providersBootstrapError });
 });
