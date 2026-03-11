@@ -203,7 +203,6 @@ async function extractFromResolvedUrl(resolvedUrl, label) {
           url: result.url,
         };
       }
-    }
     } else if (host.includes('uprot')) {
       const result = await extractUprot(resolvedUrl);
       if (result) {
