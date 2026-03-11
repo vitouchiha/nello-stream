@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Black dog silhouette icon for NelloStream -->
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#0d0d1a"/>
+    </radialGradient>
+  </defs>
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="250" fill="url(#bg)" stroke="#2a2a4a" stroke-width="4"/>
+  <!-- Dog body -->
+  <g transform="translate(256,270) scale(1.1)" fill="#111111">
+    <!-- Torso -->
+    <ellipse cx="0" cy="20" rx="75" ry="50"/>
+    <!-- Head -->
+    <circle cx="-60" cy="-30" r="42"/>
+    <!-- Snout -->
+    <ellipse cx="-95" cy="-18" rx="22" ry="16"/>
+    <!-- Left ear (floppy) -->
+    <path d="M-85,-65 Q-110,-95 -100,-55 Q-95,-50 -85,-55Z"/>
+    <!-- Right ear (floppy) -->
+    <path d="M-45,-65 Q-25,-100 -30,-55 Q-35,-50 -45,-55Z"/>
+    <!-- Front legs -->
+    <rect x="-50" y="55" width="16" height="55" rx="8"/>
+    <rect x="-25" y="55" width="16" height="55" rx="8"/>
+    <!-- Back legs -->
+    <rect x="35" y="55" width="16" height="50" rx="8"/>
+    <rect x="58" y="55" width="16" height="50" rx="8"/>
+    <!-- Tail (curled up) -->
+    <path d="M75,0 Q105,-15 95,-45 Q90,-55 80,-45" stroke="#111111" stroke-width="10" fill="none" stroke-linecap="round"/>
+  </g>
+  <!-- Eyes (white dots for expressiveness) -->
+  <g transform="translate(256,270) scale(1.1)">
+    <circle cx="-70" cy="-35" r="5" fill="#ffffff"/>
+    <circle cx="-50" cy="-35" r="5" fill="#ffffff"/>
+    <circle cx="-69" cy="-36" r="2.5" fill="#111111"/>
+    <circle cx="-49" cy="-36" r="2.5" fill="#111111"/>
+    <!-- Nose -->
+    <ellipse cx="-100" cy="-14" rx="6" ry="4.5" fill="#333333"/>
+    <!-- Tongue (small, playful) -->
+    <ellipse cx="-92" cy="-6" rx="4" ry="6" fill="#cc3344"/>
+  </g>
+  <!-- "NelloStream" text at bottom -->
+  <text x="256" y="460" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-weight="bold" font-size="36" fill="#e0e0e0" letter-spacing="2">NelloStream</text>
+</svg>

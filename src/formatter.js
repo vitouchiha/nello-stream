@@ -179,13 +179,13 @@ function formatStream(stream, providerName) {
     if (language) {
         let langStr = language;
         if (langStr.includes('🦮')) {
-            finalTitle += `\n${langStr} 🎾 StreamFusion`;
+            finalTitle += `\n${langStr} 🎾 NelloStream`;
         } else {
             langStr = langStr.replace('🇮🇹', 'IT').replace('🇯🇵', 'JP').trim();
-            finalTitle += `\n🦮 ${langStr} 🎾 StreamFusion`;
+            finalTitle += `\n🦮 ${langStr} 🎾 NelloStream`;
         }
     } else {
-         finalTitle += `\n🦮 IT 🎾 StreamFusion`;
+         finalTitle += `\n🦮 IT 🎾 NelloStream`;
     }
 
     // Altre info
