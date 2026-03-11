@@ -3,6 +3,7 @@ const { extractLoadm, extractUqload, extractDropLoad } = require('../extractors'
 const { formatStream } = require('../formatter');
 const { checkQualityFromPlaylist } = require('../quality_helper');
 const { getProviderUrl } = require('../provider_urls.js');
+const { CookieJar } = require('tough-cookie');
 
 function getGuardoserieBaseUrl() {
     return getProviderUrl('guardoserie');
@@ -12,35 +13,142 @@ function getMappingApiUrl() {
     return getProviderUrl('mapping_api').replace(/\/+$/, "");
 }
 
-// ── CF Worker proxy helper ─────────────────────────────────────────────────
-function _getCfWorkerUrl() {
-    return (process.env.CF_WORKER_URL || '').trim() || null;
+// ── Proxy + CookieJar helper (like StreamVix) ─────────────────────────────
+const _cookieJar = new CookieJar();
+
+function _getProxyUrl() {
+    return (process.env.PROXY_URL || process.env.PROXY || '').trim() || null;
 }
-function _getCfWorkerAuth() {
-    return (process.env.CF_WORKER_AUTH || '').trim() || '';
+
+function _makeAgent() {
+    const proxyUrl = _getProxyUrl();
+    if (!proxyUrl) return null;
+    if (proxyUrl.startsWith('socks')) {
+        const { SocksProxyAgent } = require('socks-proxy-agent');
+        return new SocksProxyAgent(proxyUrl);
+    }
+    const { HttpsProxyAgent } = require('https-proxy-agent');
+    return new HttpsProxyAgent(proxyUrl);
 }
+
+let _cachedAgent = undefined; // undefined = not yet created
+function _getAgent() {
+    if (_cachedAgent === undefined) _cachedAgent = _makeAgent();
+    return _cachedAgent;
+}
+
+const BROWSER_HEADERS = {
+    'User-Agent': USER_AGENT,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Windows"',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'same-origin',
+    'Upgrade-Insecure-Requests': '1',
+};
+
 /**
- * Fetch a URL through the CF worker proxy (bypasses datacenter IP blocks).
- * Falls back to direct fetch when CF_WORKER_URL is not configured.
+ * Fetch with optional SOCKS5/HTTP proxy + cookie jar.
+ * Routes through proxy when PROXY_URL env is set; otherwise direct fetch.
  */
 async function proxyFetch(url, opts = {}) {
-    const workerBase = _getCfWorkerUrl();
-    if (!workerBase) return fetch(url, opts);
+    const agent = _getAgent();
+    const fetchOpts = { ...opts };
 
-    const params = new URLSearchParams();
-    params.set('url', url);
-    if (opts.method === 'POST') {
-        params.set('method', 'POST');
-        if (opts.body) params.set('body', typeof opts.body === 'string' ? opts.body : '');
-        const ct = opts.headers?.['Content-Type'] || opts.headers?.['content-type'];
-        if (ct) params.set('contentType', ct);
+    // Inject cookies from jar
+    let cookies = '';
+    try { cookies = _cookieJar.getCookieStringSync(url); } catch { /* ignore */ }
+    const mergedHeaders = { ...BROWSER_HEADERS, ...opts.headers };
+    if (cookies) mergedHeaders['Cookie'] = cookies;
+    fetchOpts.headers = mergedHeaders;
+
+    if (agent) {
+        // node-fetch / undici dispatcher won't use 'agent' with global fetch,
+        // but https module agent works with the axios-style or node https.request.
+        // Use the undici dispatcher approach for global fetch:
+        fetchOpts.agent = agent;
+        // For Node 18+ global fetch, we need to use the dispatcher option
+        // or fall back to http/https module. Let's use node-fetch if available,
+        // otherwise the https module directly.
     }
-    const auth = _getCfWorkerAuth();
-    const headers = {};
-    if (auth) headers['x-worker-auth'] = auth;
 
-    const proxyUrl = `${workerBase.replace(/\/$/, '')}/?${params.toString()}`;
-    return fetch(proxyUrl, { headers, signal: opts.signal });
+    const resp = await _doFetch(url, fetchOpts);
+
+    // Store set-cookie headers
+    const setCookieHeaders = resp.headers.getSetCookie?.() || [];
+    for (const c of setCookieHeaders) {
+        try { _cookieJar.setCookieSync(c, url); } catch { /* ignore */ }
+    }
+
+    return resp;
+}
+
+/**
+ * Perform the actual HTTP request, using proxy agent if available.
+ */
+async function _doFetch(url, opts) {
+    const agent = opts.agent;
+    delete opts.agent;
+
+    if (!agent) return fetch(url, opts);
+
+    // Use http/https module with agent for proxy support
+    const https = require('https');
+    const http = require('http');
+    const { URL } = require('url');
+    const zlib = require('zlib');
+    const parsed = new URL(url);
+    const mod = parsed.protocol === 'https:' ? https : http;
+
+    return new Promise((resolve, reject) => {
+        const reqOpts = {
+            hostname: parsed.hostname,
+            port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+            path: parsed.pathname + parsed.search,
+            method: opts.method || 'GET',
+            headers: { ...opts.headers, Host: parsed.host },
+            agent,
+            timeout: 30000,
+        };
+
+        const req = mod.request(reqOpts, (res) => {
+            const chunks = [];
+            const encoding = (res.headers['content-encoding'] || '').toLowerCase();
+            let stream = res;
+            if (encoding === 'br') stream = res.pipe(zlib.createBrotliDecompress());
+            else if (encoding === 'gzip') stream = res.pipe(zlib.createGunzip());
+            else if (encoding === 'deflate') stream = res.pipe(zlib.createInflate());
+
+            stream.on('data', (chunk) => chunks.push(chunk));
+            stream.on('end', () => {
+                const body = Buffer.concat(chunks).toString('utf-8');
+                // Build a fetch-like response
+                resolve({
+                    ok: res.statusCode >= 200 && res.statusCode < 300,
+                    status: res.statusCode,
+                    statusCode: res.statusCode,
+                    headers: {
+                        get: (name) => res.headers[name.toLowerCase()] || null,
+                        getSetCookie: () => {
+                            const sc = res.headers['set-cookie'];
+                            return Array.isArray(sc) ? sc : sc ? [sc] : [];
+                        }
+                    },
+                    text: async () => body,
+                    json: async () => JSON.parse(body),
+                });
+            });
+            stream.on('error', reject);
+        });
+        req.on('error', reject);
+        req.on('timeout', () => { req.destroy(); reject(new Error('Request timeout')); });
+        if (opts.body) req.write(opts.body);
+        req.end();
+    });
 }
 // ────────────────────────────────────────────────────────────────────────────
 
