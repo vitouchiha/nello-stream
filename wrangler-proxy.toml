@@ -1,0 +1,7 @@
+name = "streamfusion-proxy"
+main = "cfworker-proxy.js"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# No secrets required for this proxy worker
