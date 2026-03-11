@@ -531,6 +531,28 @@ app.get('/debug-title/:imdbId', async (req, res) => {
       const tTitle = tKey ? await findTitleByImdbId(imdbId, tKey) : null;
       trace.push({ step: 'tmdb', title: tTitle, keyPresent: !!tKey });
     } catch (e) { trace.push({ step: 'tmdb', error: e.message }); }
+    // Test guardoserie via proxyFetch directly
+    try {
+      const gsModule = require('./src/guardoserie/index');
+      // Use the internal proxyFetch if exposed, else test manually
+      const cfUrl = (process.env.CF_WORKER_URL || '').trim();
+      const cfAuth = (process.env.CF_WORKER_AUTH || '').trim();
+      if (cfUrl) {
+        const gsUrl = getProviderUrl('guardoserie');
+        const targetUrl = `${gsUrl}/wp-admin/admin-ajax.php`;
+        const body = `s=scrubs&action=searchwp_live_search&swpengine=default&swpquery=scrubs`;
+        const params = new URLSearchParams();
+        params.set('url', targetUrl);
+        params.set('method', 'POST');
+        params.set('body', body);
+        params.set('contentType', 'application/x-www-form-urlencoded; charset=UTF-8');
+        const proxyTestUrl = `${cfUrl.replace(/\/$/, '')}/?${params.toString()}`;
+        const proxyResp = await axios.get(proxyTestUrl, { headers: { 'x-worker-auth': cfAuth }, timeout: 15000 });
+        trace.push({ step: 'proxy_search_test', status: proxyResp.status, len: (proxyResp.data||'').length, snippet: String(proxyResp.data).substring(0, 150) });
+      } else {
+        trace.push({ step: 'proxy_search_test', error: 'CF_WORKER_URL not set' });
+      }
+    } catch (e) { trace.push({ step: 'proxy_search_test', error: e.message?.substring(0, 200) }); }
     // Direct guardoserie test
     try {
       const guardoserie = require('./src/guardoserie/index');
