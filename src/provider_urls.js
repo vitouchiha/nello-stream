@@ -45,9 +45,15 @@ const ALIASES = {
 
 let lastCheckAt = 0;
 let lastMtimeMs = -1;
-let lastData = {};
+let localOverrides = {};   // from local provider_urls.json (highest priority)
+let remoteData = {};       // from remote GitHub URL
+let lastData = {};         // merged: remoteData overridden by localOverrides
 let lastRemoteCheckAt = 0;
 let remoteInFlight = null;
+
+function rebuildMergedData() {
+  lastData = { ...remoteData, ...localOverrides };
+}
 
 function normalizeKey(key) {
   return String(key || "").trim().toLowerCase();
@@ -84,7 +90,8 @@ function reloadProviderUrlsIfNeeded(force = false) {
   } catch {
     if (lastMtimeMs !== -1) {
       lastMtimeMs = -1;
-      lastData = {};
+      localOverrides = {};
+      rebuildMergedData();
     }
     return;
   }
@@ -94,10 +101,12 @@ function reloadProviderUrlsIfNeeded(force = false) {
   try {
     const raw = fs.readFileSync(PROVIDER_URLS_FILE, "utf8");
     const parsed = JSON.parse(raw);
-    lastData = toNormalizedMap(parsed);
+    localOverrides = toNormalizedMap(parsed);
+    rebuildMergedData();
     lastMtimeMs = stat.mtimeMs;
   } catch {
-    lastData = {};
+    localOverrides = {};
+    rebuildMergedData();
     lastMtimeMs = stat.mtimeMs;
   }
 }
@@ -154,7 +163,8 @@ async function refreshProviderUrlsFromRemoteIfNeeded(force = false) {
       const payload = await response.json();
       const parsed = toNormalizedMap(payload);
       if (Object.keys(parsed).length > 0) {
-        lastData = parsed;
+        remoteData = parsed;
+        rebuildMergedData();
       }
     } catch {
       // Ignore remote refresh errors: keep last known values.
@@ -198,4 +208,5 @@ module.exports = {
 };
 
 // Initialize from embedded JSON immediately.
-lastData = toNormalizedMap(embeddedProviderUrls);
+localOverrides = toNormalizedMap(embeddedProviderUrls);
+rebuildMergedData();
