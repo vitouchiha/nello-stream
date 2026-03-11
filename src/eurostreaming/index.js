@@ -168,6 +168,18 @@ async function resolveHostLink(href) {
  */
 async function scrapingLinks(atag, language, siteName) {
   const streams = [];
+  const hasProxy = !!(process.env.PROXY_URL || process.env.PROXY);
+  const langLabel = language.includes('SUB') ? '🇰🇷 SUB ITA' : '🇮🇹 [ITA]';
+
+  function makeStream(playerName, url, headers) {
+    const obj = {
+      name: `Eurostreaming${language}`,
+      title: `🎬 ${siteName}\n🗣 ${langLabel}\n▶️ ${playerName}\n🌐 Proxy (${hasProxy ? 'ON' : 'OFF'})\n🤌 Eurostreaming 🇪🇺`,
+      url: url,
+    };
+    if (headers) obj.behaviorHints = { proxyHeaders: { request: headers } };
+    return obj;
+  }
 
   const hasMixDrop = /MixDrop/i.test(atag);
   const hasDeltaBit = /DeltaBit/i.test(atag);
@@ -188,14 +200,7 @@ async function scrapingLinks(atag, language, siteName) {
         const resolved = await resolveHostLink(href);
         if (resolved && (resolved.includes('mixdrop') || resolved.includes('m1xdrop'))) {
           const result = await extractMixDrop(resolved);
-          if (result) {
-            streams.push({
-              name: `Eurostreaming${language}`,
-              title: `🎬 ${siteName}\n▶️ MixDrop`,
-              url: result.url,
-              ...(result.headers ? { behaviorHints: { proxyHeaders: { request: result.headers } } } : {}),
-            });
-          }
+          if (result) streams.push(makeStream('MixDrop', result.url, result.headers));
         }
       }
     } catch { /* skip */ }
@@ -208,13 +213,7 @@ async function scrapingLinks(atag, language, siteName) {
         const resolved = await resolveHostLink(href);
         if (resolved) {
           const result = await extractTurbovidda(resolved);
-          if (result) {
-            streams.push({
-              name: `Eurostreaming${language}`,
-              title: `🎬 ${siteName}\n▶️ DeltaBit`,
-              url: result.url,
-            });
-          }
+          if (result) streams.push(makeStream('DeltaBit', result.url));
         }
       }
     } catch { /* skip */ }
@@ -226,14 +225,7 @@ async function scrapingLinks(atag, language, siteName) {
           const resolved = await resolveHostLink(href);
           if (resolved) {
             const result = await extractMixDrop(resolved);
-            if (result) {
-              streams.push({
-                name: `Eurostreaming${language}`,
-                title: `🎬 ${siteName}\n▶️ MixDrop`,
-                url: result.url,
-                ...(result.headers ? { behaviorHints: { proxyHeaders: { request: result.headers } } } : {}),
-              });
-            }
+            if (result) streams.push(makeStream('MixDrop', result.url, result.headers));
           }
         }
       } catch { /* skip */ }
@@ -247,13 +239,7 @@ async function scrapingLinks(atag, language, siteName) {
         const resolved = await resolveHostLink(href);
         const target = resolved || href;
         const result = await extractMaxStream(target);
-        if (result) {
-          streams.push({
-            name: `Eurostreaming${language}`,
-            title: `🎬 ${siteName}\n▶️ MaxStream`,
-            url: result.url,
-          });
-        }
+        if (result) streams.push(makeStream('MaxStream', result.url));
       }
     } catch { /* skip */ }
   }
@@ -265,13 +251,7 @@ async function scrapingLinks(atag, language, siteName) {
         const resolved = await resolveHostLink(href);
         if (resolved) {
           const result = await extractTurbovidda(resolved);
-          if (result) {
-            streams.push({
-              name: `Eurostreaming${language}`,
-              title: `🎬 ${siteName}\n▶️ Turbovid`,
-              url: result.url,
-            });
-          }
+          if (result) streams.push(makeStream('Turbovid', result.url));
         }
       }
     } catch { /* skip */ }

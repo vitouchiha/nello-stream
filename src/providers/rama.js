@@ -347,9 +347,10 @@ async function getStreams(id, config = {}) {
       log.warn('invalid stream URL format', { epId: ep.id, url: streamUrl.slice(0, 80) });
       continue;
     }
+    const hasProxy = !!(process.env.PROXY_URL || process.env.PROXY);
     rawStreams.push({
-      name: _qualityLabel(streamUrl),
-      description: `� Rama · 📁 ${displayName} - ${ep.title}\n🇰🇷 Sub ITA`,
+      name: `${_qualityLabel(streamUrl)}\nRama`,
+      title: `🎬 ${displayName} - ${ep.title}\n🗣 🇰🇷 SUB ITA\n🌐 Proxy (${hasProxy ? 'ON' : 'OFF'})\n🤌 Rama 🌺`,
       url: streamUrl,
       behaviorHints: { bingeGroup: `streamfusion-rama-${seriesId}` },
     });

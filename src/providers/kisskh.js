@@ -692,13 +692,14 @@ async function getStreams(stremioId, config = {}) {
   const seriesTitle = metaForTitle?.name || null;
   const displayTitle = seriesTitle ? seriesTitle.replace(/\s*\(\d{4}\)\s*$/, '').trim() : null;
   const titleLine = displayTitle
-    ? `📁 ${displayTitle} - Episode ${episodeId}`
-    : `📁 Episode ${episodeId}`;
+    ? `${displayTitle} - Episode ${episodeId}`
+    : `Episode ${episodeId}`;
 
+  const hasProxy = !!(process.env.PROXY_URL || process.env.PROXY);
   return [
     {
-      name: '� KissKH',
-      description: `${titleLine}\n👤 KissKH\n🇰🇷 Sub ITA`,
+      name: 'KissKH',
+      title: `🎬 ${titleLine}\n🗣 🇰🇷 SUB ITA\n🌐 Proxy (${hasProxy ? 'ON' : 'OFF'})\n🤌 KissKH 💋`,
       url: finalUrl,
       subtitles,
       behaviorHints: {
