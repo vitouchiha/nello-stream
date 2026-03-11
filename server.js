@@ -567,12 +567,16 @@ app.get('/debug-title/:imdbId', async (req, res) => {
         trace.push({ step: 'proxy_get_test', error: 'CF_WORKER_URL not set' });
       }
     } catch (e) { trace.push({ step: 'proxy_get_test', error: e.message?.substring(0, 200) }); }
-    // Also test DIRECT GET (no proxy)
+    // Also test DIRECT GET (no proxy) - both domains
     try {
       const gsUrl3 = getProviderUrl('guardoserie');
       const directResp = await fetch(`${gsUrl3}/serie/scrubs/`, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Accept': 'text/html' } });
       const directTxt = await directResp.text();
       trace.push({ step: 'direct_get_test', status: directResp.status, len: directTxt.length, hasEpisode: directTxt.includes('episodio'), snippet: directTxt.substring(0, 80) });
+      // Also test .surf domain
+      const surfResp = await fetch('https://guardoserie.surf/serie/scrubs/', { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Accept': 'text/html' } });
+      const surfTxt = await surfResp.text();
+      trace.push({ step: 'surf_get_test', status: surfResp.status, len: surfTxt.length, hasEpisode: surfTxt.includes('episodio'), snippet: surfTxt.substring(0, 80) });
     } catch (e) { trace.push({ step: 'direct_get_test', error: e.message?.substring(0, 200) }); }
     // Direct guardoserie test
     try {
