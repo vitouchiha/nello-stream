@@ -190,7 +190,7 @@ async function extractFromResolvedUrl(resolvedUrl, label) {
           title: `🎬 CB01\n▶️ ${label} [MixDrop]`,
           url: result.url,
           behaviorHints: result.headers
-            ? { proxyHeaders: { request: result.headers } }
+            ? { notWebReady: true, proxyHeaders: { request: result.headers } }
             : undefined,
         };
       }
@@ -211,7 +211,7 @@ async function extractFromResolvedUrl(resolvedUrl, label) {
           title: `🎬 CB01\n▶️ ${label} [MaxStream via Uprot]`,
           url: result.url,
           behaviorHints: result.headers
-            ? { proxyHeaders: { request: result.headers } }
+            ? { notWebReady: true, proxyHeaders: { request: result.headers } }
             : undefined,
         };
       }
