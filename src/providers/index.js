@@ -265,12 +265,10 @@ async function _fetchFromImdbId(rawId, type, config) {
     log.warn(`Cinemeta meta fetch failed: ${err.message}`, { imdbId });
   }
 
-  // Fallback #1: TMDB find endpoint (if a valid API key is configured)
+  // Fallback #1: TMDB find endpoint
   if (!title) {
-    const tmdbKey = config.tmdbKey || process.env.TMDB_API_KEY || '';
-    if (tmdbKey) {
-      title = await findTitleByImdbId(imdbId, tmdbKey).catch(() => null);
-    }
+    const tmdbKey = config.tmdbKey || process.env.TMDB_API_KEY || '68e094699525b18a70bab2f86b1fa706';
+    title = await findTitleByImdbId(imdbId, tmdbKey).catch(() => null);
   }
 
   // Fallback #2: IMDb public page (no API key needed)
@@ -492,7 +490,7 @@ async function _buildTitleCandidates(imdbId, type, config, primaryTitle) {
 
   add(primaryTitle);
 
-  const tmdbKey = config.tmdbKey || process.env.TMDB_API_KEY || '';
+  const tmdbKey = config.tmdbKey || process.env.TMDB_API_KEY || '68e094699525b18a70bab2f86b1fa706';
   if (tmdbKey && imdbId) {
     try {
       const findUrl = `https://api.themoviedb.org/3/find/${encodeURIComponent(imdbId)}?api_key=${tmdbKey}&external_source=imdb_id&language=it-IT`;
@@ -512,6 +510,15 @@ async function _buildTitleCandidates(imdbId, type, config, primaryTitle) {
         add(item.original_name);
         add(item.title);
         add(item.original_title);
+
+        // Also fetch English title (useful for K-dramas with no Italian title)
+        try {
+          const enUrl = `https://api.themoviedb.org/3/${endpoint}/${tmdbId}?api_key=${tmdbKey}&language=en-US`;
+          const enResp = await axios.get(enUrl, { timeout: 5000 });
+          const en = enResp?.data || {};
+          add(en.name);
+          add(en.title);
+        } catch (_) { /* best effort */ }
       }
     } catch (_) {
       // Best effort only

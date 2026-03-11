@@ -180,41 +180,27 @@ async function searchSeries(showname, year) {
  * Returns a stream object or null.
  */
 async function extractFromResolvedUrl(resolvedUrl, label) {
+  const hasProxy = !!(process.env.PROXY_URL || process.env.PROXY);
+  function makeCb01Stream(playerName, url, headers) {
+    const obj = {
+      name: `CB01`,
+      title: `🎬 CB01\n🗣 🇮🇹 [ITA]\n▶️ ${playerName}\n🌐 Proxy (${hasProxy ? 'ON' : 'OFF'})\n🤌 CB01 🎞️`,
+      url: url,
+    };
+    if (headers) obj.behaviorHints = { notWebReady: true, proxyHeaders: { request: headers } };
+    return obj;
+  }
   try {
     const host = new URL(resolvedUrl).hostname.toLowerCase();
     if (host.includes('mixdrop') || host.includes('m1xdrop')) {
       const result = await extractMixDrop(resolvedUrl);
-      if (result) {
-        return {
-          name: 'CB01',
-          title: `🎬 CB01\n▶️ ${label} [MixDrop]`,
-          url: result.url,
-          behaviorHints: result.headers
-            ? { notWebReady: true, proxyHeaders: { request: result.headers } }
-            : undefined,
-        };
-      }
+      if (result) return makeCb01Stream('MixDrop', result.url, result.headers);
     } else if (host.includes('maxstream')) {
       const result = await extractMaxStream(resolvedUrl);
-      if (result) {
-        return {
-          name: 'CB01',
-          title: `🎬 CB01\n▶️ ${label} [MaxStream]`,
-          url: result.url,
-        };
-      }
+      if (result) return makeCb01Stream('MaxStream', result.url);
     } else if (host.includes('uprot')) {
       const result = await extractUprot(resolvedUrl);
-      if (result) {
-        return {
-          name: 'CB01',
-          title: `🎬 CB01\n▶️ ${label} [MaxStream via Uprot]`,
-          url: result.url,
-          behaviorHints: result.headers
-            ? { notWebReady: true, proxyHeaders: { request: result.headers } }
-            : undefined,
-        };
-      }
+      if (result) return makeCb01Stream('MaxStream via Uprot', result.url, result.headers);
     }
   } catch { /* skip */ }
   return null;
@@ -274,20 +260,22 @@ async function extractEpisodeStreams(link) {
     } else if (link.includes('maxstream')) {
       const result = await extractMaxStream(link);
       if (result) {
+        const hasProxy = !!(process.env.PROXY_URL || process.env.PROXY);
         streams.push({
           name: 'CB01',
-          title: '🎬 CB01\n▶️ MaxStream',
+          title: `🎬 CB01\n🗣 🇮🇹 [ITA]\n▶️ MaxStream\n🌐 Proxy (${hasProxy ? 'ON' : 'OFF'})\n🤌 CB01 🎞️`,
           url: result.url,
         });
       }
     } else if (link.includes('mixdrop') || link.includes('m1xdrop')) {
       const result = await extractMixDrop(link);
       if (result) {
+        const hasProxy = !!(process.env.PROXY_URL || process.env.PROXY);
         streams.push({
           name: 'CB01',
-          title: '🎬 CB01\n▶️ MixDrop',
+          title: `🎬 CB01\n🗣 🇮🇹 [ITA]\n▶️ MixDrop\n🌐 Proxy (${hasProxy ? 'ON' : 'OFF'})\n🤌 CB01 🎞️`,
           url: result.url,
-          ...(result.headers ? { behaviorHints: { proxyHeaders: { request: result.headers } } } : {}),
+          ...(result.headers ? { behaviorHints: { notWebReady: true, proxyHeaders: { request: result.headers } } } : {}),
         });
       }
     }
@@ -439,7 +427,11 @@ async function getStreams(id, type, season, episode, providerContext = null) {
     if (tmdbId) {
       const info = await getTitleAndYear(tmdbId, isMovie ? 'movie' : 'tv');
       if (info) {
-        showname = info.title;
+        // If TMDB it-IT returns a non-Latin title (e.g. Korean), prefer context title
+        const isLatin = /[a-zA-Z]/.test(info.title);
+        if (isLatin) {
+          showname = info.title;
+        }
         year = info.year;
       }
     }

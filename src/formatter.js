@@ -74,59 +74,102 @@ function shouldProxyForWebPlayback(stream, url, headers, addonBaseUrl) {
 }
 
 function formatStream(stream, providerName) {
-    // Format resolution con tema cani 🐶
-    let quality = stream.quality || '';
-    if (quality === '2160p') quality = '🐺 4K UHD';
-    else if (quality === '1440p') quality = '🐕‍🦺 QHD';
-    else if (quality === '1080p') quality = '🐕 FHD';
-    else if (quality === '720p') quality = '🐩 HD';
-    else if (quality === '576p' || quality === '480p' || quality === '360p' || quality === '240p') quality = '🐾 SD Quality';
-    else if (!quality || ['auto', 'unknown', 'unknow'].includes(String(quality).toLowerCase())) quality = 'Unknow';
+    // ─── Quality badge ────────────────────────────────────────────────────
+    let qualityBadge = '';
+    const rawQ = String(stream.quality || '').toLowerCase();
+    if (rawQ === '2160p' || rawQ === '4k')       qualityBadge = '4K';
+    else if (rawQ === '1440p')                    qualityBadge = '1440p';
+    else if (rawQ === '1080p' || rawQ === 'fhd')  qualityBadge = '1080p';
+    else if (rawQ === '720p' || rawQ === 'hd')    qualityBadge = '720p';
+    else if (['576p','480p','360p','240p','sd'].includes(rawQ)) qualityBadge = rawQ.toUpperCase();
 
-    // Format title with emoji
-    let title = `🦴 ${stream.title || 'Stream'}`;
+    // ─── Language detection ─────────────────────────────────────────────
+    let langLabel = '';
+    const lang = stream.language || '';
+    const titleLower = String(stream.title || '').toLowerCase();
+    const nameLower  = String(stream.name || '').toLowerCase();
+    if (lang.includes('SUB') || nameLower.includes('sub ita') || titleLower.includes('sub ita') || titleLower.includes('sub'))
+      langLabel = '🇰🇷 SUB ITA';
+    else if (lang.includes('🇮🇹') || nameLower.includes('ita') || titleLower.includes('[ita]'))
+      langLabel = '🇮🇹 [ITA]';
+    else
+      langLabel = '🇮🇹 [ITA]';
 
-    // Extract language if not present
-    let language = stream.language;
-    if (!language) {
-        if (stream.name && (stream.name.includes('SUB ITA') || stream.name.includes('SUB'))) language = '🇯🇵 🇮🇹';
-        else if (stream.title && (stream.title.includes('SUB ITA') || stream.title.includes('SUB'))) language = '🇯🇵 🇮🇹';
-        else language = '🇮🇹';
-    }
-
-    // Dettagli ricchi (Bitrate, Codec Video/Audio, FPS) - Tutte le info possibili
-    let details = [];
-    if (stream.size) details.push(`🥩 ${stream.size}`);
-    if (stream.videoCodec) details.push(`🎞 ${stream.videoCodec}`);
-    if (stream.audioCodec) details.push(`🔊 ${stream.audioCodec}`);
-    if (stream.bitrate) details.push(`📶 ${stream.bitrate}`);
-    if (stream.fps) details.push(`🎬 ${stream.fps} fps`);
-
-    const desc = details.join(' | ');
-
-    // Construct Name: Quality + Provider
+    // ─── Provider label (StreamVix-style) ───────────────────────────────
     let pName = stream.name || stream.server || providerName;
-
-    // Clean SUB ITA or ITA from provider name if present
     if (pName) {
         pName = pName
-            .replace(/\s*\[?\(?\s*SUB\s*ITA\s*\)?\]?/i, '') 
-            .replace(/\s*\[?\(?\s*ITA\s*\)?\]?/i, '')     
-            .replace(/\s*\[?\(?\s*SUB\s*\)?\]?/i, '')     
-            .replace(/\(\s*\)/g, '')                      
-            .replace(/\[\s*\]/g, '')                      
+            .replace(/\s*\[?\(?\s*SUB\s*ITA\s*\)?\]?/i, '')
+            .replace(/\s*\[?\(?\s*ITA\s*\)?\]?/i, '')
+            .replace(/\s*\[?\(?\s*SUB\s*\)?\]?/i, '')
+            .replace(/\(\s*\)/g, '')
+            .replace(/\[\s*\]/g, '')
             .trim();
     }
-
-    // Capitalize if using the key name
-    if (pName === providerName) {
-        pName = pName.charAt(0).toUpperCase() + pName.slice(1);
+    if (!pName || pName === providerName) {
+        pName = typeof providerName === 'string'
+            ? providerName.charAt(0).toUpperCase() + providerName.slice(1)
+            : 'Provider';
     }
 
-    // Aggiungi zampa cane se esiste il provider
-    if (pName) {
-        pName = `🐾 ${pName}`;
-    }
+    const providerEmojis = {
+        'streamingcommunity': '🤌 StreamingCommunity 🍿',
+        'cb01': '🤌 CB01 🎞️',
+        'guardaserie': '🤌 GuardaSerie 🎥',
+        'guardoserie': '🤌 Guardoserie 📼',
+        'guardahd': '🤌 GuardaHD 🎬',
+        'eurostreaming': '🤌 Eurostreaming 🇪🇺',
+        'loonex': '🤌 Loonex 🎬',
+        'toonitalia': '🤌 ToonItalia 🎨',
+        'animeunity': '🤌 AnimeUnity ⛩️',
+        'animeworld': '🤌 AnimeWorld 🌍',
+        'animesaturn': '🤌 AnimeSaturn 🪐',
+        'kisskh': '🤌 KissKH 💋',
+        'rama': '🤌 Rama 🌺',
+    };
+    const pKey = String(providerName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const providerLabel = providerEmojis[pKey] || `🤌 ${pName}`;
+
+    // ─── Size info ──────────────────────────────────────────────────────
+    let sizeLabel = '';
+    if (stream.size) sizeLabel = `💾 ${stream.size}`;
+
+    // ─── Player / extractor name ────────────────────────────────────────
+    let playerLabel = '';
+    if (stream.server && stream.server !== pName) playerLabel = `▶️ ${stream.server}`;
+    else if (stream.extractor) playerLabel = `▶️ ${stream.extractor}`;
+
+    // ─── Extra details (codec, bitrate) ─────────────────────────────────
+    let extras = [];
+    if (stream.videoCodec) extras.push(stream.videoCodec);
+    if (stream.audioCodec) extras.push(stream.audioCodec);
+    if (stream.bitrate) extras.push(stream.bitrate);
+    if (stream.fps) extras.push(`${stream.fps}fps`);
+
+    // ─── Proxy status ───────────────────────────────────────────────────
+    const hasProxy = !!(process.env.PROXY_URL || process.env.PROXY);
+    const proxyLabel = `🌐 Proxy (${hasProxy ? 'ON' : 'OFF'})`;
+
+    // ─── Build NAME field (left column in Stremio) ──────────────────────
+    //  StreamVix style: provider name + quality badge on left
+    let nameLines = [];
+    if (qualityBadge) nameLines.push(qualityBadge);
+    nameLines.push(pName);
+    const finalName = nameLines.join('\n');
+
+    // ─── Build TITLE field (right column in Stremio, multi-line) ────────
+    let titleLines = [];
+    titleLines.push(`🎬 ${stream.title || 'Stream'}`);
+    titleLines.push(`🗣 ${langLabel}`);
+    if (qualityBadge) titleLines.push(`📺 ${qualityBadge}`);
+    if (sizeLabel) titleLines.push(sizeLabel);
+    if (playerLabel) titleLines.push(playerLabel);
+    if (extras.length) titleLines.push(`📊 ${extras.join(' | ')}`);
+    titleLines.push(proxyLabel);
+    titleLines.push(providerLabel);
+    const finalTitle = titleLines.join('\n');
+
+    // ─── Behavior hints / proxy / headers (unchanged logic) ─────────────
 
     // Move headers to behaviorHints if present, but keep original for compatibility
     const behaviorHints = cloneBehaviorHints(stream.behaviorHints || {});
@@ -154,7 +197,6 @@ function formatStream(stream, providerName) {
     if (finalHeaders) {
         behaviorHints.proxyHeaders = behaviorHints.proxyHeaders || {};
         behaviorHints.proxyHeaders.request = finalHeaders;
-        // Also support "headers" in behaviorHints directly (Stremio extension)
         behaviorHints.headers = finalHeaders;
     } else {
         delete behaviorHints.proxyHeaders;
@@ -162,34 +204,6 @@ function formatStream(stream, providerName) {
     }
 
     behaviorHints.notWebReady = shouldSetNotWebReady(finalUrl, finalHeaders, behaviorHints);
-
-    let providerLabel = pName || (typeof providerName === 'string' ? providerName.charAt(0).toUpperCase() + providerName.slice(1) : 'Provider');
-    if (!providerLabel.includes('🐾')) {
-        providerLabel = `🐾 ${providerLabel}`;
-    }
-
-    // Qualità con faccine
-    let finalName = quality && quality !== 'Unknow' ? quality : providerLabel;
-    if (finalName === 'Unknow' || !finalName) finalName = '🐶 ' + providerLabel;
-    
-    // Titolo arricchito con Osso
-    let finalTitle = `🦴 ${stream.title || 'Stream'}`;
-    finalTitle += `\n${providerLabel}`;
-
-    if (language) {
-        let langStr = language;
-        if (langStr.includes('🦮')) {
-            finalTitle += `\n${langStr} 🎾 NelloStream`;
-        } else {
-            langStr = langStr.replace('🇮🇹', 'IT').replace('🇯🇵', 'JP').trim();
-            finalTitle += `\n🦮 ${langStr} 🎾 NelloStream`;
-        }
-    } else {
-         finalTitle += `\n🦮 IT 🎾 NelloStream`;
-    }
-
-    // Altre info
-    if (desc) finalTitle += `\n${desc}`;
 
     const responseStream = {
         name: finalName,
