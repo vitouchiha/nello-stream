@@ -530,12 +530,18 @@ app.get('/debug-title/:imdbId', async (req, res) => {
       const tTitle = tKey ? await findTitleByImdbId(imdbId, tKey) : null;
       trace.push({ step: 'tmdb', title: tTitle, keyPresent: !!tKey });
     } catch (e) { trace.push({ step: 'tmdb', error: e.message }); }
-    // IMDb page
+    // Direct guardoserie test
     try {
-      const iResp = await axios.get(`https://www.imdb.com/title/${imdbId}/`, { timeout: 7000, headers: { 'User-Agent': 'Mozilla/5.0' } });
-      const og = iResp.data.match(/<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i);
-      trace.push({ step: 'imdb_page', title: og?.[1] || null });
-    } catch (e) { trace.push({ step: 'imdb_page', error: e.message }); }
+      const guardoserie = require('./src/guardoserie/index');
+      const gs = await guardoserie.getStreams(imdbId, 'series', 1, 1, { imdbId });
+      trace.push({ step: 'guardoserie_direct', streams: gs.length, first: gs[0]?.name || null });
+    } catch (e) { trace.push({ step: 'guardoserie_direct', error: e.message }); }
+    // Easystreams test
+    try {
+      const easystreams = require('./src/index');
+      const es = await easystreams.getStreams(imdbId, 'series', 1, 1, { ...config, primaryTitle: 'Scrubs', titleCandidates: ['Scrubs'] });
+      trace.push({ step: 'easystreams', streams: es.length, names: es.slice(0,5).map(s=>s.name) });
+    } catch (e) { trace.push({ step: 'easystreams', error: e.message }); }
     res.json({ imdbId, trace });
   } catch (e) { res.json({ imdbId, error: e.message, trace }); }
 });
