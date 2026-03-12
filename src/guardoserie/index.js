@@ -4,6 +4,7 @@ const { formatStream } = require('../formatter');
 const { checkQualityFromPlaylist } = require('../quality_helper');
 const { getProviderUrl } = require('../provider_urls.js');
 const { CookieJar } = require('tough-cookie');
+const { launchBrowser } = require('../utils/browser.js');
 
 function getGuardoserieBaseUrl() {
     return getProviderUrl('guardoserie');
@@ -79,6 +80,49 @@ async function _cfWorkerFetch(url) {
         };
     } catch (e) {
         console.warn(`[Guardoserie] CF Worker fetch failed: ${e.message}`);
+        return null;
+    }
+}
+
+/**
+ * Fetch via headless browser (Browserless.io or local Chromium).
+ * Solves Cloudflare JS challenges via puppeteer-stealth.
+ */
+let _sharedBrowser = null;
+async function _browserFetch(url) {
+    try {
+        if (!_sharedBrowser || !_sharedBrowser.isConnected()) {
+            _sharedBrowser = await launchBrowser();
+        }
+        const page = await _sharedBrowser.newPage();
+        // Authenticate if browser has proxy auth
+        if (_sharedBrowser._proxyAuth) {
+            await page.authenticate(_sharedBrowser._proxyAuth);
+        }
+        try {
+            await page.setUserAgent(USER_AGENT);
+            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+            // Wait for Cloudflare challenge to resolve (if present)
+            const isCF = await page.evaluate(() => document.title.includes('Just a moment'));
+            if (isCF) {
+                console.log(`[Guardoserie] Cloudflare challenge detected, waiting...`);
+                await page.waitForFunction(
+                    () => !document.title.includes('Just a moment'),
+                    { timeout: 15000 }
+                );
+            }
+            const body = await page.content();
+            console.log(`[Guardoserie] Browser fetch OK: ${url.substring(0, 80)} (${body.length} bytes)`);
+            return {
+                ok: true, status: 200, statusCode: 200,
+                headers: { get: () => null, getSetCookie: () => [] },
+                text: async () => body, json: async () => JSON.parse(body),
+            };
+        } finally {
+            await page.close().catch(() => {});
+        }
+    } catch (e) {
+        console.warn(`[Guardoserie] Browser fetch failed: ${e.message}`);
         return null;
     }
 }
@@ -184,7 +228,11 @@ async function proxyFetch(url, opts = {}) {
             return cfResp;
         }
 
-        // Strategy 2: WEBSHARE residential proxy
+        // Strategy 2: Headless browser (solves Cloudflare JS challenges)
+        const brResp = await _browserFetch(url);
+        if (brResp) return brResp;
+
+        // Strategy 3: WEBSHARE residential proxy
         const wsResp = await _webshareFetch(url, mergedHeaders);
         if (wsResp) {
             const setCookieHeaders = wsResp.headers.getSetCookie?.() || [];
@@ -926,6 +974,12 @@ async function getStreams(id, type, season, episode, providerContext = null) {
     } catch (e) {
         console.error(`[Guardoserie] Error:`, e);
         return [];
+    } finally {
+        // Close shared browser to free resources
+        if (_sharedBrowser) {
+            _sharedBrowser.close().catch(() => {});
+            _sharedBrowser = null;
+        }
     }
 }
 
