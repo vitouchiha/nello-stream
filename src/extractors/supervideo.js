@@ -12,6 +12,16 @@ const axios = require('axios');
 
 const BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 const log = createLogger('supervideo');
+
+/** Returns CF_PROXY_URL if configured, else null */
+function getCfProxyUrl() {
+  try {
+    if (typeof global !== 'undefined' && global.CF_PROXY_URL) return global.CF_PROXY_URL;
+    if (typeof process !== 'undefined' && process.env && process.env.CF_PROXY_URL) return process.env.CF_PROXY_URL;
+  } catch {}
+  return null;
+}
+
 const SHOULD_PREFER_BROWSER = !!(
   process.env.VERCEL ||
   process.env.AWS_LAMBDA_FUNCTION_NAME ||
@@ -266,39 +276,85 @@ async function extractSuperVideo(url, options = {}) {
     // Pick a Webshare proxy (kept as fallback for browser extraction)
     const wsProxy = getWebshareProxy();
 
-    // PRIORITY: Use CF Worker for the embed page fetch.
-    // serversicuro.cc HLS tokens are IP-locked to the IP that loaded the embed page.
-    // CF Worker has a fixed IP, and the HLS proxy also routes serversicuro.cc
-    // through the same CF Worker — so extraction IP = playback IP.
-    // wsProxy is rotating (different IP each connection) which breaks IP-locked tokens.
+    // ─── Strategy 1: CF Worker sv_extract endpoint ──────────────────────
+    // Extracts embed page + fetches manifest in a SINGLE Worker invocation.
+    // serversicuro.cc tokens are IP-locked, so extraction and manifest fetch
+    // MUST happen from the same IP.  The CF Worker endpoint does both.
+    const cfProxyUrl = getCfProxyUrl();
+    if (cfProxyUrl) {
+      try {
+        const svExtractUrl = `${cfProxyUrl}${cfProxyUrl.includes('?') ? '&' : '?'}url=${encodeURIComponent(embedUrl)}&mode=sv_extract`;
+        const resp = await axios.get(svExtractUrl, { timeout: 15_000 });
+        const data = resp.data;
+        if (data && data.manifestUrl && data.manifestBody) {
+          log.warn('CF Worker sv_extract success', {
+            embedUrl,
+            manifestUrl: data.manifestUrl,
+            bodyLen: data.manifestBody.length,
+          });
+          return {
+            url: data.manifestUrl,
+            headers: { "User-Agent": USER_AGENT, "Referer": getPlaybackReferer(embedUrl) },
+            manifestBody: data.manifestBody,
+          };
+        }
+        log.warn('CF Worker sv_extract: no manifest body (IP mismatch), falling through', {
+          embedUrl,
+          hasUrl: !!data?.manifestUrl,
+          error: data?.error,
+        });
+      } catch (err) {
+        log.warn('CF Worker sv_extract failed', { embedUrl, error: err.message });
+      }
+    }
+
+    // ─── Strategy 1b: Browser extraction (IP-locked hosts) ──────────────
+    // serversicuro.cc tokens are IP-locked.  Puppeteer with wsProxy bypasses
+    // Cloudflare JS challenges AND captures manifestBody locked to wsProxy IP.
+    // Skip HTTP-based extraction entirely — it can't produce playable results.
+    if (SHOULD_PREFER_BROWSER && wsProxy) {
+      log.warn('trying browser-first for IP-locked host', { embedUrl, withProxy: true });
+      try {
+        const browserResolved = await resolveWithBrowser(embedUrl, refererBase, wsProxy);
+        if (browserResolved) {
+          log.warn('browser-first extraction result', {
+            embedUrl,
+            manifestUrl: browserResolved.url,
+            hasManifestBody: Boolean(browserResolved.manifestBody),
+          });
+          return browserResolved;
+        }
+      } catch (browserErr) {
+        log.warn('browser-first extraction failed, falling through to HTTP chain', { embedUrl, error: browserErr.message });
+      }
+    }
+
+    // ─── Strategy 2: Fetch embed page + parse locally ───────────────────
     const proxiedUrl = getProxiedUrl(embedUrl);
 
     let html;
     let responseStatus;
-    let usedCfWorker = false;
-    // Try CF Worker first (fixed IP — matches HLS proxy IP for serversicuro.cc)
-    try {
-      const resp = await axios.get(proxiedUrl, {
-        headers: { "User-Agent": USER_AGENT, "Referer": refererBase },
-        timeout: 8_000,
-      });
-      html = typeof resp.data === 'string' ? resp.data : String(resp.data || '');
-      responseStatus = resp.status;
-      usedCfWorker = true;
-    } catch (err) {
-      log.warn('CF Worker embed fetch failed, trying wsProxy', { embedUrl, error: err.message });
-      if (wsProxy) {
-        const agent = makeProxyAgent(wsProxy);
+    if (wsProxy) {
+      const agent = makeProxyAgent(wsProxy);
+      try {
+        const resp = await axios.get(embedUrl, {
+          headers: { "User-Agent": USER_AGENT, "Referer": refererBase },
+          timeout: 8_000,
+          httpsAgent: agent, httpAgent: agent, proxy: false,
+        });
+        html = typeof resp.data === 'string' ? resp.data : String(resp.data || '');
+        responseStatus = resp.status;
+      } catch (err) {
+        log.warn('wsProxy embed fetch failed, trying CF Worker page fetch', { embedUrl, error: err.message });
         try {
-          const resp = await axios.get(embedUrl, {
+          const resp = await axios.get(proxiedUrl, {
             headers: { "User-Agent": USER_AGENT, "Referer": refererBase },
             timeout: 8_000,
-            httpsAgent: agent, httpAgent: agent, proxy: false,
           });
           html = typeof resp.data === 'string' ? resp.data : String(resp.data || '');
           responseStatus = resp.status;
         } catch (err2) {
-          log.warn('wsProxy embed also failed, trying browser', { embedUrl, error: err2.message });
+          log.warn('CF Worker page fetch also failed, trying browser', { embedUrl, error: err2.message });
           try {
             const browserResolved = await resolveWithBrowser(embedUrl, refererBase, wsProxy);
             if (browserResolved) return browserResolved;
@@ -307,8 +363,17 @@ async function extractSuperVideo(url, options = {}) {
           }
           return null;
         }
-      } else {
-        // No wsProxy — fall back to PROXY_URL env
+      }
+    } else {
+      try {
+        const resp = await axios.get(proxiedUrl, {
+          headers: { "User-Agent": USER_AGENT, "Referer": refererBase },
+          timeout: 8_000,
+        });
+        html = typeof resp.data === 'string' ? resp.data : String(resp.data || '');
+        responseStatus = resp.status;
+      } catch (err) {
+        log.warn('CF Worker embed fetch failed (no wsProxy)', { embedUrl, error: err.message });
         const envProxy = (process.env.PROXY_URL || process.env.PROXY || '').trim();
         if (envProxy) {
           try {
@@ -330,9 +395,10 @@ async function extractSuperVideo(url, options = {}) {
       }
     }
 
-    // When CF Worker was used for the embed fetch, the HLS token is locked to CF Worker IP.
-    // Don't pass wsProxy — the HLS proxy will route through CF Worker for serversicuro.cc.
-    const resultProxyUrl = usedCfWorker ? undefined : (wsProxy || undefined);
+    // Fallback path: wsProxy or envProxy was used — pass through for HLS proxy.
+    // (The sv_extract path above returned early with manifestBody cached,
+    //  these fallback paths don't guarantee IP consistency for serversicuro.cc.)
+    const resultProxyUrl = wsProxy || undefined;
 
     let exactManifestUrl = extractDirectManifestUrl(html);
     if (exactManifestUrl) {
@@ -525,13 +591,9 @@ async function extractSuperVideoValidated(url, options = {}) {
   const result = await extractSuperVideo(url, options);
   if (!result || result.isExternal) return result;
   // serversicuro URLs are OK when:
-  //  - a per-stream proxyUrl is attached (same IP for extraction & playback), OR
-  //  - CF_PROXY_URL is configured (HLS proxy routes serversicuro.cc through CF Worker)
-  const hasCfProxy = !!(
-    (typeof global !== 'undefined' && global.CF_PROXY_URL) ||
-    (typeof process !== 'undefined' && process.env && process.env.CF_PROXY_URL)
-  );
-  if (result.proxyUrl || hasCfProxy) return result;
+  //  - manifestBody is cached (browser or sv_extract captured it), OR
+  //  - a per-stream proxyUrl is attached (same IP for extraction & playback)
+  if (result.manifestBody || result.proxyUrl) return result;
   // On serverless without proxy, serversicuro tokens are IP-locked → discard
   if (IS_SERVERLESS && result.url && /serversicuro\.cc/i.test(result.url)) {
     log.warn('discarding serversicuro URL on serverless (IP-locked token, no proxy)', {
