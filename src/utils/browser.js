@@ -25,13 +25,19 @@ const path = require('path');
  */
 
 const puppeteerCore = require('puppeteer-core');
-const { addExtra } = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const { createLogger } = require('./logger');
 
-// Wrap puppeteer-core with stealth plugin to bypass Cloudflare bot detection
-const puppeteer = addExtra(puppeteerCore);
-puppeteer.use(StealthPlugin());
+// Try to wrap puppeteer-core with stealth plugin for Cloudflare bypass.
+// Falls back to raw puppeteer-core if stealth evasions are missing (Vercel bundler).
+let puppeteer = puppeteerCore;
+try {
+  const { addExtra } = require('puppeteer-extra');
+  const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+  puppeteer = addExtra(puppeteerCore);
+  puppeteer.use(StealthPlugin());
+} catch (err) {
+  // Stealth unavailable — use raw puppeteer-core
+}
 
 const log = createLogger('browser');
 
