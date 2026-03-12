@@ -2,7 +2,14 @@
   "version": 2,
   "regions": ["fra1"],
   "builds": [
-    { "src": "api/index.js", "use": "@vercel/node", "config": { "maxDuration": 60 } }
+    {
+      "src": "api/index.js",
+      "use": "@vercel/node",
+      "config": {
+        "maxDuration": 60,
+        "includeFiles": "node_modules/puppeteer-extra-plugin-stealth/evasions/**/*"
+      }
+    }
   ],
   "routes": [
     { "src": "/(.*)", "dest": "api/index.js" }

@@ -590,16 +590,18 @@ async function extractSuperVideoValidated(url, options = {}) {
   const IS_SERVERLESS = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NETLIFY);
   const result = await extractSuperVideo(url, options);
   if (!result || result.isExternal) return result;
-  // serversicuro URLs are OK when:
-  //  - manifestBody is cached (browser or sv_extract captured it), OR
-  //  - a per-stream proxyUrl is attached (same IP for extraction & playback)
-  if (result.manifestBody || result.proxyUrl) return result;
-  // On serverless without proxy, serversicuro tokens are IP-locked → discard
-  if (IS_SERVERLESS && result.url && /serversicuro\.cc/i.test(result.url)) {
-    log.warn('discarding serversicuro URL on serverless (IP-locked token, no proxy)', {
-      url: result.url,
-    });
-    return null;
+  // serversicuro.cc tokens are IP-locked.  Only accept if we have the manifest
+  // body cached (browser response interceptor or sv_extract captured it).
+  // proxyUrl alone is NOT enough because extraction may have used a different IP.
+  if (result.url && /serversicuro\.cc/i.test(result.url)) {
+    if (result.manifestBody) return result;
+    if (IS_SERVERLESS) {
+      log.warn('discarding serversicuro URL (IP-locked, no cached body)', {
+        url: result.url,
+        hasProxy: !!result.proxyUrl,
+      });
+      return null;
+    }
   }
   return result;
 }
