@@ -560,31 +560,51 @@ app.get('/debug/providers', requireDebugAuth, async (req, res) => {
   res.json(result);
 });
 
-// Temporary diagnostic: test CF Worker fetch for guardoserie
+// Temporary diagnostic: test CF Worker + WEBSHARE fetch for guardoserie
 app.get('/debug/cf-guardoserie', requireDebugAuth, async (req, res) => {
   const cfBase = (process.env.CF_WORKER_URL || '').trim();
   const cfAuth = (process.env.CF_WORKER_AUTH || '').trim();
-  const targetUrl = 'https://guardoserie.digital/?s=how+i+met+your+mother';
-  const result = { cfBase: cfBase ? cfBase.substring(0, 40) + '...' : 'NOT SET', cfAuth: cfAuth ? 'SET (' + cfAuth.length + ' chars)' : 'NOT SET' };
-  if (!cfBase) return res.json({ ...result, error: 'CF_WORKER_URL not set' });
-  try {
-    const workerUrl = new URL(cfBase.replace(/\/$/, ''));
-    workerUrl.searchParams.set('url', targetUrl);
-    const headers = { 'Accept': 'text/html, */*' };
-    if (cfAuth) headers['x-worker-auth'] = cfAuth;
-    result.workerFullUrl = workerUrl.toString().substring(0, 120);
-    const t0 = Date.now();
-    const resp = await fetch(workerUrl.toString(), { headers, signal: AbortSignal.timeout(15000) });
-    const body = await resp.text();
-    result.status = resp.status;
-    result.ok = resp.ok;
-    result.ms = Date.now() - t0;
-    result.bodyLength = body.length;
-    result.bodySnippet = body.substring(0, 300);
-    result.hasSerieLinks = body.includes('/serie/');
-  } catch (e) {
-    result.error = e.message;
+  const wsRaw = (process.env.WEBSHARE_PROXIES || '').trim();
+  const targetUrl = 'https://guardoserie.best/?s=how+i+met+your+mother';
+  const result = {
+    cfBase: cfBase ? cfBase.substring(0, 40) + '...' : 'NOT SET',
+    cfAuth: cfAuth ? 'SET (' + cfAuth.length + ' chars)' : 'NOT SET',
+    webshare: wsRaw ? 'SET (' + wsRaw.split(',').length + ' proxies)' : 'NOT SET',
+  };
+
+  // Test 1: CF Worker
+  if (cfBase) {
+    try {
+      const cfTarget = targetUrl.replace('guardoserie.best', 'guardoserie.digital');
+      const workerUrl = new URL(cfBase.replace(/\/$/, ''));
+      workerUrl.searchParams.set('url', cfTarget);
+      const headers = { 'Accept': 'text/html, */*' };
+      if (cfAuth) headers['x-worker-auth'] = cfAuth;
+      const t0 = Date.now();
+      const resp = await fetch(workerUrl.toString(), { headers, signal: AbortSignal.timeout(15000) });
+      const body = await resp.text();
+      result.cfWorker = { status: resp.status, ok: resp.ok, ms: Date.now() - t0, bodyLength: body.length, hasSerieLinks: body.includes('/serie/'), isChallenge: body.includes('Just a moment') };
+    } catch (e) { result.cfWorker = { error: e.message }; }
   }
+
+  // Test 2: WEBSHARE proxy
+  if (wsRaw) {
+    const list = wsRaw.split(',').map(s => s.trim()).filter(Boolean);
+    const proxy = list[0];
+    try {
+      const { HttpsProxyAgent } = require('https-proxy-agent');
+      const agent = new HttpsProxyAgent(proxy);
+      const axios = require('axios');
+      const t0 = Date.now();
+      const r = await axios.get(targetUrl, {
+        httpsAgent: agent, httpAgent: agent, proxy: false,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Safari/537.36', 'Accept': 'text/html', 'Accept-Language': 'it-IT,it;q=0.9' },
+        timeout: 15000, maxRedirects: 5, validateStatus: () => true, responseType: 'text',
+      });
+      result.webshare = { status: r.status, ms: Date.now() - t0, bodyLength: (r.data||'').length, hasSerieLinks: (r.data||'').includes('/serie/'), isChallenge: (r.data||'').includes('Just a moment'), snippet: (r.data||'').substring(0,200) };
+    } catch (e) { result.webshare = { error: e.message }; }
+  }
+
   res.json(result);
 });
 

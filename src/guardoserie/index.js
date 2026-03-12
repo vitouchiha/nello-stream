@@ -53,9 +53,9 @@ const BROWSER_HEADERS = {
 
 /**
  * Fetch via Cloudflare Worker proxy (bypasses CF bot detection on guardoserie).
- * Returns a fetch-like response or null if CF Worker is not configured.
+ * Returns a fetch-like response or null if CF Worker is not configured / fails.
  */
-async function _cfWorkerFetch(url, opts = {}) {
+async function _cfWorkerFetch(url) {
     const cfBase = (process.env.CF_WORKER_URL || '').trim();
     if (!cfBase) return null;
     const cfAuth = (process.env.CF_WORKER_AUTH || '').trim();
@@ -66,59 +66,138 @@ async function _cfWorkerFetch(url, opts = {}) {
         workerUrl.searchParams.set('url', cfTargetUrl);
         const headers = { 'Accept': 'text/html, */*' };
         if (cfAuth) headers['x-worker-auth'] = cfAuth;
-        const resp = await fetch(workerUrl.toString(), { headers, signal: AbortSignal.timeout(25000) });
+        const resp = await fetch(workerUrl.toString(), { headers, signal: AbortSignal.timeout(15000) });
         const body = await resp.text();
+        if (!resp.ok || body.includes('Just a moment')) return null;
         return {
-            ok: resp.ok,
-            status: resp.status,
-            statusCode: resp.status,
+            ok: true, status: resp.status, statusCode: resp.status,
             headers: {
                 get: (name) => resp.headers.get(name),
                 getSetCookie: () => resp.headers.getSetCookie?.() || [],
             },
-            text: async () => body,
-            json: async () => JSON.parse(body),
+            text: async () => body, json: async () => JSON.parse(body),
         };
     } catch (e) {
-        console.warn(`[Guardoserie] CF Worker fetch failed for ${url}: ${e.message}`);
+        console.warn(`[Guardoserie] CF Worker fetch failed: ${e.message}`);
         return null;
     }
 }
 
 /**
- * Fetch with optional SOCKS5/HTTP proxy + cookie jar.
- * Prefers CF Worker proxy for guardoserie domains (bypasses Cloudflare).
- * Falls back to PROXY_URL agent; otherwise direct fetch.
+ * Pick a random Webshare residential proxy.
+ */
+function _getWebshareProxy() {
+    const raw = (process.env.WEBSHARE_PROXIES || '').trim();
+    if (!raw) return null;
+    const list = raw.split(',').map(s => s.trim()).filter(Boolean);
+    return list.length ? list[Math.floor(Math.random() * list.length)] : null;
+}
+
+/**
+ * Fetch via WEBSHARE residential proxy (better for Cloudflare bypass).
+ */
+async function _webshareFetch(url, mergedHeaders) {
+    const proxyUrl = _getWebshareProxy();
+    if (!proxyUrl) return null;
+    try {
+        const { HttpsProxyAgent } = require('https-proxy-agent');
+        const agent = new HttpsProxyAgent(proxyUrl);
+        const https = require('https');
+        const http = require('http');
+        const { URL } = require('url');
+        const zlib = require('zlib');
+        const parsed = new URL(url);
+        const mod = parsed.protocol === 'https:' ? https : http;
+
+        return await new Promise((resolve, reject) => {
+            const reqOpts = {
+                hostname: parsed.hostname,
+                port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+                path: parsed.pathname + parsed.search,
+                method: 'GET',
+                headers: { ...mergedHeaders, Host: parsed.host },
+                agent,
+                timeout: 20000,
+            };
+            const req = mod.request(reqOpts, (res) => {
+                // Follow redirects
+                if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
+                    resolve(_webshareFetch(res.headers.location, mergedHeaders));
+                    return;
+                }
+                const chunks = [];
+                const encoding = (res.headers['content-encoding'] || '').toLowerCase();
+                let stream = res;
+                if (encoding === 'br') stream = res.pipe(zlib.createBrotliDecompress());
+                else if (encoding === 'gzip') stream = res.pipe(zlib.createGunzip());
+                else if (encoding === 'deflate') stream = res.pipe(zlib.createInflate());
+                stream.on('data', (chunk) => chunks.push(chunk));
+                stream.on('end', () => {
+                    const body = Buffer.concat(chunks).toString('utf-8');
+                    if (res.statusCode === 403 && body.includes('Just a moment')) {
+                        resolve(null); // Cloudflare blocked
+                        return;
+                    }
+                    resolve({
+                        ok: res.statusCode >= 200 && res.statusCode < 300,
+                        status: res.statusCode, statusCode: res.statusCode,
+                        headers: {
+                            get: (name) => res.headers[name.toLowerCase()] || null,
+                            getSetCookie: () => { const sc = res.headers['set-cookie']; return Array.isArray(sc) ? sc : sc ? [sc] : []; }
+                        },
+                        text: async () => body, json: async () => JSON.parse(body),
+                    });
+                });
+                stream.on('error', reject);
+            });
+            req.on('error', reject);
+            req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
+            req.end();
+        });
+    } catch (e) {
+        console.warn(`[Guardoserie] WEBSHARE fetch failed: ${e.message}`);
+        return null;
+    }
+}
+
+/**
+ * Fetch with multiple proxy strategies for guardoserie domains:
+ * 1. CF Worker (CF-to-CF bypass)
+ * 2. WEBSHARE residential proxy (bypasses Cloudflare)
+ * 3. PROXY_URL / direct fetch (fallback)
  */
 async function proxyFetch(url, opts = {}) {
-    // Try CF Worker first for guardoserie domains (Cloudflare blocks datacenter IPs)
     const isGuardoserie = url.includes('guardoserie');
-    if (isGuardoserie) {
-        const cfResp = await _cfWorkerFetch(url, opts);
-        if (cfResp && cfResp.ok) {
-            // Store cookies if present
-            const setCookieHeaders = cfResp.headers.getSetCookie?.() || [];
-            for (const c of setCookieHeaders) {
-                try { _cookieJar.setCookieSync(c, url); } catch { /* ignore */ }
-            }
-            return cfResp;
-        }
-        if (cfResp) console.warn(`[Guardoserie] CF Worker returned ${cfResp.status} for ${url}, falling back`);
-    }
-
-    const agent = _getAgent();
-    const fetchOpts = { ...opts };
 
     // Inject cookies from jar
     let cookies = '';
     try { cookies = _cookieJar.getCookieStringSync(url); } catch { /* ignore */ }
     const mergedHeaders = { ...BROWSER_HEADERS, ...opts.headers };
     if (cookies) mergedHeaders['Cookie'] = cookies;
-    fetchOpts.headers = mergedHeaders;
 
-    if (agent) {
-        fetchOpts.agent = agent;
+    if (isGuardoserie) {
+        // Strategy 1: CF Worker
+        const cfResp = await _cfWorkerFetch(url);
+        if (cfResp) {
+            const setCookieHeaders = cfResp.headers.getSetCookie?.() || [];
+            for (const c of setCookieHeaders) { try { _cookieJar.setCookieSync(c, url); } catch {} }
+            return cfResp;
+        }
+
+        // Strategy 2: WEBSHARE residential proxy
+        const wsResp = await _webshareFetch(url, mergedHeaders);
+        if (wsResp) {
+            const setCookieHeaders = wsResp.headers.getSetCookie?.() || [];
+            for (const c of setCookieHeaders) { try { _cookieJar.setCookieSync(c, url); } catch {} }
+            return wsResp;
+        }
+        console.warn(`[Guardoserie] All proxy strategies failed for ${url}, trying direct`);
     }
+
+    // Strategy 3: PROXY_URL agent or direct
+    const agent = _getAgent();
+    const fetchOpts = { ...opts, headers: mergedHeaders };
+    if (agent) fetchOpts.agent = agent;
 
     const resp = await _doFetch(url, fetchOpts);
 
