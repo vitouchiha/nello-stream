@@ -546,13 +546,15 @@ app.get('/debug/providers', requireDebugAuth, async (req, res) => {
     ['kisskh', 'https://kisskh.co/api/DramaList/List?page=1&type=1&sub=0&country=2&status=2&order=3&pageSize=5',
       { headers: { 'User-Agent': UA, 'Accept': 'application/json', 'Referer': 'https://kisskh.co/' } }],
     ['rama', 'https://ramaorientalfansub.live/', { headers: { 'User-Agent': UA } }],
+    ['guardoserie', 'https://guardoserie.best/?s=how+i+met+your+mother', { headers: { 'User-Agent': UA, 'Accept': 'text/html', 'Accept-Language': 'it-IT,it;q=0.9' } }],
   ]) {
     try {
       const t0 = Date.now();
       const r = await axios.get(url, { ...opts, timeout: 8000, ...pc });
-      result[key] = { ok: true, status: r.status, ms: Date.now() - t0, count: r.data?.data?.length };
+      const bodySnippet = typeof r.data === 'string' ? r.data.substring(0, 200) : JSON.stringify(r.data).substring(0, 200);
+      result[key] = { ok: true, status: r.status, ms: Date.now() - t0, count: r.data?.data?.length, bodySnippet };
     } catch (e) {
-      result[key] = { ok: false, status: e?.response?.status, error: e.message };
+      result[key] = { ok: false, status: e?.response?.status, error: e.message, bodySnippet: typeof e?.response?.data === 'string' ? e.response.data.substring(0, 200) : undefined };
     }
   }
   res.json(result);
