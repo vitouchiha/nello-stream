@@ -605,6 +605,31 @@ app.get('/debug/cf-guardoserie', requireDebugAuth, async (req, res) => {
     } catch (e) { result.webshare = { error: e.message }; }
   }
 
+  // Test 3: Browser (Browserless.io)
+  const browserlessUrl = (process.env.BROWSERLESS_URL || '').trim();
+  if (browserlessUrl) {
+    try {
+      const { launchBrowser } = require('./src/utils/browser');
+      const t0 = Date.now();
+      const browser = await launchBrowser();
+      const page = await browser.newPage();
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
+      await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+      const title = await page.title();
+      const isCF = title.includes('Just a moment');
+      if (isCF) {
+        await page.waitForFunction(() => !document.title.includes('Just a moment'), { timeout: 15000 }).catch(() => {});
+      }
+      const body = await page.content();
+      const finalTitle = await page.title();
+      await page.close().catch(() => {});
+      await browser.close().catch(() => {});
+      result.browser = { ok: true, ms: Date.now() - t0, bodyLength: body.length, title: finalTitle, hasSerieLinks: body.includes('/serie/'), wasCF: isCF, snippet: body.substring(0, 300) };
+    } catch (e) { result.browser = { error: e.message, ms: 0 }; }
+  } else {
+    result.browser = { error: 'BROWSERLESS_URL not set' };
+  }
+
   res.json(result);
 });
 
