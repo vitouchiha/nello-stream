@@ -52,10 +52,58 @@ const BROWSER_HEADERS = {
 };
 
 /**
+ * Fetch via Cloudflare Worker proxy (bypasses CF bot detection on guardoserie).
+ * Returns a fetch-like response or null if CF Worker is not configured.
+ */
+async function _cfWorkerFetch(url, opts = {}) {
+    const cfBase = (process.env.CF_WORKER_URL || '').trim();
+    if (!cfBase) return null;
+    const cfAuth = (process.env.CF_WORKER_AUTH || '').trim();
+    try {
+        const workerUrl = new URL(cfBase.replace(/\/$/, ''));
+        workerUrl.searchParams.set('url', url);
+        const headers = { 'Accept': 'text/html, */*' };
+        if (cfAuth) headers['x-worker-auth'] = cfAuth;
+        const resp = await fetch(workerUrl.toString(), { headers, signal: AbortSignal.timeout(25000) });
+        const body = await resp.text();
+        return {
+            ok: resp.ok,
+            status: resp.status,
+            statusCode: resp.status,
+            headers: {
+                get: (name) => resp.headers.get(name),
+                getSetCookie: () => resp.headers.getSetCookie?.() || [],
+            },
+            text: async () => body,
+            json: async () => JSON.parse(body),
+        };
+    } catch (e) {
+        console.warn(`[Guardoserie] CF Worker fetch failed for ${url}: ${e.message}`);
+        return null;
+    }
+}
+
+/**
  * Fetch with optional SOCKS5/HTTP proxy + cookie jar.
- * Routes through proxy when PROXY_URL env is set; otherwise direct fetch.
+ * Prefers CF Worker proxy for guardoserie domains (bypasses Cloudflare).
+ * Falls back to PROXY_URL agent; otherwise direct fetch.
  */
 async function proxyFetch(url, opts = {}) {
+    // Try CF Worker first for guardoserie domains (Cloudflare blocks datacenter IPs)
+    const isGuardoserie = url.includes('guardoserie');
+    if (isGuardoserie) {
+        const cfResp = await _cfWorkerFetch(url, opts);
+        if (cfResp && cfResp.ok) {
+            // Store cookies if present
+            const setCookieHeaders = cfResp.headers.getSetCookie?.() || [];
+            for (const c of setCookieHeaders) {
+                try { _cookieJar.setCookieSync(c, url); } catch { /* ignore */ }
+            }
+            return cfResp;
+        }
+        if (cfResp) console.warn(`[Guardoserie] CF Worker returned ${cfResp.status} for ${url}, falling back`);
+    }
+
     const agent = _getAgent();
     const fetchOpts = { ...opts };
 
@@ -67,13 +115,7 @@ async function proxyFetch(url, opts = {}) {
     fetchOpts.headers = mergedHeaders;
 
     if (agent) {
-        // node-fetch / undici dispatcher won't use 'agent' with global fetch,
-        // but https module agent works with the axios-style or node https.request.
-        // Use the undici dispatcher approach for global fetch:
         fetchOpts.agent = agent;
-        // For Node 18+ global fetch, we need to use the dispatcher option
-        // or fall back to http/https module. Let's use node-fetch if available,
-        // otherwise the https module directly.
     }
 
     const resp = await _doFetch(url, fetchOpts);
