@@ -254,8 +254,8 @@ async function _solveSafegoCaptcha(safegoUrl) {
     const imgBuf = Buffer.from(b64data, 'base64');
     const { width, height, pixels } = _decodePngGrayscale(imgBuf);
 
-    // Primary: ocr.space free API (reliable, ~500 req/day free)
-    // Fallback: pixel-based nearest-neighbour OCR
+    // Primary: ocr.space free API (accurate, ~25k req/month free)
+    // Fallback: pixel-based nearest-neighbour OCR (fast, no external deps)
     let captchAnswer = null;
     try {
       const ocrForm = new URLSearchParams({
@@ -270,7 +270,7 @@ async function _solveSafegoCaptcha(safegoUrl) {
       const ocrResp = await fetch('https://api.ocr.space/parse/image', {
         method: 'POST',
         body: ocrForm,
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(6000),
       });
       const ocrJson = await ocrResp.json().catch(() => ({}));
       const ocrText = ((ocrJson?.ParsedResults || [])[0]?.ParsedText || '').replace(/\D/g, '');
@@ -517,8 +517,8 @@ async function extractTurbovidda(pageUrl) {
       'Accept-Language': 'en-US,en;q=0.5',
     };
 
-    // Step 5: Wait 2.5 seconds (Turbovid enforces a timer)
-    await new Promise((r) => setTimeout(r, 2500));
+    // Step 5: Wait 4.5 seconds (Turbovid enforces a JS timer — MammaMia uses 5s)
+    await new Promise((r) => setTimeout(r, 4500));
 
     // Step 6: POST the form
     const postResp = await fetch(finalUrl, {

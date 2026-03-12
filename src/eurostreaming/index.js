@@ -13,6 +13,7 @@ const { getProviderUrl } = require('../provider_urls.js');
 const { extractMixDrop } = require('../extractors/mixdrop');
 const { extractMaxStream } = require('../extractors/maxstream');
 const { extractTurbovidda, bypassSafego } = require('../extractors/turbovidda');
+const { formatStream } = require('../formatter.js');
 
 const TMDB_API_KEY = '68e094699525b18a70bab2f86b1fa706';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
@@ -168,17 +169,20 @@ async function resolveHostLink(href) {
  */
 async function scrapingLinks(atag, language, siteName, providerContext = null) {
   const streams = [];
-  const hasProxy = !!(process.env.PROXY_URL || process.env.PROXY);
-  const langLabel = language.includes('SUB') ? '🇰🇷 SUB ITA' : '🇮🇹 [ITA]';
+  const langEmoji = language.includes('SUB') ? '🇰🇷' : '🇮🇹';
 
   function makeStream(playerName, url, headers) {
-    const obj = {
-      name: `Eurostreaming${language}`,
-      title: `🎬 ${siteName}\n🗣 ${langLabel}\n▶️ ${playerName}\n🌐 Proxy (${hasProxy ? 'ON' : 'OFF'})\n🤌 Eurostreaming 🇪🇺`,
+    return formatStream({
       url: url,
-    };
-    if (headers) obj.behaviorHints = { proxyHeaders: { request: headers } };
-    return obj;
+      headers: headers || undefined,
+      name: `Eurostreaming - ${playerName}`,
+      title: providerContext?._displayName || siteName,
+      quality: 'HD',
+      language: langEmoji,
+      type: 'direct',
+      addonBaseUrl: providerContext?.addonBaseUrl,
+      behaviorHints: headers ? { proxyHeaders: { request: headers } } : undefined,
+    }, 'Eurostreaming');
   }
 
   const hasMixDrop = /MixDrop/i.test(atag);
@@ -264,7 +268,7 @@ async function scrapingLinks(atag, language, siteName, providerContext = null) {
  * Find episode matches in a Eurostreaming post HTML and extract streams.
  * Pattern: {season}&#215;{ep} … links … <br>
  */
-async function findEpisodeStreams(description, season, episode) {
+async function findEpisodeStreams(description, season, episode, providerContext = null) {
   const episodePadded = String(episode).padStart(2, '0');
   // &#215; is the "×" multiplication sign used as separator between season/ep
   const re = new RegExp(
@@ -283,7 +287,7 @@ async function findEpisodeStreams(description, season, episode) {
     if (!atag.includes('href')) continue;
 
     const language = t === 0 ? '\nITA' : '\nSUB-ITA';
-    const streams = await scrapingLinks(atag, language, 'Eurostreaming');
+    const streams = await scrapingLinks(atag, language, 'Eurostreaming', providerContext);
     allStreams.push(...streams);
   }
   return allStreams;
@@ -292,7 +296,7 @@ async function findEpisodeStreams(description, season, episode) {
 /**
  * Search Eurostreaming WP REST API for a title+year, find the episode, and return streams.
  */
-async function searchAndExtract(showname, year, season, episode) {
+async function searchAndExtract(showname, year, season, episode, providerContext = null) {
   const baseUrl = getEsBaseUrl();
   const allStreams = [];
 
@@ -356,7 +360,7 @@ async function searchAndExtract(showname, year, season, episode) {
 
         if (!matched) continue;
 
-        const streams = await findEpisodeStreams(description, season, episode);
+        const streams = await findEpisodeStreams(description, season, episode, providerContext);
         allStreams.push(...streams);
 
         if (allStreams.length > 0) break; // Found a match — stop searching
@@ -432,6 +436,10 @@ async function getStreams(id, type, season, episode, providerContext = null) {
 
     console.log(`[Eurostreaming] Searching: "${showname}" (${year}) S${effectiveSeason}E${effectiveEpisode}`);
 
+    // Build display name for the formatter (e.g. "Snowpiercer 4x1")
+    const displayName = `${showname} ${effectiveSeason}x${effectiveEpisode}`;
+    const enrichedContext = { ...providerContext, _displayName: displayName };
+
     // Try all title candidates to maximise chances
     const candidates = [showname];
     if (providerContext && Array.isArray(providerContext.titleCandidates)) {
@@ -442,7 +450,7 @@ async function getStreams(id, type, season, episode, providerContext = null) {
     }
 
     for (const title of candidates) {
-      const streams = await searchAndExtract(title, year, effectiveSeason, effectiveEpisode);
+      const streams = await searchAndExtract(title, year, effectiveSeason, effectiveEpisode, enrichedContext);
       if (streams.length) {
         console.log(`[Eurostreaming] Found ${streams.length} stream(s) for "${title}"`);
         return streams;
