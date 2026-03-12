@@ -80,6 +80,7 @@ export default {
       'clicka.cc', 'www.clicka.cc',
       'safego.cc', 'www.safego.cc',
       'guardoserie.digital', 'www.guardoserie.digital',
+      'guardoserie.best', 'www.guardoserie.best',
     ]);
     if (!ALLOWED_HOSTS.has(parsedTarget.hostname)) {
       return _json({ error: `Host ${parsedTarget.hostname} is not proxied by this Worker` }, 403);
