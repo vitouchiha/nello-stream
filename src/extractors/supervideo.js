@@ -720,12 +720,32 @@ async function _doFetchWithBrowser(url, refererBase, proxyUrl, setBrowser) {
       }
     }
 
-    // Detect Cloudflare challenge early — don't waste time on play interactions
+    // Detect Cloudflare challenge and wait for it to resolve
     const earlyHtml = await page.content().catch(() => '');
-    if (earlyHtml.length < 15000 && /Attention Required|Just a moment|cf-wrapper|cloudflare/i.test(earlyHtml)) {
-      log.warn('Cloudflare challenge detected, aborting', { ms: Date.now() - t0, htmlLen: earlyHtml.length });
-      await page.close().catch(() => {});
-      return null;
+    if (earlyHtml.length < 15000 && /Attention Required|Just a moment|cf-wrapper|Checking your browser/i.test(earlyHtml)) {
+      log.warn('Cloudflare challenge detected, waiting for resolution', { ms: Date.now() - t0, htmlLen: earlyHtml.length });
+      // Wait for challenge JS to solve and redirect to actual page
+      await Promise.race([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 12_000 }).catch(() => null),
+        page.waitForSelector('.jwplayer, #player, video, .jw-wrapper', { timeout: 12_000 }).catch(() => null),
+      ]);
+      const postCfHtml = await page.content().catch(() => '');
+      if (postCfHtml.length < 15000 && /Attention Required|Just a moment|cf-wrapper|Checking your browser/i.test(postCfHtml)) {
+        log.warn('Cloudflare challenge NOT resolved, aborting', { ms: Date.now() - t0, htmlLen: postCfHtml.length });
+        await page.close().catch(() => {});
+        return null;
+      }
+      log.warn('Cloudflare challenge resolved', { ms: Date.now() - t0, htmlLen: postCfHtml.length, finalUrl: page.url() });
+
+      // Re-check if manifest was captured during challenge resolution
+      if (manifestUrl && manifestResponseOk) {
+        log.warn('manifest captured during CF challenge resolution', { ms: Date.now() - t0, manifestUrl });
+        const manifestBody = await getManifestBody();
+        const html = postCfHtml;
+        const finalUrl = page.url();
+        await page.close().catch(() => {});
+        return { html, manifestUrl, manifestBody, finalUrl };
+      }
     }
 
     // Wait for JWPlayer to be fully initialised before interacting
