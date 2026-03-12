@@ -13,6 +13,7 @@ const { extractMixDrop } = require('../extractors/mixdrop');
 const { extractMaxStream } = require('../extractors/maxstream');
 const { extractUprot } = require('../extractors/uprot');
 const { fetchWithCloudscraper } = require('../utils/fetcher');
+const { formatStream } = require('../formatter.js');
 
 const TMDB_API_KEY = '68e094699525b18a70bab2f86b1fa706';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
@@ -172,16 +173,18 @@ async function searchSeries(showname, year) {
  * - uprot.net                → skip (captcha required)
  * Returns a stream object or null.
  */
-async function extractFromResolvedUrl(resolvedUrl, label, providerContext = null) {
-  const hasProxy = !!(process.env.PROXY_URL || process.env.PROXY);
+async function extractFromResolvedUrl(resolvedUrl, displayTitle, providerContext = null) {
   function makeCb01Stream(playerName, url, headers) {
-    const obj = {
-      name: `CB01`,
-      title: `🎬 CB01\n🗣 🇮🇹 [ITA]\n▶️ ${playerName}\n🌐 Proxy (${hasProxy ? 'ON' : 'OFF'})\n🤌 CB01 🎞️`,
+    const raw = {
+      name: `CB01 - ${playerName}`,
+      title: displayTitle || 'CB01',
       url: url,
+      quality: '1080p',
+      type: 'direct',
+      addonBaseUrl: providerContext?.addonBaseUrl,
     };
-    if (headers) obj.behaviorHints = { notWebReady: true, proxyHeaders: { request: headers } };
-    return obj;
+    if (headers) raw.behaviorHints = { notWebReady: true, proxyHeaders: { request: headers } };
+    return formatStream(raw, 'CB01');
   }
   try {
     const host = new URL(resolvedUrl).hostname.toLowerCase();
@@ -223,8 +226,7 @@ async function extractMovieStreams(pageUrl, providerContext = null) {
       const resolvedUrl = await resolveStayOnline(stayUrl);
       if (!resolvedUrl) continue;
 
-      const label = iframeId ? iframeId.replace('iframen', 'Link') : 'HD';
-      const stream = await extractFromResolvedUrl(resolvedUrl, label, providerContext);
+      const stream = await extractFromResolvedUrl(resolvedUrl, providerContext?._displayTitle, providerContext);
       if (stream) streams.push(stream);
     }
   } catch (err) {
@@ -239,33 +241,38 @@ async function extractMovieStreams(pageUrl, providerContext = null) {
  */
 async function extractEpisodeStreams(link, providerContext = null) {
   const streams = [];
+  const displayTitle = providerContext?._displayTitle || 'CB01';
   try {
     if (link.includes('stayonline')) {
       const resolvedUrl = await resolveStayOnline(link);
       if (resolvedUrl) {
-        const stream = await extractFromResolvedUrl(resolvedUrl, 'HD', providerContext);
+        const stream = await extractFromResolvedUrl(resolvedUrl, displayTitle, providerContext);
         if (stream) streams.push(stream);
       }
     } else if (link.includes('maxstream')) {
       const result = await extractMaxStream(link);
       if (result) {
-        const hasProxy = !!(process.env.PROXY_URL || process.env.PROXY);
-        streams.push({
-          name: 'CB01',
-          title: `🎬 CB01\n🗣 🇮🇹 [ITA]\n▶️ MaxStream\n🌐 Proxy (${hasProxy ? 'ON' : 'OFF'})\n🤌 CB01 🎞️`,
+        streams.push(formatStream({
+          name: 'CB01 - MaxStream',
+          title: displayTitle,
           url: result.url,
-        });
+          quality: '1080p',
+          type: 'direct',
+          addonBaseUrl: providerContext?.addonBaseUrl,
+        }, 'CB01'));
       }
     } else if (link.includes('mixdrop') || link.includes('m1xdrop')) {
       const result = await extractMixDrop(link, undefined, providerContext);
       if (result) {
-        const hasProxy = !!(process.env.PROXY_URL || process.env.PROXY);
-        streams.push({
-          name: 'CB01',
-          title: `🎬 CB01\n🗣 🇮🇹 [ITA]\n▶️ MixDrop\n🌐 Proxy (${hasProxy ? 'ON' : 'OFF'})\n🤌 CB01 🎞️`,
+        streams.push(formatStream({
+          name: 'CB01 - MixDrop',
+          title: displayTitle,
           url: result.url,
+          quality: '1080p',
+          type: 'direct',
+          addonBaseUrl: providerContext?.addonBaseUrl,
           ...(result.headers ? { behaviorHints: { notWebReady: true, proxyHeaders: { request: result.headers } } } : {}),
-        });
+        }, 'CB01'));
       }
     }
   } catch { /* skip */ }
@@ -279,7 +286,7 @@ async function extractEpisodeStreams(link, providerContext = null) {
  *   <div class="sp-head">STAGIONE 2 ITA</div>
  *   Content with patterns: {season}&#215;{ep} or S{ss}E{ep} or {s}x{ep}
  */
-async function extractSeriesStreams(pageUrl, season, episode) {
+async function extractSeriesStreams(pageUrl, season, episode, providerContext = null) {
   const streams = [];
   try {
     const html = await fetchWithCloudscraper(pageUrl, { referer: getCb01BaseUrl() + '/' });
@@ -445,7 +452,7 @@ async function getStreams(id, type, season, episode, providerContext = null) {
       if (isMovie) {
         pageUrl = await searchMovie(title, year);
         if (!pageUrl) continue;
-        const streams = await extractMovieStreams(pageUrl, providerContext);
+        const streams = await extractMovieStreams(pageUrl, { ...providerContext, _displayTitle: showname });
         if (streams.length) {
           console.log(`[CB01] Found ${streams.length} movie stream(s) for "${title}"`);
           return streams;
@@ -453,7 +460,7 @@ async function getStreams(id, type, season, episode, providerContext = null) {
       } else {
         pageUrl = await searchSeries(title, year);
         if (!pageUrl) continue;
-        const streams = await extractSeriesStreams(pageUrl, effectiveSeason, effectiveEpisode);
+        const streams = await extractSeriesStreams(pageUrl, effectiveSeason, effectiveEpisode, { ...providerContext, _displayTitle: showname });
         if (streams.length) {
           console.log(`[CB01] Found ${streams.length} series stream(s) for "${title}"`);
           return streams;
