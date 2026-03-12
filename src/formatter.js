@@ -73,107 +73,127 @@ function shouldProxyForWebPlayback(stream, url, headers, addonBaseUrl) {
     return !isMp4Url(url);
 }
 
+// ─── Provider display identity ────────────────────────────────────────────
+// Each provider gets a unique geometric icon — no shared emojis with other addons
+const PROVIDER_DISPLAY = {
+    streamingcommunity: { label: 'StreamingCommunity', icon: '◈' },
+    guardaserie:        { label: 'GuardaSerie',        icon: '◆' },
+    guardoserie:        { label: 'Guardoserie',        icon: '◇' },
+    guardahd:           { label: 'GuardaHD',           icon: '▣' },
+    guardaflix:         { label: 'Guardaflix',          icon: '◆' },
+    cb01:               { label: 'CB01',               icon: '▩' },
+    eurostreaming:      { label: 'EuroStreaming',      icon: '◉' },
+    loonex:             { label: 'Loonex',             icon: '◎' },
+    toonitalia:         { label: 'ToonItalia',         icon: '✦' },
+    animeunity:         { label: 'AnimeUnity',         icon: '⛩' },
+    animeworld:         { label: 'AnimeWorld',         icon: '◈' },
+    animesaturn:        { label: 'AnimeSaturn',        icon: '◇' },
+    kisskh:             { label: 'KissKH',             icon: '♦' },
+    rama:               { label: 'Rama',               icon: '❖' },
+    drammatica:         { label: 'Drammatica',         icon: '◈' },
+};
+
+// Quality tiers — visual dot meter (unique to NelloStream)
+const QUALITY_TIERS = {
+    '2160p': { dots: '⬤⬤⬤⬤⬤', tag: '4K' },
+    '4k':    { dots: '⬤⬤⬤⬤⬤', tag: '4K' },
+    '1440p': { dots: '⬤⬤⬤⬤○', tag: 'QHD' },
+    '1080p': { dots: '⬤⬤⬤⬤○', tag: 'FHD' },
+    'fhd':   { dots: '⬤⬤⬤⬤○', tag: 'FHD' },
+    '720p':  { dots: '⬤⬤⬤○○', tag: 'HD' },
+    'hd':    { dots: '⬤⬤⬤○○', tag: 'HD' },
+    '576p':  { dots: '⬤⬤○○○', tag: 'SD' },
+    '480p':  { dots: '⬤⬤○○○', tag: 'SD' },
+    '360p':  { dots: '⬤○○○○', tag: 'SD' },
+    '240p':  { dots: '⬤○○○○', tag: 'SD' },
+    'sd':    { dots: '⬤⬤○○○', tag: 'SD' },
+};
+
+function _cleanLangTags(str) {
+    return String(str || '')
+        .replace(/\s*\[?\(?\s*SUB\s*ITA\s*\)?\]?/i, '')
+        .replace(/\s*\[?\(?\s*ITA\s*\)?\]?/i, '')
+        .replace(/\s*\[?\(?\s*SUB\s*\)?\]?/i, '')
+        .replace(/\(\s*\)/g, '').replace(/\[\s*\]/g, '').trim();
+}
+
 function formatStream(stream, providerName) {
-    // ─── Quality badge ────────────────────────────────────────────────────
-    let qualityBadge = '';
+    // ─── Quality tier ───────────────────────────────────────────────────
     const rawQ = String(stream.quality || '').toLowerCase();
-    if (rawQ === '2160p' || rawQ === '4k')       qualityBadge = '4K';
-    else if (rawQ === '1440p')                    qualityBadge = '1440p';
-    else if (rawQ === '1080p' || rawQ === 'fhd')  qualityBadge = '1080p';
-    else if (rawQ === '720p' || rawQ === 'hd')    qualityBadge = '720p';
-    else if (['576p','480p','360p','240p','sd'].includes(rawQ)) qualityBadge = rawQ.toUpperCase();
+    const tier = QUALITY_TIERS[rawQ] || null;
 
     // ─── Language detection ─────────────────────────────────────────────
-    let langLabel = '';
-    const lang = stream.language || '';
-    const titleLower = String(stream.title || '').toLowerCase();
-    const nameLower  = String(stream.name || '').toLowerCase();
-    if (lang.includes('SUB') || nameLower.includes('sub ita') || titleLower.includes('sub ita') || titleLower.includes('sub'))
-      langLabel = '🇰🇷 SUB ITA';
-    else if (lang.includes('🇮🇹') || nameLower.includes('ita') || titleLower.includes('[ita]'))
-      langLabel = '🇮🇹 [ITA]';
-    else
-      langLabel = '🇮🇹 [ITA]';
+    const lang  = stream.language || '';
+    const sName = String(stream.name  || '').toLowerCase();
+    const sTitle = String(stream.title || '').toLowerCase();
+    let langFlag = '🇮🇹 ITA';
+    if (lang.includes('SUB') || sName.includes('sub ita') ||
+        sTitle.includes('sub ita') || sTitle.includes('sub'))
+        langFlag = '🇰🇷 SUB ITA';
 
-    // ─── Provider label (StreamVix-style) ───────────────────────────────
-    let pName = stream.name || stream.server || providerName;
-    if (pName) {
-        pName = pName
-            .replace(/\s*\[?\(?\s*SUB\s*ITA\s*\)?\]?/i, '')
-            .replace(/\s*\[?\(?\s*ITA\s*\)?\]?/i, '')
-            .replace(/\s*\[?\(?\s*SUB\s*\)?\]?/i, '')
-            .replace(/\(\s*\)/g, '')
-            .replace(/\[\s*\]/g, '')
-            .trim();
-    }
-    if (!pName || pName === providerName) {
-        pName = typeof providerName === 'string'
-            ? providerName.charAt(0).toUpperCase() + providerName.slice(1)
-            : 'Provider';
-    }
-
-    const providerEmojis = {
-        'streamingcommunity': '🤌 StreamingCommunity 🍿',
-        'cb01': '🤌 CB01 🎞️',
-        'guardaserie': '🤌 GuardaSerie 🎥',
-        'guardoserie': '🤌 Guardoserie 📼',
-        'guardahd': '🤌 GuardaHD 🎬',
-        'eurostreaming': '🤌 Eurostreaming 🇪🇺',
-        'loonex': '🤌 Loonex 🎬',
-        'toonitalia': '🤌 ToonItalia 🎨',
-        'animeunity': '🤌 AnimeUnity ⛩️',
-        'animeworld': '🤌 AnimeWorld 🌍',
-        'animesaturn': '🤌 AnimeSaturn 🪐',
-        'kisskh': '🤌 KissKH 💋',
-        'rama': '🤌 Rama 🌺',
-    };
+    // ─── Provider identity ──────────────────────────────────────────────
     const pKey = String(providerName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    const providerLabel = providerEmojis[pKey] || `🤌 ${pName}`;
+    const pInfo = PROVIDER_DISPLAY[pKey] || {
+        label: providerName
+            ? providerName.charAt(0).toUpperCase() + providerName.slice(1)
+            : 'Provider',
+        icon: '◆',
+    };
 
-    // ─── Size info ──────────────────────────────────────────────────────
-    let sizeLabel = '';
-    if (stream.size) sizeLabel = `💾 ${stream.size}`;
+    // ─── Server / extractor (parsed from stream.name "Provider - Server") ─
+    let serverName = '';
+    const rawName = _cleanLangTags(stream.name);
+    if (rawName.includes(' - ')) {
+        serverName = rawName.split(' - ').slice(1).join(' - ').trim();
+    } else if (stream.server) {
+        serverName = _cleanLangTags(stream.server);
+    } else if (stream.extractor) {
+        serverName = _cleanLangTags(stream.extractor);
+    }
+    // Don't repeat the provider name as server
+    if (serverName && serverName.toLowerCase() === pInfo.label.toLowerCase()) {
+        serverName = '';
+    }
 
-    // ─── Player / extractor name ────────────────────────────────────────
-    let playerLabel = '';
-    if (stream.server && stream.server !== pName) playerLabel = `▶️ ${stream.server}`;
-    else if (stream.extractor) playerLabel = `▶️ ${stream.extractor}`;
-
-    // ─── Extra details (codec, bitrate) ─────────────────────────────────
-    let extras = [];
-    if (stream.videoCodec) extras.push(stream.videoCodec);
-    if (stream.audioCodec) extras.push(stream.audioCodec);
-    if (stream.bitrate) extras.push(stream.bitrate);
-    if (stream.fps) extras.push(`${stream.fps}fps`);
-
-    // ─── Proxy status ───────────────────────────────────────────────────
-    const hasProxy = !!(process.env.PROXY_URL || process.env.PROXY);
-    const proxyLabel = `🌐 Proxy (${hasProxy ? 'ON' : 'OFF'})`;
-
-    // ─── Build NAME field (left column in Stremio) ──────────────────────
-    //  StreamVix style: provider name + quality badge on left
-    let nameLines = [];
-    if (qualityBadge) nameLines.push(qualityBadge);
-    nameLines.push(pName);
+    // ─── Build NAME (left badge in Stremio) ─────────────────────────────
+    //  Line 1: Branded identity
+    //  Line 2: Visual quality meter (unique dot indicator)
+    const nameLines = ['NelloStream'];
+    if (tier) nameLines.push(`${tier.dots} ${tier.tag}`);
     const finalName = nameLines.join('\n');
 
-    // ─── Build TITLE field (right column in Stremio, multi-line) ────────
-    let titleLines = [];
-    titleLines.push(`🎬 ${stream.title || 'Stream'}`);
-    titleLines.push(`🗣 ${langLabel}`);
-    if (qualityBadge) titleLines.push(`📺 ${qualityBadge}`);
-    if (sizeLabel) titleLines.push(sizeLabel);
-    if (playerLabel) titleLines.push(playerLabel);
-    if (extras.length) titleLines.push(`📊 ${extras.join(' | ')}`);
-    titleLines.push(proxyLabel);
-    titleLines.push(providerLabel);
-    const finalTitle = titleLines.join('\n');
+    // ─── Build TITLE (right info card, 3 lines) ────────────────────────
+    //  Line 1: Content title
+    //  Line 2: ◆ Provider ▸ Server
+    //  Line 3: 🇮🇹 ITA │ FHD │ 1.2 GB │ ⚡ Proxy
+    const titleParts = [];
 
-    // ─── Behavior hints / proxy / headers (unchanged logic) ─────────────
+    titleParts.push(stream.title || 'Stream');
 
-    // Move headers to behaviorHints if present, but keep original for compatibility
+    let provLine = `${pInfo.icon} ${pInfo.label}`;
+    if (serverName) provLine += ` ▸ ${serverName}`;
+    titleParts.push(provLine);
+
+    const hasProxy = !!(process.env.PROXY_URL || process.env.PROXY);
+    const chips = [langFlag];
+    if (tier) chips.push(tier.tag);
+    if (stream.size) chips.push(stream.size);
+    const extras = [];
+    if (stream.videoCodec) extras.push(stream.videoCodec);
+    if (stream.audioCodec) extras.push(stream.audioCodec);
+    if (stream.bitrate)    extras.push(stream.bitrate);
+    if (stream.fps)        extras.push(`${stream.fps}fps`);
+    if (extras.length) chips.push(extras.join('/'));
+    chips.push(`⚡ ${hasProxy ? 'Proxy' : 'Direct'}`);
+    titleParts.push(chips.join(' │ '));
+
+    const finalTitle = titleParts.join('\n');
+
+    // ─── Behavior hints / proxy / headers ───────────────────────────────
     const behaviorHints = cloneBehaviorHints(stream.behaviorHints || {});
-    const addonBaseUrl = String(stream.addonBaseUrl || stream.providerContext?.addonBaseUrl || '').trim();
+    const addonBaseUrl = String(
+        stream.addonBaseUrl || stream.providerContext?.addonBaseUrl || ''
+    ).trim();
     let finalHeaders = stream.headers;
     let finalUrl = stream.url;
 
@@ -184,7 +204,10 @@ function formatStream(stream, providerName) {
     }
 
     if (shouldProxyForWebPlayback(stream, finalUrl, finalHeaders, addonBaseUrl)) {
-        const proxiedUrl = buildProxyUrl(addonBaseUrl, finalUrl, finalHeaders, undefined, stream.proxyUrl, stream.manifestBody);
+        const proxiedUrl = buildProxyUrl(
+            addonBaseUrl, finalUrl, finalHeaders, undefined,
+            stream.proxyUrl, stream.manifestBody
+        );
         if (proxiedUrl) {
             finalUrl = proxiedUrl;
             finalHeaders = null;
@@ -205,26 +228,19 @@ function formatStream(stream, providerName) {
 
     behaviorHints.notWebReady = shouldSetNotWebReady(finalUrl, finalHeaders, behaviorHints);
 
-    const responseStream = {
+    const out = {
         name: finalName,
         title: finalTitle,
-        behaviorHints: behaviorHints,
+        behaviorHints,
     };
 
-    if (stream.isExternal) {
-        responseStream.externalUrl = finalUrl;
-    } else {
-        responseStream.url = finalUrl;
-    }
+    if (stream.isExternal) out.externalUrl = finalUrl;
+    else out.url = finalUrl;
 
-    if (stream.subtitles) {
-        responseStream.subtitles = stream.subtitles;
-    }
-    if (stream.description) {
-        responseStream.description = stream.description;
-    }
+    if (stream.subtitles)  out.subtitles = stream.subtitles;
+    if (stream.description) out.description = stream.description;
 
-    return responseStream;
+    return out;
 }
 
 module.exports = { formatStream };
