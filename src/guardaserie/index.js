@@ -823,17 +823,15 @@ function getStreams(id, type, season, episode, providerContext = null) {
         }
         const normalizedQuality = getQualityFromName(quality);
         const hasPlaybackHeaders = extracted.headers && Object.keys(extracted.headers).length > 0;
-        // serversicuro.cc tokens are IP-locked to the CF Worker that extracted
-        // the embed page. Our HLS proxy runs on a different IP → always 403.
-        // Skip the HLS proxy and let Stremio's player handle the URL directly
-        // (same approach as EasyStreams / StreamVix).
-        const isIpLocked = /serversicuro\.cc/i.test(extracted.url);
+        // serversicuro.cc tokens are IP-locked to the proxy that extracted
+        // the embed page. The internal HLS proxy passes through the proxyUrl
+        // from the token, so it can replay from the same IP. Do NOT disable
+        // the HLS proxy — Stremio can't reach serversicuro directly.
         const behaviorHints = extracted.isExternal
           ? { notWebReady: true, bingeGroup: `guardaserie-${title}` }
           : hasPlaybackHeaders
             ? { notWebReady: true, bingeGroup: `guardaserie-${title}` }
             : { bingeGroup: `guardaserie-${title}` };
-        if (isIpLocked) behaviorHints.proxyPlaybackDisabled = true;
         svStreamObjs.push({
           url: extracted.url,
           headers: extracted.headers,

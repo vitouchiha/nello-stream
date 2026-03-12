@@ -390,7 +390,7 @@ async function getStreams(id, type, season, episode, config = {}) {
                 continue;
             }
             if (providerName === 'guardoserie') {
-              promises.push(withProviderTimeout('Guardoserie', withMfp('guardoserie', guardoserie.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, ctxFor('guardoserie')))));
+              promises.push(withProviderTimeout('Guardoserie', withMfp('guardoserie', guardoserie.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, ctxFor('guardoserie'))), 30000));
         }
     }
 
