@@ -325,7 +325,7 @@ async function getStreams(id, type, season, episode, config = {}) {
       // ── MFP-selective helpers ────────────────────────────────────────────────
       // Providers where MFP is applied instead of the internal HLS proxy.
       // For all other providers, MFP is NOT applied (it can break playback).
-      const MFP_PROVIDERS = new Set(['guardoserie', 'guardaflix', 'animesaturn', 'animeunity', 'guardahd', 'guardaserie']);
+      const MFP_PROVIDERS = new Set(['guardoserie', 'guardaflix', 'animesaturn', 'animeunity', 'guardahd', 'guardaserie', 'cb01']);
 
       // When MFP is configured, pass a context without addonBaseUrl to these providers
       // so formatStream doesn't apply the internal proxy (avoids double-wrapping).
@@ -374,7 +374,7 @@ async function getStreams(id, type, season, episode, config = {}) {
                 continue;
             }
             if (providerName === 'cb01') {
-              promises.push(withProviderTimeout('CB01', cb01.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext), 25000));
+              promises.push(withProviderTimeout('CB01', withMfp('cb01', cb01.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, ctxFor('cb01'))), 25000));
                 continue;
             }
             if (providerName === 'eurostreaming') {
