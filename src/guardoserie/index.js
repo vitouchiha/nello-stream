@@ -646,7 +646,6 @@ async function getStreams(id, type, season, episode, providerContext = null) {
         // Search helper – uses GET /?s= (the admin-ajax.php endpoint is broken)
         const searchProvider = async (query) => {
             const searchUrl = `${getGuardoserieBaseUrl()}/?s=${encodeURIComponent(query)}`;
-            console.log(`[Guardoserie] Search URL: ${searchUrl}`);
 
             const response = await proxyFetch(searchUrl, {
                 headers: {
@@ -657,12 +656,8 @@ async function getStreams(id, type, season, episode, providerContext = null) {
                 }
             });
 
-            if (!response.ok) {
-                console.log(`[Guardoserie] Search response not ok: ${response.status}`);
-                return [];
-            }
+            if (!response.ok) return [];
             const searchHtml = await response.text();
-            console.log(`[Guardoserie] Search HTML length: ${searchHtml.length}, snippet: ${searchHtml.substring(0, 150)}`);
             const results = [];
             let match;
 
@@ -704,7 +699,6 @@ async function getStreams(id, type, season, episode, providerContext = null) {
         const queries = searchTitles.filter(q => q && q.length > 2);
         for (const q of queries) {
             const res = await searchProvider(q);
-            console.log(`[Guardoserie] Search '${q}': ${res.length} results`, res.slice(0,3).map(r => r.title));
             allResults.push(...res);
         }
 
