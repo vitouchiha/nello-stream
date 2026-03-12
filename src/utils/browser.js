@@ -25,7 +25,13 @@ const path = require('path');
  */
 
 const puppeteerCore = require('puppeteer-core');
+const { addExtra } = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const { createLogger } = require('./logger');
+
+// Wrap puppeteer-core with stealth plugin to bypass Cloudflare bot detection
+const puppeteer = addExtra(puppeteerCore);
+puppeteer.use(StealthPlugin());
 
 const log = createLogger('browser');
 
@@ -95,7 +101,7 @@ async function launchBrowser(options = {}) {
       }
       log.warn('browserless connect', { wsUrlLen: wsUrl.length, hasProxy: !!proxyInfo, wsUrlEnd: wsUrl.slice(-50) });
       const browser = await Promise.race([
-        puppeteerCore.connect({
+        puppeteer.connect({
           browserWSEndpoint: wsUrl,
           defaultViewport: { width: 1280, height: 720 },
         }),
@@ -149,7 +155,7 @@ async function launchBrowser(options = {}) {
   }
 
   try {
-    const browser = await puppeteerCore.launch(launchOpts);
+    const browser = await puppeteer.launch(launchOpts);
     if (proxyInfo && proxyInfo.username) {
       browser._proxyAuth = { username: proxyInfo.username, password: proxyInfo.password };
     }
