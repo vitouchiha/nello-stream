@@ -5,6 +5,71 @@ const { USER_AGENT, unpackPackedSource } = require('./common');
 
 const TURBO_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36';
 
+// ─── CF Worker proxy helper ─────────────────────────────────────────────────
+
+/**
+ * Fetch through CF Worker when CF_WORKER_URL is set, direct fetch otherwise.
+ * Handles GET/POST, redirect manual/follow, and cookie pass-through.
+ * Returns a Response-compatible object.
+ */
+async function _proxyFetch(url, options = {}) {
+  const cfBase = (process.env.CF_WORKER_URL || '').trim();
+  if (!cfBase) return fetch(url, options); // Direct (local dev)
+
+  const workerUrl = new URL(cfBase.replace(/\/$/, ''));
+  workerUrl.searchParams.set('url', url);
+
+  const cfAuth = (process.env.CF_WORKER_AUTH || '').trim();
+  const outHeaders = {};
+  if (cfAuth) outHeaders['x-worker-auth'] = cfAuth;
+
+  const isPost = (options.method || 'GET').toUpperCase() === 'POST';
+  const isManual = options.redirect === 'manual';
+
+  if (isPost) {
+    workerUrl.searchParams.set('method', 'POST');
+    if (options.body) workerUrl.searchParams.set('body', String(options.body));
+    const ct = options.headers?.['Content-Type'] || options.headers?.['content-type'];
+    if (ct) workerUrl.searchParams.set('contentType', ct);
+  }
+
+  // Pass cookie header
+  const cookie = options.headers?.Cookie || options.headers?.cookie;
+  if (cookie) workerUrl.searchParams.set('cookie', cookie);
+
+  if (isManual) workerUrl.searchParams.set('nofollow', '1');
+  // Always use wantCookie so we get setCookie + body in JSON
+  workerUrl.searchParams.set('wantCookie', '1');
+
+  const resp = await fetch(workerUrl.toString(), {
+    headers: outHeaders,
+    signal: options.signal,
+  });
+
+  let data;
+  try { data = await resp.json(); } catch {
+    return { status: 502, ok: false, url, headers: _fakeHeaders({}), text: async () => '', json: async () => ({}) };
+  }
+  const status = data.status || resp.status;
+  return {
+    status,
+    ok: status >= 200 && status < 400,
+    url,
+    headers: _fakeHeaders({
+      'location': data.location || '',
+      'set-cookie': data.setCookie || '',
+    }),
+    text: async () => data.body || '',
+    json: async () => JSON.parse(data.body || '{}'),
+  };
+}
+
+function _fakeHeaders(map) {
+  return { get(name) { return map[(name || '').toLowerCase()] || null; } };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * Parse all <input> fields from an HTML string into an object.
  */
@@ -30,7 +95,7 @@ async function resolveRedirectUrl(url, maxHops = 5) {
   let current = String(url || '').trim();
   for (let i = 0; i < maxHops; i++) {
     try {
-      const resp = await fetch(current, {
+      const resp = await _proxyFetch(current, {
         method: 'GET',
         headers: {
           'User-Agent': TURBO_UA,
@@ -237,7 +302,7 @@ function _matchDigit(TL, TR, ML, MR, BL, BR, ratio) {
 async function _solveSafegoCaptcha(safegoUrl) {
   const UA = 'Mozilla/5.0 (X11; Linux x86_64; rv:146.0) Gecko/20100101 Firefox/146.0';
   try {
-    const r1 = await fetch(safegoUrl, {
+    const r1 = await _proxyFetch(safegoUrl, {
       headers: { 'User-Agent': UA, 'Accept': 'text/html,application/xhtml+xml', 'Referer': 'https://safego.cc/' },
       redirect: 'manual',
     });
@@ -286,7 +351,7 @@ async function _solveSafegoCaptcha(safegoUrl) {
     // POST the answer using detected field name
     const body = new URLSearchParams({ [captchField]: captchAnswer }).toString();
     console.log(`[Safego] Posting ${captchField}=${captchAnswer}`);
-    const r2 = await fetch(safegoUrl, {
+    const r2 = await _proxyFetch(safegoUrl, {
       method: 'POST',
       headers: {
         'User-Agent': UA,
@@ -310,7 +375,7 @@ async function _solveSafegoCaptcha(safegoUrl) {
         // Cookie obtained but no immediate redirect — GET with cookie to retrieve destination
         const cookieStr = `PHPSESSID=${phpsessid}; captch5=${captch5Cookie}`;
         try {
-          const rGet = await fetch(safegoUrl, {
+          const rGet = await _proxyFetch(safegoUrl, {
             headers: { 'User-Agent': UA, 'Cookie': cookieStr, 'Accept': 'text/html,application/xhtml+xml' },
             redirect: 'manual',
           });
@@ -389,7 +454,7 @@ async function bypassSafego(initialUrl) {
           const ph = hasCached ? _safegoCache.phpsessid : envSessid;
           const c5 = hasCached ? _safegoCache.captch5 : envCaptch;
           const cookieStr = `PHPSESSID=${ph}; captch5=${c5}`;
-          const getR = await fetch(current, {
+          const getR = await _proxyFetch(current, {
             headers: {
               'User-Agent': TURBO_UA, 'Cookie': cookieStr,
               'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -412,7 +477,7 @@ async function bypassSafego(initialUrl) {
           // Got cookies but no directUrl — try GET with new cookies
           if (solved.captch5) {
             const ck = `PHPSESSID=${solved.phpsessid}; captch5=${solved.captch5}`;
-            const gR = await fetch(current, {
+            const gR = await _proxyFetch(current, {
               headers: { 'User-Agent': TURBO_UA, 'Cookie': ck, 'Accept': 'text/html,application/xhtml+xml' },
               redirect: 'manual',
             });
@@ -429,7 +494,7 @@ async function bypassSafego(initialUrl) {
       }
 
       // Generic redirect following
-      const resp = await fetch(current, {
+      const resp = await _proxyFetch(current, {
         headers: {
           'User-Agent': TURBO_UA,
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -485,7 +550,7 @@ async function extractTurbovidda(pageUrl) {
     }
 
     // Step 2: GET the Turbovid page
-    const pageResp = await fetch(actualUrl, {
+    const pageResp = await _proxyFetch(actualUrl, {
       headers: {
         'User-Agent': TURBO_UA,
         'Referer': 'https://safego.cc/',
@@ -521,7 +586,7 @@ async function extractTurbovidda(pageUrl) {
     await new Promise((r) => setTimeout(r, 4500));
 
     // Step 6: POST the form
-    const postResp = await fetch(finalUrl, {
+    const postResp = await _proxyFetch(finalUrl, {
       method: 'POST',
       headers: postHeaders,
       body: formBody,

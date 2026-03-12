@@ -14,12 +14,87 @@ const { extractMixDrop } = require('../extractors/mixdrop');
 const { extractMaxStream } = require('../extractors/maxstream');
 const { extractTurbovidda, bypassSafego } = require('../extractors/turbovidda');
 const { formatStream } = require('../formatter.js');
+const { fetchWithCloudscraper } = require('../utils/fetcher.js');
 
 const TMDB_API_KEY = '68e094699525b18a70bab2f86b1fa706';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
 
 function getEsBaseUrl() {
   return (getProviderUrl('eurostreaming') || 'https://eurostreamings.life').replace(/\/+$/, '');
+}
+
+// ─── CF Worker bypass ───────────────────────────────────────────────────────
+
+/**
+ * Fetch a URL with Cloudflare bypass (cloudscraper → CF Worker → direct).
+ * Needed because eurostream.ing has Cloudflare protection that blocks Vercel IPs.
+ * @param {string} url  Target URL
+ * @param {object} [opts]  { timeout }
+ * @returns {Promise<{ok:boolean, url:string, text:()=>Promise<string>, json:()=>Promise<any>}|null>}
+ */
+async function _esFetch(url, opts = {}) {
+  const timeout = opts.timeout || 10000;
+
+  // 1. Try cloudscraper (handles CF JS challenges)
+  try {
+    const body = await fetchWithCloudscraper(url, {
+      retries: 1,
+      timeout,
+      referer: getEsBaseUrl() + '/',
+    });
+    if (body && !body.includes('Just a moment')) {
+      const finalUrl = url; // cloudscraper doesn't expose final URL
+      return {
+        ok: true, status: 200, url: finalUrl,
+        text: async () => body,
+        json: async () => JSON.parse(body),
+      };
+    }
+  } catch (e) {
+    console.log(`[Eurostreaming] cloudscraper failed: ${e.message}`);
+  }
+
+  // 2. Try CF Worker
+  const cfBase = (process.env.CF_WORKER_URL || '').trim();
+  if (cfBase) {
+    try {
+      const workerUrl = new URL(cfBase.replace(/\/$/, ''));
+      workerUrl.searchParams.set('url', url);
+      const headers = { 'User-Agent': UA, 'Accept': opts.accept || 'application/json,text/html,*/*' };
+      const cfAuth = (process.env.CF_WORKER_AUTH || '').trim();
+      if (cfAuth) headers['x-worker-auth'] = cfAuth;
+      const resp = await fetch(workerUrl.toString(), { headers, signal: AbortSignal.timeout(timeout) });
+      const body = await resp.text();
+      if (resp.ok && !body.includes('Just a moment')) {
+        return {
+          ok: true, status: resp.status, url: url,
+          text: async () => body,
+          json: async () => JSON.parse(body),
+        };
+      }
+    } catch (e) {
+      console.log(`[Eurostreaming] CF Worker fetch failed: ${e.message}`);
+    }
+  }
+
+  // 3. Direct fallback (works locally)
+  try {
+    const resp = await fetch(url, {
+      headers: { 'User-Agent': UA, 'Accept': opts.accept || 'application/json,text/html,*/*' },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(timeout),
+    });
+    if (!resp.ok) return null;
+    const body = await resp.text();
+    if (body.includes('Just a moment')) return null;
+    return {
+      ok: true, status: resp.status, url: resp.url,
+      text: async () => body,
+      json: async () => JSON.parse(body),
+    };
+  } catch {
+    return null;
+  }
 }
 
 // ─── Utility ────────────────────────────────────────────────────────────────
@@ -99,24 +174,49 @@ async function getTitleAndYear(tmdbId, endpoint = 'tv') {
 // ─── Link resolution helpers ──────────────────────────────────────────────────
 
 /**
+ * Follow a single redirect via CF Worker (nofollow mode → returns Location header).
+ * Falls back to direct fetch if CF Worker not configured.
+ */
+async function _followOneRedirect(url) {
+  // Try CF Worker with nofollow
+  const cfBase = (process.env.CF_WORKER_URL || '').trim();
+  if (cfBase) {
+    try {
+      const workerUrl = new URL(cfBase.replace(/\/$/, ''));
+      workerUrl.searchParams.set('url', url);
+      workerUrl.searchParams.set('nofollow', '1');
+      const cfAuth = (process.env.CF_WORKER_AUTH || '').trim();
+      const headers = { 'User-Agent': UA };
+      if (cfAuth) headers['x-worker-auth'] = cfAuth;
+      const resp = await fetch(workerUrl.toString(), { headers, signal: AbortSignal.timeout(8000) });
+      const data = await resp.json().catch(() => null);
+      if (data && data.location) return data.location;
+    } catch { /* fall through */ }
+  }
+  // Direct fallback
+  try {
+    const resp = await fetch(url, {
+      headers: { 'User-Agent': UA, 'Range': 'bytes=0-0' },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(6000),
+    });
+    if (resp.status === 200 || resp.status === 206) return null;
+    return resp.headers.get('location') || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Follow a redirect chain (up to 6 hops) to resolve the final URL.
- * Used to go from a safego/intermediate link to the actual video host.
+ * Uses CF Worker for Cloudflare-protected domains (clicka.cc, safego.cc).
  */
 async function followRedirectChain(url, maxHops = 6) {
   let current = String(url || '').trim();
   for (let i = 0; i < maxHops; i++) {
-    try {
-      const resp = await fetch(current, {
-        headers: { 'User-Agent': UA, 'Range': 'bytes=0-0' },
-        redirect: 'manual',
-      });
-      if (resp.status === 200 || resp.status === 206) break; // Already final URL
-      const location = resp.headers.get('location');
-      if (!location) break;
-      current = new URL(location, current).href;
-    } catch {
-      break;
-    }
+    const location = await _followOneRedirect(current);
+    if (!location) break;
+    current = new URL(location, current).href;
   }
   return current;
 }
@@ -302,11 +402,8 @@ async function searchAndExtract(showname, year, season, episode, providerContext
 
   try {
     const searchUrl = `${baseUrl}/wp-json/wp/v2/search?search=${encodeURIComponent(showname)}&_fields=id,subtype&per_page=10`;
-    const searchResp = await fetch(searchUrl, {
-      headers: { 'User-Agent': UA, 'Accept': 'application/json' },
-      redirect: 'follow',
-    });
-    if (!searchResp.ok) return [];
+    const searchResp = await _esFetch(searchUrl);
+    if (!searchResp) return [];
     const results = await searchResp.json();
     if (!Array.isArray(results) || !results.length) return [];
     // Use the final URL after redirect as the actual base (domain may redirect)
@@ -317,11 +414,8 @@ async function searchAndExtract(showname, year, season, episode, providerContext
       if (item.subtype && item.subtype !== 'post') continue;
       try {
         const postUrl = `${actualBase}/wp-json/wp/v2/posts/${item.id}?_fields=content,title`;
-        const postResp = await fetch(postUrl, {
-          headers: { 'User-Agent': UA, 'Accept': 'application/json' },
-          redirect: 'follow',
-        });
-        if (!postResp.ok) continue;
+        const postResp = await _esFetch(postUrl);
+        if (!postResp) continue;
         const postData = await postResp.json();
         if (!postData || postData.code === 'rest_post_invalid_id') continue;
 
@@ -346,8 +440,8 @@ async function searchAndExtract(showname, year, season, episode, providerContext
             const moreMatch = /<a\s+href="([^"]+)"[^>]*>Continua a leggere<\/a>/i.exec(description);
             if (moreMatch) {
               try {
-                const fullResp = await fetch(moreMatch[1], { headers: { 'User-Agent': UA } });
-                const fullHtml = await fullResp.text();
+                const fullResp = await _esFetch(moreMatch[1], { accept: 'text/html,*/*' });
+                const fullHtml = fullResp ? await fullResp.text() : '';
                 const fullYearMatch = /(?<![\/\-])(19|20)\d{2}(?![\/\-])/.exec(fullHtml);
                 if (fullYearMatch) {
                   const diff = Math.abs(parseInt(fullYearMatch[0], 10) - parseInt(year, 10));

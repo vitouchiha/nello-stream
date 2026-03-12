@@ -79,6 +79,8 @@ export default {
       'eurostream.ing', 'www.eurostream.ing',
       'clicka.cc', 'www.clicka.cc',
       'safego.cc', 'www.safego.cc',
+      'deltabit.co', 'www.deltabit.co',
+      'turbovid.me', 'www.turbovid.me',
       'guardoserie.digital', 'www.guardoserie.digital',
       'guardoserie.best', 'www.guardoserie.best',
     ]);
@@ -95,17 +97,23 @@ export default {
     const isEurostream = parsedTarget.hostname.includes('eurostream');
     const isClicka = parsedTarget.hostname.includes('clicka');
     const isSafego = parsedTarget.hostname.includes('safego');
+    const isDeltabit = parsedTarget.hostname.includes('deltabit');
+    const isTurbovid = parsedTarget.hostname.includes('turbovid');
 
     const referer  = url.searchParams.get('referer') ||
       (isKissKH ? 'https://kisskh.co/' :
        isEurostream ? 'https://eurostream.ing/' :
        isClicka ? 'https://eurostream.ing/' :
-       isSafego ? 'https://safego.cc/' : '/');
+       isSafego ? 'https://safego.cc/' :
+       isDeltabit ? 'https://safego.cc/' :
+       isTurbovid ? 'https://safego.cc/' : '/');
 
     const origin  = isKissKH ? 'https://kisskh.co' :
                     isEurostream ? 'https://eurostream.ing' :
                     isClicka ? 'https://clicka.cc' :
-                    isSafego ? 'https://safego.cc' : parsedTarget.origin;
+                    isSafego ? 'https://safego.cc' :
+                    isDeltabit ? parsedTarget.origin :
+                    isTurbovid ? parsedTarget.origin : parsedTarget.origin;
 
     const isEpisodeApi = parsedTarget.pathname.includes('/DramaList/Episode/');
     const isGuardoserie = parsedTarget.hostname.includes('guardoserie');
@@ -142,6 +150,11 @@ export default {
       if (nofollow) {
         const location = resp.headers.get('Location') || resp.headers.get('location') || '';
         const setCookie = resp.headers.get('Set-Cookie') || '';
+        // wantCookie+nofollow: include body too (needed for safego captcha page)
+        if (url.searchParams.get('wantCookie') === '1') {
+          const bodyText = new TextDecoder().decode(await resp.arrayBuffer());
+          return _json({ status: resp.status, location, setCookie, body: bodyText });
+        }
         return _json({
           status: resp.status,
           location,
@@ -151,12 +164,12 @@ export default {
 
       const body = await resp.arrayBuffer();
 
-      // For POST responses: include Set-Cookie in JSON wrapper if requested
-      if (url.searchParams.get('method') === 'POST' && url.searchParams.get('wantCookie') === '1') {
+      // wantCookie mode: return JSON wrapper with metadata (GET or POST)
+      if (url.searchParams.get('wantCookie') === '1') {
         const setCookie = resp.headers.get('Set-Cookie') || '';
         const location = resp.headers.get('Location') || resp.headers.get('location') || '';
         const bodyText = new TextDecoder().decode(body);
-        return _json({ status: resp.status, setCookie, location, body: bodyText.substring(0, 500) });
+        return _json({ status: resp.status, setCookie, location, body: bodyText });
       }
 
       // Pass through the content-type from upstream; default to JSON
