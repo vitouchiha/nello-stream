@@ -1422,6 +1422,8 @@ app.get('/debug/eurostreaming', requireDebugAuth, async (req, res) => {
     testViaCF('eurostreamingsLife_viaCF', 'https://eurostreamings.life/wp-json/wp/v2/search?search=Scrubs&_fields=id,subtype&per_page=2'),
     testViaCF('clickaCC_viaCF', 'https://clicka.cc/delta/039rfckolqwa'),
     testViaCF('safego_viaCF', 'https://safego.cc/safe.php?url=YmZ2RlNqSHMwckM0YU1XdVpoQWMxSEJQeEEwM21WcGpvRkIrYWJvZ09kTllMLzBxN0wrU3U1NUVoWGVXblQ0Q0FrbTFJOGhlTWFmVGdyeThGSkR3UVE9PQ=='),
+    testViaCF('deltabit_viaCF', 'https://deltabit.co/'),
+    testViaCF('eurostream_kvCacheTest', 'https://eurostream.ing/wp-json/wp/v2/search?search=Snowpiercer&per_page=5'),
   ]);
 
   res.json(out);

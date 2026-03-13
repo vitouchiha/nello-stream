@@ -7,6 +7,13 @@ compatibility_flags = ["nodejs_compat"]
 [placement]
 mode = "smart"
 
+[ai]
+binding = "AI"
+
+[[kv_namespaces]]
+binding = "ES_CACHE"
+id = "77d345738f28442c8a19fadc030eb92e"
+
 [vars]
 # AUTH_TOKEN is set as a secret via "wrangler secret put AUTH_TOKEN"
 # Do not put it here in plaintext

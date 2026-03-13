@@ -135,11 +135,26 @@ export default {
 
     const headers = {
       'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      'Accept':          isEurostream ? 'application/json, text/html, */*' : isGuardoserie ? 'text/html, */*' : 'application/json, text/plain, */*',
+      'Accept':          isEurostream ? 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8' : isGuardoserie ? 'text/html, */*' : 'application/json, text/plain, */*',
       'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
       'Referer':         referer,
       'Origin':          origin,
     };
+    // Full browser headers for Cloudflare-protected sites (eurostream + clicka)
+    if (isEurostream || isClicka) {
+      headers['Accept-Encoding'] = 'gzip, deflate, br';
+      headers['Cache-Control'] = 'no-cache';
+      headers['Pragma'] = 'no-cache';
+      headers['Sec-Fetch-Dest'] = 'document';
+      headers['Sec-Fetch-Mode'] = 'navigate';
+      headers['Sec-Fetch-Site'] = 'none';
+      headers['Sec-Fetch-User'] = '?1';
+      headers['Upgrade-Insecure-Requests'] = '1';
+      headers['sec-ch-ua'] = '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"';
+      headers['sec-ch-ua-mobile'] = '?0';
+      headers['sec-ch-ua-platform'] = '"Windows"';
+      delete headers['Origin']; // Browsers don't send Origin on navigation
+    }
     if (cookie) headers['Cookie'] = cookie;
     // Custom Content-Type for POST requests (e.g. guardoserie WP AJAX)
     const contentType = url.searchParams.get('contentType');
@@ -150,58 +165,87 @@ export default {
       headers['X-Requested-With'] = 'XMLHttpRequest';
     }
 
+    // ── KV cache: domains where responses are cached globally ──────────────
+    const _KV_CACHEABLES = { 'eurostream.ing': 21600, 'eurostreamings.life': 21600, 'clicka.cc': 86400, 'deltabit.co': 3600 };
+    const hostNorm = parsedTarget.hostname.replace(/^www\./, '');
+    const kvTtl = _KV_CACHEABLES[hostNorm] || 0;
+    const isPost = url.searchParams.get('method') === 'POST';
+    // Only cache GET requests (POST = captcha submissions, form posts)
+    const kvKey = kvTtl && !isPost ? `p:${targetUrl}` : null;
+
     // ── Proxy request ───────────────────────────────────────────────────────
     try {
       const resp = await fetch(targetUrl, {
-        method: url.searchParams.get('method') === 'POST' ? 'POST' : 'GET',
+        method: isPost ? 'POST' : 'GET',
         headers,
-        body: url.searchParams.get('method') === 'POST' ? (url.searchParams.get('body') || '') : undefined,
+        body: isPost ? (url.searchParams.get('body') || '') : undefined,
         redirect: nofollow ? 'manual' : 'follow',
         cf: { cacheEverything: false },
       });
 
-      // nofollow mode: return redirect metadata as JSON
-      if (nofollow) {
-        const location = resp.headers.get('Location') || resp.headers.get('location') || '';
-        const setCookie = resp.headers.get('Set-Cookie') || '';
-        // wantCookie+nofollow: include body too (needed for safego captcha page)
-        if (url.searchParams.get('wantCookie') === '1') {
-          const bodyText = new TextDecoder().decode(await resp.arrayBuffer());
-          return _json({ status: resp.status, location, setCookie, body: bodyText });
-        }
-        return _json({
-          status: resp.status,
-          location,
-          setCookie,
-        });
-      }
-
-      const body = await resp.arrayBuffer();
-
-      // wantCookie mode: return JSON wrapper with metadata (GET or POST)
-      if (url.searchParams.get('wantCookie') === '1') {
-        const setCookie = resp.headers.get('Set-Cookie') || '';
-        const location = resp.headers.get('Location') || resp.headers.get('location') || '';
-        const bodyText = new TextDecoder().decode(body);
-        return _json({ status: resp.status, setCookie, location, body: bodyText });
-      }
-
-      // Pass through the content-type from upstream; default to JSON
+      // Read response once
+      const bodyBuf = await resp.arrayBuffer();
+      const bodyText = new TextDecoder().decode(bodyBuf);
+      const status = resp.status;
+      const location = resp.headers.get('Location') || resp.headers.get('location') || '';
+      const setCk = resp.headers.get('Set-Cookie') || '';
       const ct = resp.headers.get('Content-Type') || 'application/json; charset=utf-8';
 
-      return new Response(body, {
-        status: resp.status,
-        headers: {
-          'Content-Type':                ct,
-          'Access-Control-Allow-Origin': '*',
-          'X-Worker-Upstream-Status':    String(resp.status),
-        },
-      });
+      // Detect Cloudflare block
+      const isCfBlock = status === 403 && (bodyText.includes('Just a moment') || bodyText.includes('Checking your browser'));
+
+      // If blocked and cacheable → fall back to KV
+      if (isCfBlock && kvKey && env?.ES_CACHE) {
+        try {
+          const cached = await env.ES_CACHE.get(kvKey, 'json');
+          if (cached && cached.b) {
+            return _proxyResponse(cached.b, cached.s || 200, cached.l || '', cached.ck || '', cached.ct || ct, nofollow, url.searchParams.get('wantCookie') === '1', true);
+          }
+        } catch { /* KV read error */ }
+      }
+
+      // If success and cacheable → store in KV (non-blocking)
+      if (!isCfBlock && status >= 200 && status < 400 && kvKey && env?.ES_CACHE) {
+        const kvVal = JSON.stringify({ b: bodyText, s: status, l: location, ck: setCk, ct, t: Date.now() });
+        // Don't await — fire and forget
+        env.ES_CACHE.put(kvKey, kvVal, { expirationTtl: Math.max(kvTtl, 60) }).catch(() => {});
+      }
+
+      return _proxyResponse(bodyText, status, location, setCk, ct, nofollow, url.searchParams.get('wantCookie') === '1', false);
     } catch (err) {
+      // Fetch error → try KV as last resort
+      if (kvKey && env?.ES_CACHE) {
+        try {
+          const cached = await env.ES_CACHE.get(kvKey, 'json');
+          if (cached && cached.b) {
+            return _proxyResponse(cached.b, cached.s || 200, cached.l || '', cached.ck || '', cached.ct || 'text/html', nofollow, url.searchParams.get('wantCookie') === '1', true);
+          }
+        } catch { /* KV read error */ }
+      }
       return _json({ error: `Proxy fetch failed: ${err.message}` }, 502);
     }
   },
 };
+
+/** Format proxy response for all modes (nofollow, wantCookie, passthrough). */
+function _proxyResponse(bodyText, status, location, setCookie, contentType, nofollow, wantCookie, fromCache) {
+  const cacheHdr = fromCache ? { 'X-KV-Cache': 'hit' } : {};
+  if (nofollow) {
+    const json = { status, location, setCookie };
+    if (wantCookie) json.body = bodyText;
+    if (fromCache) json.kvCache = true;
+    return new Response(JSON.stringify(json), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', ...cacheHdr } });
+  }
+  if (wantCookie) {
+    const json = { status, setCookie, location, body: bodyText };
+    if (fromCache) json.kvCache = true;
+    return new Response(JSON.stringify(json), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', ...cacheHdr } });
+  }
+  return new Response(bodyText, {
+    status,
+    headers: { 'Content-Type': contentType, 'Access-Control-Allow-Origin': '*', 'X-Worker-Upstream-Status': String(status), ...cacheHdr },
+  });
+}
 
 function _json(obj, status = 200) {
   return new Response(JSON.stringify(obj), {
