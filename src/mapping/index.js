@@ -13,6 +13,7 @@
 
 const { createTimeoutSignal } = require("../fetch_helper.js");
 const { getProviderUrl } = require("../provider_urls.js");
+const animeList = require("./anime_list.js");
 
 const TMDB_API_KEY = "68e094699525b18a70bab2f86b1fa706";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
@@ -93,6 +94,21 @@ async function fetchKitsuMappings(kitsuId) {
   const cached = cacheGet(key);
   if (cached !== undefined) return cached;
 
+  // 1) Try offline list first (instant, no API call)
+  await animeList.ensureLoaded();
+  const offlineEntry = animeList.findByKitsu(kitsuId);
+  if (offlineEntry) {
+    const ids = {};
+    if (offlineEntry.mal_id) ids.mal = String(offlineEntry.mal_id);
+    if (offlineEntry.anilist_id) ids.anilist = String(offlineEntry.anilist_id);
+    if (offlineEntry.tvdb_id) ids.tvdb = String(offlineEntry.tvdb_id);
+    if (offlineEntry.imdb_id) ids.imdb = offlineEntry.imdb_id;
+    if (offlineEntry.anidb_id) ids.anidb = String(offlineEntry.anidb_id);
+    if (offlineEntry.themoviedb_id) ids.tmdb = String(offlineEntry.themoviedb_id);
+    return cacheSet(key, ids, 30 * 60 * 1000); // cache 30 min for offline data
+  }
+
+  // 2) Fallback: Kitsu API
   const data = await fetchJson(`https://kitsu.io/api/edge/anime/${kitsuId}/mappings`);
   if (!data?.data || !Array.isArray(data.data)) return cacheSet(key, {});
 
@@ -119,7 +135,17 @@ async function findKitsuIdByExternalId(externalSite, externalId) {
   const cached = cacheGet(key);
   if (cached !== undefined) return cached;
 
-  // Kitsu mappings filter API
+  // 1) Try offline list first (instant)
+  await animeList.ensureLoaded();
+  let offlineEntry = null;
+  if (externalSite === "imdb") offlineEntry = animeList.findByImdb(externalId);
+  else if (externalSite === "tvdb") offlineEntry = animeList.findByTvdb(Number(externalId));
+  else if (externalSite === "tmdb") offlineEntry = animeList.findByTmdb(Number(externalId));
+  else if (externalSite === "mal") offlineEntry = animeList.findByMal(Number(externalId));
+  else if (externalSite === "anilist") offlineEntry = animeList.findByAnilist(Number(externalId));
+  if (offlineEntry?.kitsu_id) return cacheSet(key, String(offlineEntry.kitsu_id), 30 * 60 * 1000);
+
+  // 2) Fallback: Kitsu mappings filter API
   const sites = [];
   if (externalSite === "imdb") {
     sites.push("imdb/series", "imdb/movie", "imdb");
@@ -159,7 +185,12 @@ async function resolveKitsuIdFromTmdb(tmdbId) {
   const cached = cacheGet(key);
   if (cached !== undefined) return cached;
 
-  // First get IMDB/TVDB from TMDB, then look up Kitsu
+  // 1) Try offline list first
+  await animeList.ensureLoaded();
+  const offlineEntry = animeList.findByTmdb(Number(tmdbId));
+  if (offlineEntry?.kitsu_id) return cacheSet(key, String(offlineEntry.kitsu_id), 30 * 60 * 1000);
+
+  // 2) Fallback: get IMDB/TVDB from TMDB, then look up Kitsu
   const tmdbData = await fetchJson(
     `https://api.themoviedb.org/3/tv/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`
   );
@@ -510,19 +541,16 @@ async function resolveByKitsu(kitsuId, options = {}) {
 
   if (!kitsuAnime) return cacheSet(cacheKey, { ok: false, error: "not_found" });
 
-  // Resolve TMDB ID from mappings
-  let tmdbId = null;
+  // Resolve TMDB ID — offline list now provides tmdb directly
+  let tmdbId = externalIds.tmdb || null;
   let imdbId = externalIds.imdb || null;
 
-  if (externalIds.tvdb) {
+  // Only hit TMDB API if offline list didn't have TMDB
+  if (!tmdbId && externalIds.tvdb) {
     tmdbId = await findTmdbIdFromExternal(externalIds.tvdb, "tvdb_id");
   }
   if (!tmdbId && imdbId) {
     tmdbId = await findTmdbIdFromExternal(imdbId, "imdb_id");
-  }
-  if (!tmdbId && externalIds.tvdb) {
-    // Try series lookup
-    tmdbId = await findTmdbIdFromExternal(externalIds.tvdb, "tvdb_id");
   }
 
   // If still no TMDB, try title search
