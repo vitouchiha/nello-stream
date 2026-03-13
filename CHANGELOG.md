@@ -1,3 +1,11 @@
+## [3.0.47] - 2026-03-11
+
+### Fixed
+- **Episode/Season parameter threading** - I parametri `episode` e `season` ora vengono passati correttamente attraverso tutta la pipeline di mapping interno (`fetchMappingByRoute`, `fetchMappingByKitsu`, `resolveProviderRequestContext`). Risolve il problema delle stagioni/episodi sbagliati nelle ricerche anime (supporto completo `?ep=62` assoluto e `?s=2&ep=1`).
+- **AnimeUnity search ripristinato** - Reimplementata la ricerca AnimeUnity utilizzando l'API POST `/archivio/get-animes` con gestione sessione CSRF. Ora trova correttamente gli anime tramite `anilist_id` o ricerca per titolo con match di similarità.
+
+---
+
 ## [3.0.22] - 2026-03-10
 
 ### Fixed
