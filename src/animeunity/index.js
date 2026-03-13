@@ -729,8 +729,8 @@ function resolveLookupRequest(id, season, episode, providerContext = null) {
         : null;
 
     if (explicit.provider === "kitsu") {
-      // For Kitsu lookups use season only when explicitly provided in the id.
-      requestedSeason = explicitSeason;
+      // For Kitsu lookups use season from id if provided, otherwise keep the requested season
+      if (explicitSeason !== null) requestedSeason = explicitSeason;
     } else if (explicitSeason !== null) {
       requestedSeason = explicitSeason;
     }
@@ -750,7 +750,7 @@ function resolveLookupRequest(id, season, episode, providerContext = null) {
     return {
       provider: "kitsu",
       externalId: String(contextKitsu),
-      season: null,
+      season: requestedSeason,
       episode: requestedEpisode
     };
   }
