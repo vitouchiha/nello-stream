@@ -77,6 +77,7 @@ export default {
     const ALLOWED_HOSTS = new Set([
       'kisskh.do', 'www.kisskh.do', 'kisskh.co', 'www.kisskh.co',
       'eurostream.ing', 'www.eurostream.ing',
+      'eurostreamings.life', 'www.eurostreamings.life',
       'clicka.cc', 'www.clicka.cc',
       'safego.cc', 'www.safego.cc',
       'deltabit.co', 'www.deltabit.co',
