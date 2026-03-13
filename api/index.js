@@ -6,4 +6,7 @@
  * Local dev: use `node server.js` directly
  */
 
+// Pre-load anime mapping list at module init (Vercel cold start)
+try { require('../src/mapping/anime_list').ensureLoaded().catch(() => {}); } catch {}
+
 module.exports = require('../server');

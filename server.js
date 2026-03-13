@@ -1752,6 +1752,8 @@ if (require.main === module) {
     log.info('StreamFusion Mail running', { port: PORT });
     console.log('\n  ✅  StreamFusion Mail v' + manifest.version);
     console.log('  📡  http://localhost:' + PORT + '\n');
+    // Pre-load anime ID list in background
+    try { require('./src/mapping/anime_list').ensureLoaded().catch(() => {}); } catch {}
   });
 }
 
