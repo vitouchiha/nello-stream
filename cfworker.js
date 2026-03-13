@@ -715,7 +715,7 @@ async function _handleEsStream(deltaUrl, reqUrl, env) {
     try {
       const cached = await env.ES_CACHE.get(`video:${deltaUrl}`, 'json');
       if (cached && cached.url && Date.now() - cached.t < 1800000) { // 30 min
-        return Response.redirect(cached.url, 302);
+        return new Response(null, { status: 302, headers: { 'Location': cached.url, 'Access-Control-Allow-Origin': '*' } });
       }
     } catch {}
   }
@@ -804,7 +804,7 @@ async function _handleEsStream(deltaUrl, reqUrl, env) {
       if (env?.ES_CACHE) {
         try { await env.ES_CACHE.put(`video:${deltaUrl}`, JSON.stringify({ url: videoUrl, t: Date.now() }), { expirationTtl: 1800 }); } catch {}
       }
-      return Response.redirect(videoUrl, 302);
+      return new Response(null, { status: 302, headers: { 'Location': videoUrl, 'Access-Control-Allow-Origin': '*' } });
     }
 
     return _json({ error: 'Video URL not found in response', htmlPreview: postHtml.substring(0, 500) }, 502);
