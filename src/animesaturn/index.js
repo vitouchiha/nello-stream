@@ -5,6 +5,7 @@ const { formatStream } = require("../formatter.js");
 const { checkQualityFromPlaylist } = require("../quality_helper.js");
 const { getProviderUrl } = require("../provider_urls.js");
 const { createTimeoutSignal } = require("../fetch_helper.js");
+const mapping = require("../mapping/index");
 
 function getSaturnBaseUrl() {
   return getProviderUrl("animesaturn");
@@ -951,24 +952,16 @@ async function fetchMappingPayload(lookup) {
   const cached = getCached(caches.mapping, cacheKey);
   if (cached !== undefined) return cached;
 
-  const params = new URLSearchParams();
-  params.set("ep", String(requestedEpisode));
-  if (Number.isInteger(requestedSeason) && requestedSeason >= 0) {
-    params.set("s", String(requestedSeason));
-  }
-
-  const url = `${getMappingApiBase()}/${provider}/${encodeURIComponent(externalId)}?${params.toString()}`;
   try {
-    const payload = await fetchResource(url, {
-      as: "json",
-      ttlMs: TTL.mapping,
-      cacheKey,
-      timeoutMs: FETCH_TIMEOUT
-    });
+    const options = { episode: requestedEpisode };
+    if (Number.isInteger(requestedSeason) && requestedSeason >= 0) {
+      options.season = requestedSeason;
+    }
+    const payload = await mapping.resolve(provider, externalId, options);
     setCached(caches.mapping, cacheKey, payload, TTL.mapping);
     return payload;
   } catch (error) {
-    console.error("[AnimeSaturn] mapping request failed:", error.message);
+    console.error("[AnimeSaturn] internal mapping error:", error.message);
     return null;
   }
 }
