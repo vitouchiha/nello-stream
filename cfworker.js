@@ -194,7 +194,7 @@ export default {
     }
 
     // ── KV cache: domains where responses are cached globally ──────────────
-    const _KV_CACHEABLES = { 'eurostream.ing': 21600, 'eurostreamings.life': 21600, 'clicka.cc': 86400, 'deltabit.co': 3600 };
+    const _KV_CACHEABLES = { 'eurostream.ing': 86400, 'eurostreamings.life': 86400, 'clicka.cc': 86400, 'deltabit.co': 3600 };
     const hostNorm = parsedTarget.hostname.replace(/^www\./, '');
     const kvTtl = _KV_CACHEABLES[hostNorm] || 0;
     const isPost = url.searchParams.get('method') === 'POST';
