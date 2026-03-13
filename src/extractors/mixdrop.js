@@ -30,27 +30,24 @@ async function extractMixDrop(url, refererBase = 'https://m1xdrop.net/', provide
     if (!url) return null;
 
     // Try MFP extractor first (handles new MixDrop obfuscation)
-    // Use the extractor URL directly as the stream URL so MFP extracts AND
-    // proxies from the same IP — MixDrop MP4 tokens are IP-locked.
+    // Resolve server-side to get a direct /proxy/stream URL — the
+    // /extractor/video endpoint returns 302 without CORS headers,
+    // which Stremio's player cannot follow.
     const mfpConfig = providerContext || {};
     if (mfpConfig.mfpUrl) {
       // MFP only works with m1xdrop.net/e/ — normalize other domains/paths
       const mfpUrl = url
         .replace(/^(https?:\/\/)(?:mixdrop\.(?:vip|ag|co|to|club|sx)|m1xdrop\.(?:net|com))/i, '$1m1xdrop.net')
         .replace(/\/(emb|f)\//i, '/e/');
-      const base = mfpConfig.mfpUrl.replace(/\/$/, '');
-      const params = new URLSearchParams({
-        host: 'Mixdrop',
-        d: mfpUrl,
-        redirect_stream: 'true',
-      });
-      if (mfpConfig.mfpKey) params.set('api_password', mfpConfig.mfpKey);
-      const extractorUrl = `${base}/extractor/video?${params}`;
-      return {
-        url: extractorUrl,
-        headers: null,
-        mfpHandled: true,
-      };
+      const proxyUrl = await extractViaMfp(mfpUrl, 'Mixdrop', mfpConfig, true);
+      if (proxyUrl) {
+        return {
+          url: proxyUrl,
+          headers: null,
+          mfpHandled: true,
+        };
+      }
+      // Fall through to local extraction if MFP fails
     }
 
     // Fallback: local p.a.c.k.e.r extraction (old MixDrop format)
