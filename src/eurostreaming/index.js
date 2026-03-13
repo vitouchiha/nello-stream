@@ -323,7 +323,18 @@ async function scrapingLinks(atag, language, siteName, providerContext = null) {
           workerUrl.searchParams.set('es_stream', '1');
           workerUrl.searchParams.set('url', href);
           if (cfAuth) workerUrl.searchParams.set('auth', cfAuth);
-          streams.push(makeStream('DeltaBit', workerUrl.toString()));
+
+          // Return as a direct Worker URL — Stremio follows the 302 redirect to the MP4.
+          // mfpHandled: true prevents the addon proxy from wrapping this URL.
+          streams.push(formatStream({
+            url: workerUrl.toString(),
+            name: 'Eurostreaming - DeltaBit',
+            title: providerContext?._displayName || siteName,
+            quality: 'HD',
+            language: langEmoji,
+            type: 'direct',
+            mfpHandled: true,
+          }, 'Eurostreaming'));
         } else {
           // Fallback: resolve and extract locally (works when sites aren't blocked)
           const resolved = await resolveHostLink(href);
