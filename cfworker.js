@@ -81,11 +81,24 @@ export default {
       'safego.cc', 'www.safego.cc',
       'deltabit.co', 'www.deltabit.co',
       'turbovid.me', 'www.turbovid.me',
+      'uprot.net', 'www.uprot.net',
+      'maxstream.video', 'www.maxstream.video',
       'guardoserie.digital', 'www.guardoserie.digital',
       'guardoserie.best', 'www.guardoserie.best',
     ]);
     if (!ALLOWED_HOSTS.has(parsedTarget.hostname)) {
       return _json({ error: `Host ${parsedTarget.hostname} is not proxied by this Worker` }, 403);
+    }
+
+    // ── Safego captcha solver mode ──────────────────────────────────────────
+    // All requests happen in one Worker invocation (same outbound IP).
+    if (url.searchParams.get('safego') === '1' && parsedTarget.hostname.includes('safego')) {
+      return _handleSafego(targetUrl, url, env);
+    }
+
+    // ── Safego diagnostic: fetch captcha and return OCR analysis ─────────────
+    if (url.searchParams.get('safego_diag') === '1' && parsedTarget.hostname.includes('safego')) {
+      return _handleSafegoDiag(targetUrl);
     }
 
     // ── nofollow mode: return redirect info without following ────────────────
@@ -197,4 +210,290 @@ function _json(obj, status = 200) {
       'Access-Control-Allow-Origin': '*',
     },
   });
+}
+
+/**
+ * Safego captcha solver — runs GET → OCR → POST → redirect in one Worker
+ * invocation so all outbound requests share the same IP.
+ */
+// ─── Pixel OCR engine (no external API dependencies) ─────────────────────────
+
+/** Decompress zlib-wrapped data using Web Streams API (CF Workers). */
+async function _inflate(data) {
+  const ds = new DecompressionStream('deflate');
+  const writer = ds.writable.getWriter();
+  writer.write(data);
+  writer.close();
+  const reader = ds.readable.getReader();
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    total += value.length;
+  }
+  const result = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) { result.set(c, off); off += c.length; }
+  return result;
+}
+
+/** Decode a PNG from Uint8Array into { width, height, pixels[] } (grayscale 0-255). */
+async function _decodePngGrayscale(buf) {
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  let offset = 8; // skip PNG magic
+  let width = 0, height = 0, bitDepth = 0, colorType = 0;
+  const idatChunks = [];
+  while (offset < buf.length) {
+    const chunkLen = view.getUint32(offset); offset += 4;
+    const type = String.fromCharCode(buf[offset], buf[offset+1], buf[offset+2], buf[offset+3]); offset += 4;
+    const data = buf.slice(offset, offset + chunkLen); offset += chunkLen + 4; // +4 for CRC
+    if (type === 'IHDR') {
+      const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+      width = dv.getUint32(0); height = dv.getUint32(4);
+      bitDepth = data[8]; colorType = data[9];
+    } else if (type === 'IDAT') {
+      idatChunks.push(data);
+    } else if (type === 'IEND') break;
+  }
+  // Concat IDAT chunks
+  let idatTotal = 0;
+  for (const c of idatChunks) idatTotal += c.length;
+  const idat = new Uint8Array(idatTotal);
+  let io = 0;
+  for (const c of idatChunks) { idat.set(c, io); io += c.length; }
+
+  const raw = await _inflate(idat);
+  const channels = [0, 0, 3, 0, 2, 0, 4][colorType] || 1;
+  const bpp = Math.ceil((bitDepth * channels) / 8);
+  const stride = 1 + width * bpp;
+  const pixels = new Uint8Array(width * height);
+  let prev = new Uint8Array(width * bpp);
+  for (let y = 0; y < height; y++) {
+    const ft = raw[y * stride];
+    const cur = new Uint8Array(width * bpp);
+    for (let i = 0; i < width * bpp; i++) {
+      const b = raw[y * stride + 1 + i];
+      const a = i >= bpp ? cur[i - bpp] : 0;
+      const c = (i >= bpp && y > 0) ? prev[i - bpp] : 0;
+      const p = prev[i];
+      let v;
+      if (ft === 0) v = b;
+      else if (ft === 1) v = b + a;
+      else if (ft === 2) v = b + p;
+      else if (ft === 3) v = b + Math.floor((a + p) / 2);
+      else { const pa = Math.abs(p - c), pb = Math.abs(a - c), pc = Math.abs(a + p - 2 * c); v = b + (pa <= pb && pa <= pc ? a : pb <= pc ? p : c); }
+      cur[i] = v & 0xFF;
+    }
+    prev = cur;
+    for (let x = 0; x < width; x++) {
+      const r = cur[x * bpp], g = channels >= 3 ? cur[x * bpp + 1] : r, bv = channels >= 3 ? cur[x * bpp + 2] : r;
+      pixels[y * width + x] = Math.round(0.299 * r + 0.587 * g + 0.114 * bv);
+    }
+  }
+  return { width, height, pixels };
+}
+
+// ─── Bitmap-based digit templates (calibrated from real safego captchas) ──────
+const _BITMAP_TEMPLATES = {
+  '0': '...##...|..####..|.##..##.|##....##|##....##|##....##|##....##|.##..##.|..####..|...##...',
+  '1': '..##|.###|####|..##|..##|..##|..##|..##|..##|####',
+  '2': '..####..|.##..##.|##....##|......##|.....##.|....##..|...##...|..##....|.##.....|########',
+  '3': '.#####..|##...##.|......##|.....##.|...###..|.....##.|......##|......##|##...##.|.#####..',
+  '4': '.....##|....###|...####|..##.##|.##..##|##...##|#######|.....##|.....##|.....##',
+  '5': '#######.|##......|##......|##.###..|###..##.|......##|......##|##....##|.##..##.|..####..',
+  '6': '..####..|.##..##.|##....#.|##......|##.###..|###..##.|##....##|##....##|.##..##.|..####..',
+  '7': '########|......##|......##|.....##.|....##..|...##...|..##....|.##.....|##......|##......',
+  '8': '..####..|.##..##.|##....##|.##..##.|..####..|.##..##.|##....##|##....##|.##..##.|..####..',
+  '9': '..####..|.##..##.|##....##|##....##|.##..###|..###.##|......##|.#....##|.##..##.|..####..',
+};
+
+function _ocrDigitsFromPixels(width, height, pixels, threshold = 128) {
+  // 1. Column darkness → segment digits
+  const colDark = new Float32Array(width);
+  for (let x = 0; x < width; x++) {
+    let dark = 0;
+    for (let y = 0; y < height; y++) { if (pixels[y * width + x] < threshold) dark++; }
+    colDark[x] = dark / height;
+  }
+  const inDigit = Array.from(colDark, v => v > 0.05);
+  const segments = [];
+  let start = -1;
+  for (let x = 0; x <= width; x++) {
+    if (inDigit[x] && start < 0) start = x;
+    else if (!inDigit[x] && start >= 0) { segments.push([start, x - 1]); start = -1; }
+  }
+  const merged = [];
+  for (const seg of segments) {
+    if (merged.length && seg[0] - merged[merged.length - 1][1] <= 1) {
+      merged[merged.length - 1][1] = seg[1];
+    } else merged.push([...seg]);
+  }
+  const digits = merged.filter(([s, e]) => e - s >= 2);
+  if (!digits.length) return null;
+
+  // 2. Extract each digit bitmap and match against templates
+  let result = '';
+  for (const [s, e] of digits) {
+    // Find vertical bounds
+    let top = -1, bot = -1;
+    for (let y = 0; y < height; y++) {
+      let d = 0; for (let x = s; x <= e; x++) if (pixels[y * width + x] < threshold) d++;
+      if (d > 0) { if (top < 0) top = y; bot = y; }
+    }
+    if (top < 0) continue;
+    // Build bitmap rows
+    const rows = [];
+    for (let y = top; y <= bot; y++) {
+      let row = '';
+      for (let x = s; x <= e; x++) row += pixels[y * width + x] < threshold ? '#' : '.';
+      rows.push(row);
+    }
+    const key = rows.join('|');
+    // Exact match first
+    let matched = null;
+    for (const [ch, tmpl] of Object.entries(_BITMAP_TEMPLATES)) {
+      if (tmpl === key) { matched = ch; break; }
+    }
+    // Hamming distance fallback (same-width templates only)
+    if (!matched) {
+      let best = '?', bestDist = Infinity;
+      for (const [ch, tmpl] of Object.entries(_BITMAP_TEMPLATES)) {
+        const t = tmpl.replace(/\|/g, '');
+        const k = key.replace(/\|/g, '');
+        if (t.length !== k.length) continue;
+        let dist = 0;
+        for (let i = 0; i < t.length; i++) if (t[i] !== k[i]) dist++;
+        if (dist < bestDist) { bestDist = dist; best = ch; }
+      }
+      matched = bestDist <= 12 ? best : '?';
+    }
+    result += matched;
+  }
+  return result || null;
+}
+
+// ─── Safego diagnostic (returns OCR analysis without POSTing) ────────────────
+async function _handleSafegoDiag(safegoUrl) {
+  const UA = 'Mozilla/5.0 (X11; Linux x86_64; rv:146.0) Gecko/20100101 Firefox/146.0';
+  try {
+    const r1 = await fetch(safegoUrl, { headers: { 'User-Agent': UA }, redirect: 'manual' });
+    const html1 = await r1.text();
+    const imgMatch = html1.match(/data:image\/png;base64,([^"]+)"/i);
+    if (!imgMatch) return _json({ error: 'no captcha' });
+    const b64 = imgMatch[1].replace(/\s/g, '');
+    const raw = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const { width, height, pixels } = await _decodePngGrayscale(raw);
+    // Build ASCII art
+    const ascii = [];
+    for (let y = 0; y < height; y++) {
+      let line = '';
+      for (let x = 0; x < width; x++) line += pixels[y * width + x] < 128 ? '#' : '.';
+      ascii.push(line);
+    }
+    const answer = _ocrDigitsFromPixels(width, height, pixels);
+    return _json({ width, height, answer, b64len: b64.length, ascii });
+  } catch (err) {
+    return _json({ error: err.message });
+  }
+}
+
+// ─── Safego captcha solver ───────────────────────────────────────────────────
+
+async function _handleSafego(safegoUrl, reqUrl, env) {
+  const UA = 'Mozilla/5.0 (X11; Linux x86_64; rv:146.0) Gecko/20100101 Firefox/146.0';
+  const hdrs = (extra = {}) => ({
+    'User-Agent': UA,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Referer': 'https://safego.cc/',
+    ...extra,
+  });
+
+  try {
+    const MAX_ATTEMPTS = 3;
+    const attempts = [];
+
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      // 1. GET safego page → PHPSESSID + captcha image
+      const r1 = await fetch(safegoUrl, { headers: hdrs(), redirect: 'manual' });
+      const sessid = ((r1.headers.get('Set-Cookie') || '').match(/PHPSESSID=([^;,\s]+)/) || [])[1];
+      if (!sessid) { attempts.push({ attempt, error: 'no PHPSESSID' }); continue; }
+      const html1 = await r1.text();
+      const cField = (html1.match(/name="(captch[45])"/) || [])[1] || 'captch5';
+      const imgMatch = html1.match(/data:image\/png;base64,([^"]+)"/i);
+      if (!imgMatch) { attempts.push({ attempt, error: 'no captcha image' }); continue; }
+      const b64 = imgMatch[1].replace(/\s/g, '');
+
+      // 2. Decode PNG
+      let width, height, pixels;
+      try {
+        const raw = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+        ({ width, height, pixels } = await _decodePngGrayscale(raw));
+      } catch (ocrErr) {
+        attempts.push({ attempt, error: `decode: ${ocrErr.message}` });
+        continue;
+      }
+
+      // 3. OCR — bitmap template matching (primary), AI fallback
+      let answer = null;
+      let ocrMethod = '';
+
+      // 3a. Pixel OCR with bitmap templates (very accurate for this captcha font)
+      const pxAnswer = _ocrDigitsFromPixels(width, height, pixels);
+      if (pxAnswer && !pxAnswer.includes('?') && pxAnswer.length >= 2 && pxAnswer.length <= 5) {
+        answer = pxAnswer; ocrMethod = 'pixel';
+      }
+
+      // 3b. AI vision fallback (only if pixel OCR failed)
+      if (!answer && env?.AI) {
+        try {
+          const b64img = btoa(String.fromCharCode(...Uint8Array.from(atob(b64), c => c.charCodeAt(0))));
+          const aiResp = await env.AI.run('@cf/llava-hf/llava-1.5-7b-hf', {
+            image: [...Uint8Array.from(atob(b64), c => c.charCodeAt(0))],
+            prompt: 'This CAPTCHA shows exactly 3 digits. What are the digits? Reply with ONLY the 3 digits, nothing else.',
+            max_tokens: 10,
+          });
+          const aiText = (aiResp?.description || aiResp?.response || '').replace(/\D/g, '');
+          if (aiText && aiText.length >= 2 && aiText.length <= 5) { answer = aiText; ocrMethod = 'ai'; }
+        } catch (aiErr) { /* AI failed */ }
+      }
+
+      if (!answer) {
+        attempts.push({ attempt, error: 'ocr failed' });
+        continue;
+      }
+
+      // 4. POST the answer
+      const rPost = await fetch(safegoUrl, {
+        method: 'POST',
+        headers: hdrs({
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Cookie': `PHPSESSID=${sessid}`,
+          'Origin': 'https://safego.cc',
+          'Referer': safegoUrl,
+        }),
+        body: `${cField}=${answer}`,
+        redirect: 'manual',
+      });
+
+      // Safego returns 200 + <a href="URL"> on success (NOT a 302 redirect)
+      const postBody = await rPost.text();
+      const linkMatch = /<a\b[^>]+href="(https?:\/\/[^"]+)"/.exec(postBody);
+      if (linkMatch) {
+        return _json({ url: linkMatch[1], attempt, answer, ocrMethod });
+      }
+
+      // Fallback: 302 redirect (some versions may use this)
+      const postLoc = rPost.headers.get('Location');
+      if (postLoc) return _json({ url: new URL(postLoc, safegoUrl).href, attempt, answer, ocrMethod });
+
+      const errSnippet = postBody.substring(0, 200);
+      attempts.push({ attempt, answer, ocrMethod, postStatus: rPost.status, errSnippet });
+    }
+
+    return _json({ error: `Captcha unsolved after ${MAX_ATTEMPTS} attempts`, attempts }, 502);
+  } catch (err) {
+    return _json({ error: `Safego solver error: ${err.message}` }, 502);
+  }
 }

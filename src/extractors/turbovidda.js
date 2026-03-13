@@ -181,115 +181,85 @@ function _decodePngGrayscale(buf) {
 }
 
 /**
- * Segment dark pixel columns into digit groups and apply simple 7-segment template matching.
+ * Segment dark pixel columns into digit groups and match against bitmap templates.
  * Returns the digit string (e.g. "4271") or null if unrecognisable.
  */
+
+// ─── Bitmap-based digit templates (calibrated from real safego captchas) ──────
+const _BITMAP_TEMPLATES = {
+  '0': '...##...|..####..|.##..##.|##....##|##....##|##....##|##....##|.##..##.|..####..|...##...',
+  '1': '..##|.###|####|..##|..##|..##|..##|..##|..##|####',
+  '2': '..####..|.##..##.|##....##|......##|.....##.|....##..|...##...|..##....|.##.....|########',
+  '3': '.#####..|##...##.|......##|.....##.|...###..|.....##.|......##|......##|##...##.|.#####..',
+  '4': '.....##|....###|...####|..##.##|.##..##|##...##|#######|.....##|.....##|.....##',
+  '5': '#######.|##......|##......|##.###..|###..##.|......##|......##|##....##|.##..##.|..####..',
+  '6': '..####..|.##..##.|##....#.|##......|##.###..|###..##.|##....##|##....##|.##..##.|..####..',
+  '7': '########|......##|......##|.....##.|....##..|...##...|..##....|.##.....|##......|##......',
+  '8': '..####..|.##..##.|##....##|.##..##.|..####..|.##..##.|##....##|##....##|.##..##.|..####..',
+  '9': '..####..|.##..##.|##....##|##....##|.##..###|..###.##|......##|.#....##|.##..##.|..####..',
+};
+
 function _ocrDigitsFromPixels(width, height, pixels, threshold = 128) {
-  // Build column darkness profile
+  // 1. Column darkness → segment digits
   const colDark = new Float32Array(width);
   for (let x = 0; x < width; x++) {
     let dark = 0;
-    for (let y = 0; y < height; y++) {
-      if (pixels[y * width + x] < threshold) dark++;
-    }
+    for (let y = 0; y < height; y++) { if (pixels[y * width + x] < threshold) dark++; }
     colDark[x] = dark / height;
   }
-
-  // Find digit segments: contiguous columns with >5% dark pixels
-  const inDigit = colDark.map(v => v > 0.05);
+  const inDigit = Array.from(colDark, v => v > 0.05);
   const segments = [];
   let start = -1;
   for (let x = 0; x <= width; x++) {
     if (inDigit[x] && start < 0) start = x;
     else if (!inDigit[x] && start >= 0) { segments.push([start, x - 1]); start = -1; }
   }
-  // Only merge if literally adjacent (gap = 0); safego digit gaps are exactly 1 col
   const merged = [];
   for (const seg of segments) {
     if (merged.length && seg[0] - merged[merged.length - 1][1] <= 1) {
       merged[merged.length - 1][1] = seg[1];
     } else merged.push([...seg]);
   }
-  // Ignore very narrow artifact columns (< 2px wide)
   const digits = merged.filter(([s, e]) => e - s >= 2);
-
   if (!digits.length) return null;
 
+  // 2. Extract each digit bitmap and match against templates
   let result = '';
   for (const [s, e] of digits) {
-    const dw = e - s + 1;
-    // Build row profile for this digit column range
-    const rowDark = new Float32Array(height);
+    let top = -1, bot = -1;
     for (let y = 0; y < height; y++) {
-      let dark = 0;
-      for (let x = s; x <= e; x++) if (pixels[y * width + x] < threshold) dark++;
-      rowDark[y] = dark / dw;
+      let d = 0; for (let x = s; x <= e; x++) if (pixels[y * width + x] < threshold) d++;
+      if (d > 0) { if (top < 0) top = y; bot = y; }
     }
-    // Find top/bottom of the digit (rows with any dark pixels)
-    let top = 0, bot = height - 1;
-    for (let y = 0; y < height; y++) { if (rowDark[y] > 0.1) { top = y; break; } }
-    for (let y = height - 1; y >= 0; y--) { if (rowDark[y] > 0.1) { bot = y; break; } }
-    const dh = bot - top + 1; if (dh < 3) continue;
-
-    // 3-zone split (top / mid / bottom) + left/right half darkness
-    const t1 = top + Math.floor(dh / 3), t2 = top + Math.floor(2 * dh / 3);
-    const zones = ['T', 'M', 'B'];
-    const profile = {};
-    for (const [zi, [ya, yb]] of [['T', [top, t1]], ['M', [t1 + 1, t2]], ['B', [t2 + 1, bot]]]) {
-      let L = 0, R = 0, cnt = 0;
-      const mid = Math.floor((s + e) / 2);
-      for (let y = ya; y <= yb; y++) {
-        for (let x = s; x <= e; x++) {
-          if (pixels[y * width + x] < threshold) {
-            if (x <= mid) L++; else R++;
-          }
-          cnt++;
-        }
+    if (top < 0) continue;
+    const rows = [];
+    for (let y = top; y <= bot; y++) {
+      let row = '';
+      for (let x = s; x <= e; x++) row += pixels[y * width + x] < threshold ? '#' : '.';
+      rows.push(row);
+    }
+    const key = rows.join('|');
+    // Exact match first
+    let matched = null;
+    for (const [ch, tmpl] of Object.entries(_BITMAP_TEMPLATES)) {
+      if (tmpl === key) { matched = ch; break; }
+    }
+    // Hamming distance fallback (same-width templates only)
+    if (!matched) {
+      let best = '?', bestDist = Infinity;
+      for (const [ch, tmpl] of Object.entries(_BITMAP_TEMPLATES)) {
+        const t = tmpl.replace(/\|/g, '');
+        const k = key.replace(/\|/g, '');
+        if (t.length !== k.length) continue;
+        let dist = 0;
+        for (let i = 0; i < t.length; i++) if (t[i] !== k[i]) dist++;
+        if (dist < bestDist) { bestDist = dist; best = ch; }
       }
-      profile[zi + 'L'] = L / (cnt / 2 + 0.01);
-      profile[zi + 'R'] = R / (cnt / 2 + 0.01);
+      matched = bestDist <= 12 ? best : '?';
     }
-
-    const { TL = 0, TR = 0, ML = 0, MR = 0, BL = 0, BR = 0 } = profile;
-    const ratio = dw / dh;
-    // Width-to-height ratio helps distinguish 1 (narrow) from others
-    const digit = _matchDigit(TL, TR, ML, MR, BL, BR, ratio);
-    result += digit;
+    result += matched;
   }
-
   return result || null;
-}
-
-/**
- * Map pixel zone profile to a digit character.
- * Uses nearest-neighbour matching against expected feature vectors.
- * Vectors measured from real safego.cc captcha samples.
- * Format: [TL, TR, ML, MR, BL, BR] (zone darkness 0-1 per half).
- */
-const _DIGIT_TEMPLATES = {
-  '0': [0.44, 0.44, 0.50, 0.50, 0.42, 0.42], // oval – symmetric, all zones dark
-  '1': [0.00, 0.90, 0.00, 0.90, 0.00, 0.90], // right bar only (ratio < 0.28 catches narrow)
-  '2': [0.38, 0.50, 0.08, 0.42, 0.66, 0.33], // top arc, right mid, diagonal → BL heavy
-  '3': [0.10, 0.65, 0.00, 0.60, 0.05, 0.70], // right-side only all zones
-  '4': [0.50, 0.55, 0.70, 0.60, 0.00, 0.80], // left bar top, crossbar, right bar bottom
-  '5': [0.60, 0.15, 0.42, 0.48, 0.08, 0.72], // top-left, centre, bottom-right
-  '6': [0.50, 0.31, 0.66, 0.50, 0.50, 0.50], // top-left arch, left side, bottom oval
-  '7': [0.50, 0.78, 0.00, 0.52, 0.00, 0.18], // full top bar, right diagonal only, no bottom
-  '8': [0.52, 0.52, 0.58, 0.58, 0.52, 0.52], // all zones dark (two stacked ovals)
-  '9': [0.42, 0.42, 0.22, 0.70, 0.00, 0.72], // top arc, right + middle, no BL
-};
-
-function _matchDigit(TL, TR, ML, MR, BL, BR, ratio) {
-  if (ratio < 0.28) return '1';
-  const obs = [TL, TR, ML, MR, BL, BR];
-  let best = '?', bestDist = Infinity;
-  for (const [ch, tmpl] of Object.entries(_DIGIT_TEMPLATES)) {
-    let dist = 0;
-    for (let i = 0; i < 6; i++) dist += Math.abs(obs[i] - tmpl[i]);
-    if (dist < bestDist) { bestDist = dist; best = ch; }
-  }
-  // Reject if nothing is close enough (max total distance = 1.0)
-  return bestDist < 1.0 ? best : '?';
 }
 
 /**
@@ -319,33 +289,34 @@ async function _solveSafegoCaptcha(safegoUrl) {
     const imgBuf = Buffer.from(b64data, 'base64');
     const { width, height, pixels } = _decodePngGrayscale(imgBuf);
 
-    // Primary: ocr.space free API (accurate, ~25k req/month free)
-    // Fallback: pixel-based nearest-neighbour OCR (fast, no external deps)
-    let captchAnswer = null;
-    try {
-      const ocrForm = new URLSearchParams({
-        base64Image: `data:image/png;base64,${b64data}`,
-        apikey: 'helloworld',
-        language: 'eng',
-        isOverlayRequired: 'false',
-        detectOrientation: 'false',
-        scale: 'true',
-        OCREngine: '2',
-      });
-      const ocrResp = await fetch('https://api.ocr.space/parse/image', {
-        method: 'POST',
-        body: ocrForm,
-        signal: AbortSignal.timeout(10000),
-      });
-      const ocrJson = await ocrResp.json().catch(() => ({}));
-      const ocrText = ((ocrJson?.ParsedResults || [])[0]?.ParsedText || '').replace(/\D/g, '');
-      if (ocrText) { captchAnswer = ocrText; console.log(`[Safego] OCR.space: "${captchAnswer}"`); }
-    } catch (e) {
-      console.log(`[Safego] OCR.space failed: ${e.message}`);
-    }
-    if (!captchAnswer) {
-      captchAnswer = _ocrDigitsFromPixels(width, height, pixels);
-      console.log(`[Safego] Pixel OCR fallback: "${captchAnswer}" (${width}x${height})`);
+    // Primary: Bitmap template OCR (very accurate for safego's fixed font)
+    let captchAnswer = _ocrDigitsFromPixels(width, height, pixels);
+    if (captchAnswer && !captchAnswer.includes('?') && captchAnswer.length >= 2) {
+      console.log(`[Safego] Bitmap OCR: "${captchAnswer}" (${width}x${height})`);
+    } else {
+      // Fallback: OCR.space free API
+      captchAnswer = null;
+      try {
+        const ocrForm = new URLSearchParams({
+          base64Image: `data:image/png;base64,${b64data}`,
+          apikey: 'helloworld',
+          language: 'eng',
+          isOverlayRequired: 'false',
+          detectOrientation: 'false',
+          scale: 'true',
+          OCREngine: '2',
+        });
+        const ocrResp = await fetch('https://api.ocr.space/parse/image', {
+          method: 'POST',
+          body: ocrForm,
+          signal: AbortSignal.timeout(10000),
+        });
+        const ocrJson = await ocrResp.json().catch(() => ({}));
+        const ocrText = ((ocrJson?.ParsedResults || [])[0]?.ParsedText || '').replace(/\D/g, '');
+        if (ocrText) { captchAnswer = ocrText; console.log(`[Safego] OCR.space fallback: "${captchAnswer}"`); }
+      } catch (e) {
+        console.log(`[Safego] OCR.space fallback failed: ${e.message}`);
+      }
     }
     if (!captchAnswer) return null;
     // POST the answer using detected field name
@@ -367,34 +338,23 @@ async function _solveSafegoCaptcha(safegoUrl) {
     const setCookie2 = r2.headers.get('set-cookie') || '';
     const captch5Cookie = (setCookie2.match(/captch[45]=([^;,\s]+)/) || [])[1] || '';
     const r2loc = r2.headers.get('location');
-    if (captch5Cookie || r2loc) {
-      const directUrl = r2loc ? new URL(r2loc, safegoUrl).href : undefined;
-      if (directUrl) console.log(`[Safego] Captcha solved OK → ${directUrl}`);
-      else console.log(`[Safego] Captcha solved OK, captch5 cookie obtained, doing follow-up GET`);
-      if (!directUrl && captch5Cookie) {
-        // Cookie obtained but no immediate redirect — GET with cookie to retrieve destination
-        const cookieStr = `PHPSESSID=${phpsessid}; captch5=${captch5Cookie}`;
-        try {
-          const rGet = await _proxyFetch(safegoUrl, {
-            headers: { 'User-Agent': UA, 'Cookie': cookieStr, 'Accept': 'text/html,application/xhtml+xml' },
-            redirect: 'manual',
-          });
-          const getLoc = rGet.headers.get('location');
-          if (getLoc) return { phpsessid, captch5: captch5Cookie, directUrl: new URL(getLoc, safegoUrl).href };
-          const getHtml = await rGet.text();
-          const getLink = /<a\b[^>]+href="(https?:\/\/[^"]+)"/.exec(getHtml);
-          if (getLink) return { phpsessid, captch5: captch5Cookie, directUrl: getLink[1] };
-        } catch (_) { /* ignore, fall through to return without directUrl */ }
-      }
+
+    // Safego returns 200 + <a href="URL"> on success (NOT a 302 redirect)
+    const postHtml = await r2.text();
+    const postLink = /<a\b[^>]+href="(https?:\/\/[^"]+)"/.exec(postHtml);
+    if (postLink) {
+      console.log(`[Safego] Captcha solved OK → ${postLink[1]}`);
+      return { phpsessid, captch5: captch5Cookie || captchAnswer, directUrl: postLink[1] };
+    }
+
+    // Fallback: 302 redirect (some versions of safego may use this)
+    if (r2loc) {
+      const directUrl = new URL(r2loc, safegoUrl).href;
+      console.log(`[Safego] Captcha solved OK (302) → ${directUrl}`);
       return { phpsessid, captch5: captch5Cookie || captchAnswer, directUrl };
     }
-    // Check if response has a direct link (POST succeeded without a cookie)
-    const html2 = await r2.text();
-    const linkMatch = /<a[^>]+href=["']([^"']+)["']/.exec(html2);
-    if (linkMatch && /^https?:\/\//.test(linkMatch[1])) {
-      return { phpsessid, captch5: captchAnswer, directUrl: linkMatch[1] };
-    }
-    console.log('[Safego] Captcha POST did not return captch5 cookie — captcha may have been wrong');
+
+    console.log('[Safego] Captcha POST did not return destination link — captcha may have been wrong');
     return null;
   } catch (e) {
     console.error('[Safego] solveCaptcha error:', e.message);
