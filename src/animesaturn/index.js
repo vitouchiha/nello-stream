@@ -651,7 +651,7 @@ async function mapLimit(values, limit, mapper) {
   return output;
 }
 
-async function extractStreamsFromAnimePath(animePath, requestedEpisode, mediaType = "tv") {
+async function extractStreamsFromAnimePath(animePath, requestedEpisode, mediaType = "tv", requestedSeason = null) {
   const normalizedPath = normalizeAnimeSaturnPath(animePath);
   if (!normalizedPath) return [];
 
@@ -680,7 +680,18 @@ async function extractStreamsFromAnimePath(animePath, requestedEpisode, mediaTyp
     Array.isArray(parsedPage.relatedAnimePaths) &&
     parsedPage.relatedAnimePaths.length > 0
   ) {
-    for (const related of parsedPage.relatedAnimePaths.slice(0, 2)) {
+    // Filter related paths by season to prevent S1 content leaking into S2 results
+    let relatedCandidates = parsedPage.relatedAnimePaths;
+    if (Number.isInteger(requestedSeason) && requestedSeason >= 2) {
+      const seasonStr = String(requestedSeason);
+      relatedCandidates = relatedCandidates.filter(p => {
+        const slug = (p.split('/').pop() || '').toLowerCase()
+          .replace(/-(ita|sub-ita|ita-sub|sub|eng|raw|jp|dub)(-[a-z])?$/i, '');
+        return slug.endsWith('-' + seasonStr) || slug.includes('-' + seasonStr + '-') ||
+               new RegExp(`[-_](season-?${seasonStr}|s${seasonStr})$`, 'i').test(slug);
+      });
+    }
+    for (const related of relatedCandidates.slice(0, 2)) {
       try {
         const relatedUrl = buildSaturnUrl(related);
         if (!relatedUrl) continue;
@@ -1052,7 +1063,7 @@ async function getStreams(id, type, season, episode, providerContext = null) {
     const mediaType = normalizedType === "movie" ? "movie" : "tv";
 
     const perPathStreams = await mapLimit(animePaths, 3, (path) =>
-      extractStreamsFromAnimePath(path, requestedEpisode, mediaType)
+      extractStreamsFromAnimePath(path, requestedEpisode, mediaType, lookup.season)
     );
 
     const streams = perPathStreams.flat().filter((stream) => stream && stream.url);

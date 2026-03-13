@@ -13,6 +13,7 @@
 
 const { createTimeoutSignal } = require("../fetch_helper.js");
 const { getProviderUrl } = require("../provider_urls.js");
+const cloudscraper = require("cloudscraper");
 const animeList = require("./anime_list.js");
 
 const TMDB_API_KEY = "68e094699525b18a70bab2f86b1fa706";
@@ -510,16 +511,53 @@ const AU_SESSION_TTL = 30 * 60 * 1000; // 30 min
 async function getAnimeUnitySession(base) {
   if (auSession && auSession.expiresAt > Date.now()) return auSession;
   try {
-    const tc = createTimeoutSignal(8000);
-    const res = await fetch(base, { signal: tc.signal, headers: { "User-Agent": UA } });
-    if (typeof tc.cleanup === "function") tc.cleanup();
-    if (!res.ok) return null;
-    const html = await res.text();
+    // Try direct fetch first (fast path for non-CF environments)
+    let html = null;
+    let rawCookies = [];
+    try {
+      const tc = createTimeoutSignal(8000);
+      const res = await fetch(base, { signal: tc.signal, headers: { "User-Agent": UA } });
+      if (typeof tc.cleanup === "function") tc.cleanup();
+      if (res.ok) {
+        const txt = await res.text();
+        if (!txt.includes("Just a moment") || txt.length > 50000) {
+          html = txt;
+          rawCookies = res.headers.getSetCookie?.() || [];
+        }
+      }
+    } catch { /* direct fetch failed, try cloudscraper */ }
+
+    // Fallback: use cloudscraper to bypass CF challenge
+    let csJar = null;
+    if (!html) {
+      console.log("[Mapping] AnimeUnity: direct fetch failed or CF-challenged, trying cloudscraper...");
+      try {
+        csJar = cloudscraper.jar();
+        const csResp = await cloudscraper.get({
+          uri: base,
+          jar: csJar,
+          headers: { "User-Agent": UA, "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7" },
+          resolveWithFullResponse: true,
+          timeout: 10000,
+        });
+        if (csResp.statusCode >= 200 && csResp.statusCode < 300) {
+          html = csResp.body;
+          const jarCookies = csJar.getCookieString(base);
+          if (jarCookies) rawCookies = [jarCookies];
+          console.log("[Mapping] AnimeUnity: cloudscraper succeeded, CSRF found:", !!html.match(/csrf-token/));
+        }
+      } catch (csErr) {
+        console.log("[Mapping] AnimeUnity: cloudscraper also failed:", csErr.message);
+      }
+    }
+
+    if (!html) return null;
     const csrf = (html.match(/name="csrf-token"\s+content="([^"]+)"/) || [])[1] || null;
-    const rawCookies = res.headers.getSetCookie?.() || [];
-    const cookies = rawCookies.map(c => c.split(";")[0]).join("; ");
+    const cookies = rawCookies.length > 0
+      ? rawCookies.map(c => c.split(";")[0]).join("; ")
+      : "";
     if (!csrf || !cookies) return null;
-    auSession = { csrf, cookies, expiresAt: Date.now() + AU_SESSION_TTL };
+    auSession = { csrf, cookies, jar: csJar, expiresAt: Date.now() + AU_SESSION_TTL };
     return auSession;
   } catch { return null; }
 }
@@ -545,26 +583,57 @@ async function searchAnimeUnity(titles, anilistId) {
     if (cachedPaths !== undefined) { cachedPaths.forEach(p => allPaths.add(p)); continue; }
 
     try {
-      const tc = createTimeoutSignal(8000);
-      const res = await fetch(`${base}/archivio/get-animes`, {
-        method: "POST",
-        signal: tc.signal,
-        headers: {
-          "User-Agent": UA,
-          "Content-Type": "application/json",
-          "X-Requested-With": "XMLHttpRequest",
-          "X-CSRF-TOKEN": session.csrf,
-          "Cookie": session.cookies,
-          "Accept": "application/json",
-        },
-        body: JSON.stringify({ title }),
-      });
-      if (typeof tc.cleanup === "function") tc.cleanup();
-      if (!res.ok) { cacheSet(key, []); continue; }
+      let records = null;
 
-      const json = await res.json();
-      const records = json.records || json.data || json || [];
-      if (!Array.isArray(records) || records.length === 0) { cacheSet(key, []); continue; }
+      // Try direct fetch POST first
+      try {
+        const tc = createTimeoutSignal(8000);
+        const res = await fetch(`${base}/archivio/get-animes`, {
+          method: "POST",
+          signal: tc.signal,
+          headers: {
+            "User-Agent": UA,
+            "Content-Type": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+            "X-CSRF-TOKEN": session.csrf,
+            "Cookie": session.cookies,
+            "Accept": "application/json",
+          },
+          body: JSON.stringify({ title }),
+        });
+        if (typeof tc.cleanup === "function") tc.cleanup();
+        if (res.ok) {
+          const json = await res.json();
+          const raw = json.records || json.data || json || [];
+          if (Array.isArray(raw) && raw.length > 0) records = raw;
+        }
+      } catch { /* direct POST failed */ }
+
+      // Fallback: use cloudscraper POST with the shared cookie jar
+      if (!records && session.jar) {
+        try {
+          const csResp = await cloudscraper.post({
+            uri: `${base}/archivio/get-animes`,
+            jar: session.jar,
+            json: { title },
+            headers: {
+              "User-Agent": UA,
+              "X-Requested-With": "XMLHttpRequest",
+              "X-CSRF-TOKEN": session.csrf,
+              "Accept": "application/json",
+            },
+            resolveWithFullResponse: true,
+            timeout: 10000,
+          });
+          if (csResp.statusCode >= 200 && csResp.statusCode < 300) {
+            const data = typeof csResp.body === "string" ? JSON.parse(csResp.body) : csResp.body;
+            const raw = data.records || data.data || data || [];
+            if (Array.isArray(raw) && raw.length > 0) records = raw;
+          }
+        } catch { /* cloudscraper POST also failed */ }
+      }
+
+      if (!records || records.length === 0) { cacheSet(key, []); continue; }
 
       const paths = [];
 
