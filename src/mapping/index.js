@@ -503,25 +503,109 @@ async function searchAnimeSaturn(titles) {
   return [...allPaths].slice(0, 20);
 }
 
+// ─── AnimeUnity search (POST /archivio/get-animes) ───────────────────────────
+let auSession = null;   // { csrf, cookies, expiresAt }
+const AU_SESSION_TTL = 30 * 60 * 1000; // 30 min
+
+async function getAnimeUnitySession(base) {
+  if (auSession && auSession.expiresAt > Date.now()) return auSession;
+  try {
+    const tc = createTimeoutSignal(8000);
+    const res = await fetch(base, { signal: tc.signal, headers: { "User-Agent": UA } });
+    if (typeof tc.cleanup === "function") tc.cleanup();
+    if (!res.ok) return null;
+    const html = await res.text();
+    const csrf = (html.match(/name="csrf-token"\s+content="([^"]+)"/) || [])[1] || null;
+    const rawCookies = res.headers.getSetCookie?.() || [];
+    const cookies = rawCookies.map(c => c.split(";")[0]).join("; ");
+    if (!csrf || !cookies) return null;
+    auSession = { csrf, cookies, expiresAt: Date.now() + AU_SESSION_TTL };
+    return auSession;
+  } catch { return null; }
+}
+
 async function searchAnimeUnity(titles, anilistId) {
   const base = getProviderBase("animeunity");
   if (!base) return [];
 
-  // AnimeUnity is JS-rendered, standard HTML scraping doesn't work.
-  // Try fetching by known AniList ID pattern if available.
-  if (anilistId) {
-    const key = `au:anilist:${anilistId}`;
-    const cached = cacheGet(key);
-    if (cached !== undefined) return cached;
+  // Build cache key from inputs
+  const cacheId = anilistId ? `au:anilist:${anilistId}` : `au:title:${(titles[0] || "").toLowerCase()}`;
+  const cached = cacheGet(cacheId);
+  if (cached !== undefined) return cached;
 
-    // Try common AnimeUnity URL patterns using their internal search
-    // AnimeUnity's URL format: /anime/{internal_id}-{slug}
-    // We can't derive internal_id from AniList ID directly.
-    // As fallback, return empty - the provider already handles this gracefully.
-    return cacheSet(key, []);
+  const session = await getAnimeUnitySession(base);
+  if (!session) return cacheSet(cacheId, []);
+
+  // Search using each title via POST /archivio/get-animes
+  const allPaths = new Set();
+  for (const title of titles.slice(0, 3)) {
+    if (!title) continue;
+    const key = `au:search:${title.toLowerCase()}`;
+    const cachedPaths = cacheGet(key);
+    if (cachedPaths !== undefined) { cachedPaths.forEach(p => allPaths.add(p)); continue; }
+
+    try {
+      const tc = createTimeoutSignal(8000);
+      const res = await fetch(`${base}/archivio/get-animes`, {
+        method: "POST",
+        signal: tc.signal,
+        headers: {
+          "User-Agent": UA,
+          "Content-Type": "application/json",
+          "X-Requested-With": "XMLHttpRequest",
+          "X-CSRF-TOKEN": session.csrf,
+          "Cookie": session.cookies,
+          "Accept": "application/json",
+        },
+        body: JSON.stringify({ title }),
+      });
+      if (typeof tc.cleanup === "function") tc.cleanup();
+      if (!res.ok) { cacheSet(key, []); continue; }
+
+      const json = await res.json();
+      const records = json.records || json.data || json || [];
+      if (!Array.isArray(records) || records.length === 0) { cacheSet(key, []); continue; }
+
+      const paths = [];
+
+      // If we have an AniList ID, match by ID first (most accurate)
+      if (anilistId) {
+        const match = records.find(r => r.anilist_id === Number(anilistId));
+        if (match && match.id && match.slug) {
+          paths.push(`/anime/${match.id}-${match.slug}`);
+        }
+      }
+
+      // Also match by title similarity
+      if (paths.length === 0) {
+        const normalizedTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, "");
+        if (normalizedTitle) {
+          for (const r of records) {
+            if (!r.id || !r.slug) continue;
+            const candidates = [r.title, r.title_eng, r.title_it].filter(Boolean);
+            for (const c of candidates) {
+              const norm = c.toLowerCase().replace(/[^a-z0-9]+/g, "");
+              if (norm.includes(normalizedTitle) || normalizedTitle.includes(norm)) {
+                const path = `/anime/${r.id}-${r.slug}`;
+                if (!paths.includes(path)) paths.push(path);
+                break;
+              }
+            }
+            if (paths.length >= 5) break;
+          }
+        }
+      }
+
+      cacheSet(key, paths);
+      paths.forEach(p => allPaths.add(p));
+      if (allPaths.size >= 10) break;
+    } catch {
+      cacheSet(key, []);
+    }
   }
 
-  return [];
+  const result = [...allPaths].slice(0, 20);
+  return cacheSet(cacheId, result);
 }
 
 // ─── Main resolution ──────────────────────────────────────────────────────────
