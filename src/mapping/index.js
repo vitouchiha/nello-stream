@@ -7,8 +7,8 @@
  * Provides:
  *   resolve(provider, externalId, options) → mapping payload
  *
- * Supports providers: "kitsu", "tmdb", "imdb"
- * Uses: Kitsu API, TMDB API, provider site search
+ * Supports providers: "kitsu", "tmdb", "imdb", "mal", "anilist", "tvdb", "anidb"
+ * Uses: Kitsu API, TMDB API, Fribb offline list, provider site search
  */
 
 const { createTimeoutSignal } = require("../fetch_helper.js");
@@ -143,6 +143,7 @@ async function findKitsuIdByExternalId(externalSite, externalId) {
   else if (externalSite === "tmdb") offlineEntry = animeList.findByTmdb(Number(externalId));
   else if (externalSite === "mal") offlineEntry = animeList.findByMal(Number(externalId));
   else if (externalSite === "anilist") offlineEntry = animeList.findByAnilist(Number(externalId));
+  else if (externalSite === "anidb") offlineEntry = animeList.findByAnidb(Number(externalId));
   if (offlineEntry?.kitsu_id) return cacheSet(key, String(offlineEntry.kitsu_id), 30 * 60 * 1000);
 
   // 2) Fallback: Kitsu mappings filter API
@@ -761,6 +762,28 @@ async function resolveByImdb(imdbId, options = {}) {
   return { ok: false, error: "not_found" };
 }
 
+async function resolveByExternalProvider(providerName, externalId, options = {}) {
+  const id = String(externalId).trim();
+  if (!id) return { ok: false, error: `invalid_${providerName}_id` };
+
+  const kitsuId = await findKitsuIdByExternalId(providerName, id);
+  if (kitsuId) {
+    const result = await resolveByKitsu(kitsuId, options);
+    if (result?.ok) {
+      result.requested = {
+        provider: providerName,
+        externalId: id,
+        id: `${providerName}:${id}`,
+        resolvedKitsuId: kitsuId,
+        ...(options.episode ? { episode: parseInt(String(options.episode), 10) } : {}),
+      };
+      return result;
+    }
+  }
+
+  return { ok: false, error: "not_found" };
+}
+
 async function buildMinimalTmdbResponse(tmdbId, options = {}, imdbOverride = null) {
   // Get show details + external IDs from TMDB in parallel
   const [tvData, extIds] = await Promise.all([
@@ -823,7 +846,7 @@ async function buildMinimalTmdbResponse(tmdbId, options = {}, imdbOverride = nul
 /**
  * Main entry point. Resolves anime mapping by provider type and external ID.
  *
- * @param {string} provider - "kitsu", "tmdb", or "imdb"
+ * @param {string} provider - "kitsu", "tmdb", "imdb", "mal", "anilist", "tvdb", or "anidb"
  * @param {string} externalId - The external ID (e.g., "12", "tt0388629", "37854")
  * @param {object} options - { episode?: number, season?: number }
  * @returns {Promise<object>} Mapping payload compatible with external API format
@@ -837,6 +860,10 @@ async function resolve(provider, externalId, options = {}) {
     case "kitsu": return resolveByKitsu(id, options);
     case "tmdb": return resolveByTmdb(id, options);
     case "imdb": return resolveByImdb(id, options);
+    case "mal":
+    case "anilist":
+    case "tvdb":
+    case "anidb": return resolveByExternalProvider(p, id, options);
     default: return { ok: false, error: "unsupported_provider" };
   }
 }
