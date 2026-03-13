@@ -185,6 +185,57 @@ async function resolveKitsuIdFromTmdb(tmdbId) {
     if (kitsuId) return cacheSet(key, kitsuId);
   }
 
+  // Fallback: search Kitsu by TMDB title
+  const kitsuIdByTitle = await searchKitsuByTmdbTitle(tmdbId);
+  if (kitsuIdByTitle) return cacheSet(key, kitsuIdByTitle);
+
+  return cacheSet(key, null);
+}
+
+// ─── Kitsu title search (fallback when external ID mappings don't exist) ──────
+
+async function searchKitsuByTmdbTitle(tmdbId) {
+  const key = `kitsu:title_search:tmdb:${tmdbId}`;
+  const cached = cacheGet(key);
+  if (cached !== undefined) return cached;
+
+  // Get title from TMDB
+  const tvData = await fetchJson(
+    `https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${TMDB_API_KEY}`
+  );
+  const movieData = !tvData?.name ? await fetchJson(
+    `https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${TMDB_API_KEY}`
+  ) : null;
+
+  const titles = new Set();
+  if (tvData?.name) titles.add(tvData.name);
+  if (tvData?.original_name) titles.add(tvData.original_name);
+  if (movieData?.title) titles.add(movieData.title);
+  if (movieData?.original_title) titles.add(movieData.original_title);
+  if (titles.size === 0) return cacheSet(key, null);
+
+  for (const title of titles) {
+    const searchUrl = `https://kitsu.io/api/edge/anime?filter[text]=${encodeURIComponent(title)}&fields[anime]=id,canonicalTitle,titles,slug,subtype&page[limit]=5`;
+    const result = await fetchJson(searchUrl, 8000);
+    if (!result?.data?.length) continue;
+
+    // Match by title similarity
+    const normalizedSearch = title.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    for (const anime of result.data) {
+      const attrs = anime.attributes || {};
+      const candidateTitles = [
+        attrs.canonicalTitle,
+        attrs.titles?.en, attrs.titles?.en_jp, attrs.titles?.ja_jp,
+        attrs.slug?.replace(/-/g, " ")
+      ].filter(Boolean).map(t => t.toLowerCase().replace(/[^a-z0-9]+/g, ""));
+
+      for (const cand of candidateTitles) {
+        if (cand === normalizedSearch || cand.includes(normalizedSearch) || normalizedSearch.includes(cand)) {
+          return cacheSet(key, String(anime.id));
+        }
+      }
+    }
+  }
   return cacheSet(key, null);
 }
 
@@ -311,13 +362,30 @@ async function searchAnimeWorld(titles) {
     if (cached !== undefined) { cached.forEach(p => allPaths.add(p)); continue; }
 
     const html = await fetchHtml(`${base}/search?keyword=${encodeURIComponent(title)}`);
-    const paths = [];
+    const allLinks = [];
     const regex = /href="(\/play\/[^"]+)"/g;
     let m;
     while ((m = regex.exec(html)) !== null) {
       const p = m[1].split("?")[0];
-      if (p && !paths.includes(p)) paths.push(p);
+      if (p && !allLinks.includes(p)) allLinks.push(p);
     }
+
+    // Filter by title similarity: /play/slug.ID → extract slug part
+    const normalizedTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    // Skip non-Latin titles that normalize to empty
+    if (!normalizedTitle) { cacheSet(key, []); continue; }
+    const paths = allLinks.filter(p => {
+      // Extract slug from /play/SLUG.ID or /play/SLUG-subita.ID etc.
+      const slug = p.replace(/^\/play\//, "").replace(/\.[^.]+$/, ""); // remove .ID suffix
+      const normalizedSlug = slug.toLowerCase().replace(/[-_]+/g, "").replace(/[^a-z0-9]/g, "");
+      if (normalizedSlug.includes(normalizedTitle) || normalizedTitle.includes(normalizedSlug)) return true;
+      // Word-based matching
+      const slugWords = slug.toLowerCase().split(/[-_]+/).filter(w => w.length > 2);
+      const titleWords = title.toLowerCase().split(/[\s:,.-]+/).filter(w => w.length > 2);
+      const matchingWords = titleWords.filter(tw => slugWords.some(sw => sw.includes(tw) || tw.includes(sw)));
+      return matchingWords.length >= Math.max(1, Math.ceil(titleWords.length * 0.5));
+    });
+
     cacheSet(key, paths);
     paths.forEach(p => allPaths.add(p));
     if (allPaths.size >= 10) break;
@@ -339,13 +407,11 @@ async function searchAnimeSaturn(titles) {
     const html = await fetchHtml(`${base}/animelist?search=${encodeURIComponent(title)}`);
     const paths = [];
 
-    // Extract only links from search result items (inside .anime-card or similar containers)
-    // Use a two-pass approach: first try structured results, then fallback with title filtering
-    const resultBlockRegex = /class="[^"]*anime-card[^"]*"[\s\S]*?<\/div>/gi;
+    // AnimeSaturn search results are inside <div class="item-archivio"> blocks
+    const resultBlockRegex = /class="[^"]*item-archivio[^"]*"[\s\S]*?<\/(?:div|li)>/gi;
     const blocks = html.match(resultBlockRegex);
     
     if (blocks && blocks.length > 0) {
-      // Parse links from within result blocks only
       for (const block of blocks) {
         const linkMatch = block.match(/href="(?:https?:\/\/[^"]*)?\/anime\/([^"?#]+)"/i);
         if (linkMatch) {
@@ -358,11 +424,30 @@ async function searchAnimeSaturn(titles) {
       }
     }
     
-    // Fallback: get all /anime/ links but filter by title similarity
+    // Fallback: extract from list-group-item blocks
+    if (paths.length === 0) {
+      const listBlockRegex = /class="[^"]*list-group-item[^"]*"[\s\S]*?<\/li>/gi;
+      const listBlocks = html.match(listBlockRegex);
+      if (listBlocks) {
+        for (const block of listBlocks) {
+          const linkMatch = block.match(/href="(?:https?:\/\/[^"]*)?\/anime\/([^"?#]+)"/i);
+          if (linkMatch) {
+            const slug = linkMatch[1];
+            if (!slug.includes("${") && !slug.includes("{{")) {
+              const path = `/anime/${slug}`;
+              if (!paths.includes(path)) paths.push(path);
+            }
+          }
+        }
+      }
+    }
+
+    // Last fallback: regex with title filtering
     if (paths.length === 0) {
       const regex = /href="(?:https?:\/\/[^"]*)?\/anime\/([^"?#]+)"/gi;
       let m;
       const normalizedTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, "");
+      if (!normalizedTitle) { cacheSet(key, []); continue; } // Skip non-Latin titles
       while ((m = regex.exec(html)) !== null) {
         const slug = m[1];
         if (slug.includes("${") || slug.includes("{{")) continue;
@@ -598,12 +683,13 @@ async function resolveByImdb(imdbId, options = {}) {
   let kitsuId = await findKitsuIdByExternalId("imdb", id);
 
   // If direct fails, chain: IMDB → TMDB → TVDB → Kitsu
+  let resolvedTmdbId = null;
   if (!kitsuId) {
-    const tmdbId = await findTmdbIdFromExternal(id, "imdb_id");
-    if (tmdbId) {
+    resolvedTmdbId = await findTmdbIdFromExternal(id, "imdb_id");
+    if (resolvedTmdbId) {
       // Get TVDB from TMDB external_ids
       const extIds = await fetchJson(
-        `https://api.themoviedb.org/3/tv/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`
+        `https://api.themoviedb.org/3/tv/${resolvedTmdbId}/external_ids?api_key=${TMDB_API_KEY}`
       );
       if (extIds?.tvdb_id) {
         kitsuId = await findKitsuIdByExternalId("tvdb", String(extIds.tvdb_id));
@@ -611,11 +697,15 @@ async function resolveByImdb(imdbId, options = {}) {
       // If still no Kitsu, try movie external_ids
       if (!kitsuId) {
         const movieExt = await fetchJson(
-          `https://api.themoviedb.org/3/movie/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`
+          `https://api.themoviedb.org/3/movie/${resolvedTmdbId}/external_ids?api_key=${TMDB_API_KEY}`
         );
         if (movieExt?.tvdb_id) {
           kitsuId = await findKitsuIdByExternalId("tvdb", String(movieExt.tvdb_id));
         }
+      }
+      // Last resort: search Kitsu by TMDB title
+      if (!kitsuId) {
+        kitsuId = await searchKitsuByTmdbTitle(resolvedTmdbId);
       }
     }
   }
@@ -634,29 +724,25 @@ async function resolveByImdb(imdbId, options = {}) {
     }
   }
 
-  // Fallback: get TMDB from IMDB, build minimal response
-  const tmdbId = await findTmdbIdFromExternal(id, "imdb_id");
-  if (tmdbId) {
-    return {
-      ok: true,
-      generatedAt: new Date().toISOString(),
-      requested: { provider: "imdb", externalId: id, id: `imdb:${id}`, resolvedKitsuId: null },
-      kitsu: null,
-      mappings: { ids: { imdb: id, tmdb: tmdbId } },
-    };
+  // Fallback: get TMDB from IMDB, build minimal response with provider search
+  const fallbackTmdbId = resolvedTmdbId || await findTmdbIdFromExternal(id, "imdb_id");
+  if (fallbackTmdbId) {
+    return buildMinimalTmdbResponse(fallbackTmdbId, options, id);
   }
 
   return { ok: false, error: "not_found" };
 }
 
-async function buildMinimalTmdbResponse(tmdbId, options = {}) {
-  // Get external IDs from TMDB
-  const extIds = await fetchJson(
-    `https://api.themoviedb.org/3/tv/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`
-  );
+async function buildMinimalTmdbResponse(tmdbId, options = {}, imdbOverride = null) {
+  // Get show details + external IDs from TMDB in parallel
+  const [tvData, extIds] = await Promise.all([
+    fetchJson(`https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${TMDB_API_KEY}`),
+    fetchJson(`https://api.themoviedb.org/3/tv/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`),
+  ]);
 
   const ids = { tmdb: tmdbId };
-  if (extIds?.imdb_id) ids.imdb = extIds.imdb_id;
+  if (imdbOverride) ids.imdb = imdbOverride;
+  else if (extIds?.imdb_id) ids.imdb = extIds.imdb_id;
   if (extIds?.tvdb_id) ids.tvdb = String(extIds.tvdb_id);
 
   const requestedEpisode = parseInt(String(options.episode || ""), 10) || null;
@@ -669,19 +755,36 @@ async function buildMinimalTmdbResponse(tmdbId, options = {}) {
     tmdbEpisode = await resolveTmdbEpisode(tmdbId, requestedEpisode, requestedSeason);
   }
 
+  // Search provider sites by TMDB title
+  const searchTitles = [];
+  if (tvData?.name) searchTitles.push(tvData.name);
+  if (tvData?.original_name && tvData.original_name !== tvData.name) searchTitles.push(tvData.original_name);
+
+  let animeWorldPaths = [], animeSaturnPaths = [], animeUnityPaths = [];
+  if (searchTitles.length > 0) {
+    [animeWorldPaths, animeSaturnPaths, animeUnityPaths] = await Promise.all([
+      searchAnimeWorld(searchTitles),
+      searchAnimeSaturn(searchTitles),
+      searchAnimeUnity(searchTitles, null),
+    ]);
+  }
+
   return {
     ok: true,
     generatedAt: new Date().toISOString(),
     requested: {
-      provider: "tmdb",
-      externalId: tmdbId,
-      id: `tmdb:${tmdbId}`,
+      provider: imdbOverride ? "imdb" : "tmdb",
+      externalId: imdbOverride || tmdbId,
+      id: imdbOverride ? `imdb:${imdbOverride}` : `tmdb:${tmdbId}`,
       resolvedKitsuId: null,
       ...(requestedEpisode ? { episode: requestedEpisode } : {}),
     },
     kitsu: null,
     mappings: {
       ids,
+      ...(animeWorldPaths.length > 0 ? { animeworld: animeWorldPaths } : {}),
+      ...(animeSaturnPaths.length > 0 ? { animesaturn: animeSaturnPaths } : {}),
+      ...(animeUnityPaths.length > 0 ? { animeunity: animeUnityPaths } : {}),
       ...(tmdbEpisode ? { tmdb_episode: tmdbEpisode } : {}),
     },
   };
