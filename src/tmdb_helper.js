@@ -1,5 +1,5 @@
 const TMDB_API_KEY = "68e094699525b18a70bab2f86b1fa706";
-const MAPPING_API_URL = "https://animemapping.stremio.dpdns.org";
+const internalMapping = require("./mapping/index");
 
 async function resolveTmdbFromKitsu(kitsuId) {
     try {
@@ -48,50 +48,45 @@ async function resolveTmdbFromKitsu(kitsuId) {
             seriesSeasonCount
         });
 
-        // 1. Try Central Mapping API (Fastest and most accurate as it's updated on the edge)
-        if (MAPPING_API_URL) {
-            try {
-                const apiResponse = await fetch(`${MAPPING_API_URL}/mapping/${id}`);
-                if (apiResponse.ok) {
-                    const apiData = await apiResponse.json();
-                    applyTopologyHints(apiData);
-                    titleHints = Array.isArray(apiData?.titleHints)
-                        ? apiData.titleHints.map(x => String(x || "").trim()).filter(Boolean)
-                        : [];
-                    if (isMeaningfulSeasonName(apiData?.seasonName)) {
-                        tmdbSeasonTitle = String(apiData.seasonName).trim();
-                    }
-
-                    if (apiData.tmdbId) {
-                        if (apiData.season && !tmdbSeasonTitle) {
-                            tmdbSeasonTitle = await getTmdbSeasonTitle(apiData.tmdbId, apiData.season);
-                        }
-                        console.log(`[TMDB Helper] API Hit (TMDB)! Kitsu ${id} -> TMDB ${apiData.tmdbId}, Season ${apiData.season} (Source: ${apiData.source})`);
-                        return withTopologyHints({ tmdbId: apiData.tmdbId, season: apiData.season, tmdbSeasonTitle, titleHints });
-                    }
-
-                    // NEW: If we have IMDb ID, use it to find TMDB ID immediately
-                    if (apiData.imdbId) {
-                        console.log(`[TMDB Helper] API Hit (IMDb)! Kitsu ${id} -> IMDb ${apiData.imdbId}, Season ${apiData.season} (Source: ${apiData.source})`);
-                        const findUrl = `https://api.themoviedb.org/3/find/${apiData.imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
-                        const findResponse = await fetch(findUrl);
-                        const findData = await findResponse.json();
-
-                        if (findData.tv_results?.length > 0) {
-                            if (!tmdbSeasonTitle && apiData.season) {
-                                tmdbSeasonTitle = await getTmdbSeasonTitle(findData.tv_results[0].id, apiData.season);
-                            }
-                            return withTopologyHints({ tmdbId: findData.tv_results[0].id, season: apiData.season, tmdbSeasonTitle, titleHints });
-                        }
-                        else if (findData.movie_results?.length > 0) return withTopologyHints({ tmdbId: findData.movie_results[0].id, season: null, tmdbSeasonTitle, titleHints });
-
-                        // Fallback: keep IMDb id so providers can resolve it later in metadata step.
-                        return withTopologyHints({ tmdbId: apiData.imdbId, season: apiData.season ?? null, tmdbSeasonTitle, titleHints });
-                    }
+        // 1. Try Internal Mapping Module (replaces external animemapping API)
+        try {
+            const apiData = await internalMapping.resolveForTmdbHelper(id);
+            if (apiData) {
+                applyTopologyHints(apiData);
+                titleHints = Array.isArray(apiData?.titleHints)
+                    ? apiData.titleHints.map(x => String(x || "").trim()).filter(Boolean)
+                    : [];
+                if (isMeaningfulSeasonName(apiData?.seasonName)) {
+                    tmdbSeasonTitle = String(apiData.seasonName).trim();
                 }
-            } catch (apiErr) {
-                console.warn('[TMDB Helper] Mapping API Error:', apiErr.message);
+
+                if (apiData.tmdbId) {
+                    if (apiData.season && !tmdbSeasonTitle) {
+                        tmdbSeasonTitle = await getTmdbSeasonTitle(apiData.tmdbId, apiData.season);
+                    }
+                    console.log(`[TMDB Helper] Internal Mapping Hit (TMDB)! Kitsu ${id} -> TMDB ${apiData.tmdbId}, Season ${apiData.season} (Source: ${apiData.source})`);
+                    return withTopologyHints({ tmdbId: apiData.tmdbId, season: apiData.season, tmdbSeasonTitle, titleHints });
+                }
+
+                if (apiData.imdbId) {
+                    console.log(`[TMDB Helper] Internal Mapping Hit (IMDb)! Kitsu ${id} -> IMDb ${apiData.imdbId}, Season ${apiData.season} (Source: ${apiData.source})`);
+                    const findUrl = `https://api.themoviedb.org/3/find/${apiData.imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
+                    const findResponse = await fetch(findUrl);
+                    const findData = await findResponse.json();
+
+                    if (findData.tv_results?.length > 0) {
+                        if (!tmdbSeasonTitle && apiData.season) {
+                            tmdbSeasonTitle = await getTmdbSeasonTitle(findData.tv_results[0].id, apiData.season);
+                        }
+                        return withTopologyHints({ tmdbId: findData.tv_results[0].id, season: apiData.season, tmdbSeasonTitle, titleHints });
+                    }
+                    else if (findData.movie_results?.length > 0) return withTopologyHints({ tmdbId: findData.movie_results[0].id, season: null, tmdbSeasonTitle, titleHints });
+
+                    return withTopologyHints({ tmdbId: apiData.imdbId, season: apiData.season ?? null, tmdbSeasonTitle, titleHints });
+                }
             }
+        } catch (apiErr) {
+            console.warn('[TMDB Helper] Internal Mapping Error:', apiErr.message);
         }
 
         // Fetch Mappings

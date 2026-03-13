@@ -19,13 +19,11 @@ var __async = (__this, __arguments, generator) => {
   });
 };
 const { getProviderUrl } = require("../provider_urls.js");
+const mapping = require("../mapping/index");
 function getGuardaserieBaseUrl() {
   return getProviderUrl("guardaserie");
 }
 const TMDB_API_KEY = "68e094699525b18a70bab2f86b1fa706";
-function getMappingApiUrl() {
-  return getProviderUrl("mapping_api").replace(/\/+$/, "");
-}
 const USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
 
 const { extractFromUrl } = require('../extractors');
@@ -232,22 +230,20 @@ function getIdsFromKitsu(kitsuId, season, episode) {
   return __async(this, null, function* () {
     try {
       if (!kitsuId) return null;
-      const params = new URLSearchParams();
       const parsedEpisode = Number.parseInt(String(episode || ""), 10);
       const parsedSeason = Number.parseInt(String(season || ""), 10);
+      const options = {};
       if (Number.isInteger(parsedEpisode) && parsedEpisode > 0) {
-        params.set("ep", String(parsedEpisode));
+        options.episode = parsedEpisode;
       } else {
-        params.set("ep", "1");
+        options.episode = 1;
       }
       if (Number.isInteger(parsedSeason) && parsedSeason >= 0) {
-        params.set("s", String(parsedSeason));
+        options.season = parsedSeason;
       }
 
-      const url = `${getMappingApiUrl()}/kitsu/${encodeURIComponent(String(kitsuId).trim())}?${params.toString()}`;
-      const response = yield fetch(url);
-      if (!response.ok) return null;
-      const payload = yield response.json();
+      const payload = yield mapping.resolve("kitsu", String(kitsuId).trim(), options);
+      if (!payload || !payload.ok) return null;
       const ids = payload && payload.mappings && payload.mappings.ids ? payload.mappings.ids : {};
       const tmdbEpisode =
         (payload && payload.mappings && (payload.mappings.tmdb_episode || payload.mappings.tmdbEpisode)) ||

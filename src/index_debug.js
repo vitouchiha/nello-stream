@@ -6,6 +6,7 @@ const animeunity = require('./animeunity/index');
 const animeworld = require('./animeworld/index');
 const animesaturn = require('./animesaturn/index');
 const { createTimeoutSignal } = require('./fetch_helper.js');
+const mapping = require('./mapping/index');
 
 const TMDB_API_KEY = '68e094699525b18a70bab2f86b1fa706';
 const CONTEXT_TIMEOUT = 3000;
@@ -28,27 +29,23 @@ async function fetchJsonWithTimeout(url, timeoutMs = CONTEXT_TIMEOUT) {
     }
 }
 
-// Mapping API implementation
+// Internal Mapping API (replaces external animemapping.stremio.dpdns.org)
 async function fetchMappingByRoute(route, value, season) {
-    const MAPPING_API_URL = "https://animemapping.stremio.dpdns.org";
     if (!route || !value) return null;
-    const encodedValue = encodeURIComponent(String(value).trim());
-    let url = `${MAPPING_API_URL}/${route}/${encodedValue}`;
-    if (Number.isInteger(season) && season >= 0) {
-        url += `?season=${season}`;
-    }
-    return fetchJsonWithTimeout(url, 2000);
+    try {
+        const options = {};
+        if (Number.isInteger(season) && season >= 0) options.season = season;
+        return await mapping.resolve(route, value, options);
+    } catch { return null; }
 }
 
 async function fetchMappingByKitsu(kitsuId, season) {
-    const MAPPING_API_URL = "https://animemapping.stremio.dpdns.org";
     if (!kitsuId) return null;
-    const encodedValue = encodeURIComponent(String(kitsuId).trim());
-    let url = `${MAPPING_API_URL}/kitsu/${encodedValue}`;
-    if (Number.isInteger(season) && season >= 0) {
-        url += `?season=${season}`;
-    }
-    return fetchJsonWithTimeout(url, 2000);
+    try {
+        const options = {};
+        if (Number.isInteger(season) && season >= 0) options.season = season;
+        return await mapping.resolve("kitsu", kitsuId, options);
+    } catch { return null; }
 }
 
 function applyMappingHintsToContext(context, payload) {

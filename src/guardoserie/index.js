@@ -5,14 +5,12 @@ const { checkQualityFromPlaylist } = require('../quality_helper');
 const { getProviderUrl } = require('../provider_urls.js');
 const { CookieJar } = require('tough-cookie');
 const { launchBrowser } = require('../utils/browser.js');
+const mapping = require('../mapping/index');
 
 function getGuardoserieBaseUrl() {
     return getProviderUrl('guardoserie');
 }
 const TMDB_API_KEY = '68e094699525b18a70bab2f86b1fa706';
-function getMappingApiUrl() {
-    return getProviderUrl('mapping_api').replace(/\/+$/, "");
-}
 
 // ── Proxy + CookieJar helper (like StreamVix) ─────────────────────────────
 const _cookieJar = new CookieJar();
@@ -326,22 +324,20 @@ async function _doFetch(url, opts) {
 async function getIdsFromKitsu(kitsuId, season, episode) {
     try {
         if (!kitsuId) return null;
-        const params = new URLSearchParams();
         const parsedEpisode = Number.parseInt(String(episode || ''), 10);
         const parsedSeason = Number.parseInt(String(season || ''), 10);
+        const options = {};
         if (Number.isInteger(parsedEpisode) && parsedEpisode > 0) {
-            params.set('ep', String(parsedEpisode));
+            options.episode = parsedEpisode;
         } else {
-            params.set('ep', '1');
+            options.episode = 1;
         }
         if (Number.isInteger(parsedSeason) && parsedSeason >= 0) {
-            params.set('s', String(parsedSeason));
+            options.season = parsedSeason;
         }
 
-        const url = `${getMappingApiUrl()}/kitsu/${encodeURIComponent(String(kitsuId).trim())}?${params.toString()}`;
-        const response = await fetch(url);
-        if (!response.ok) return null;
-        const payload = await response.json();
+        const payload = await mapping.resolve('kitsu', String(kitsuId).trim(), options);
+        if (!payload || !payload.ok) return null;
         const ids = payload && payload.mappings && payload.mappings.ids ? payload.mappings.ids : {};
         const tmdbEpisode =
             (payload && payload.mappings && (payload.mappings.tmdb_episode || payload.mappings.tmdbEpisode)) ||
