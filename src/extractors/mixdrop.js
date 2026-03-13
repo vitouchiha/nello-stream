@@ -34,10 +34,14 @@ async function extractMixDrop(url, refererBase = 'https://m1xdrop.net/', provide
     // proxies from the same IP — MixDrop MP4 tokens are IP-locked.
     const mfpConfig = providerContext || {};
     if (mfpConfig.mfpUrl) {
+      // MFP only works with m1xdrop.net/e/ — normalize other domains/paths
+      const mfpUrl = url
+        .replace(/^(https?:\/\/)(?:mixdrop\.(?:vip|ag|co|to|club|sx)|m1xdrop\.(?:net|com))/i, '$1m1xdrop.net')
+        .replace(/\/(emb|f)\//i, '/e/');
       const base = mfpConfig.mfpUrl.replace(/\/$/, '');
       const params = new URLSearchParams({
         host: 'Mixdrop',
-        d: url,
+        d: mfpUrl,
         redirect_stream: 'true',
       });
       if (mfpConfig.mfpKey) params.set('api_password', mfpConfig.mfpKey);
