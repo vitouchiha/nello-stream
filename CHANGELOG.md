@@ -1,3 +1,10 @@
+## [3.0.49] - 2026-03-13
+
+### Fixed
+- **AnimeUnity/AnimeWorld/AnimeSaturn: stagione persa nei lookup Kitsu** - I tre provider anime impostavano `season: null` quando il lookup passava per un Kitsu ID ricevuto dal providerContext, perdendo la stagione richiesta dall'utente. Ora preservano correttamente la stagione in entrambi i path (esplicito e da contesto). Questo causava il mancato ritrovamento di stream AnimeUnity per S2+ (es. Frieren Stagione 2).
+
+---
+
 ## [3.0.48] - 2026-03-13
 
 ### Fixed
