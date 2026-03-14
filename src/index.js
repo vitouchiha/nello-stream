@@ -376,7 +376,7 @@ async function getStreams(id, type, season, episode, config = {}) {
                 continue;
             }
             if (providerName === 'cb01') {
-              promises.push(withProviderTimeout('CB01', withMfp('cb01', cb01.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, ctxFor('cb01'))), 12000));
+              promises.push(withProviderTimeout('CB01', withMfp('cb01', cb01.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, ctxFor('cb01'))), 25000));
                 continue;
             }
             if (providerName === 'eurostreaming') {
