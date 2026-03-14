@@ -12,6 +12,7 @@
 const { getProviderUrl } = require('../provider_urls.js');
 const { extractMixDrop } = require('../extractors/mixdrop');
 const { extractMaxStream } = require('../extractors/maxstream');
+const { extractUprot } = require('../extractors/uprot');
 const { extractTurbovidda, bypassSafego } = require('../extractors/turbovidda');
 const { formatStream } = require('../formatter.js');
 const { fetchWithCloudscraper } = require('../utils/fetcher.js');
@@ -390,10 +391,9 @@ async function scrapingLinks(atag, language, siteName, providerContext = null) {
   }
 
   // ── DL (download link via uprot.net/msd/) ──────────────────────────────
-  // DL links go through uprot.net → MixDrop/download page — skip for now
-  // (uprot.net requires captcha bypass which we don't support yet)
+  // DL links go through uprot.net → download page — skip (download, not stream)
 
-  // ── MaxStream (via uprot.net/msf/) ─────────────────────────────────────
+  // ── MaxStream (via uprot.net/msf/ or direct maxstream link) ────────────
   if (/MaxStream/i.test(atag)) {
     const href = extractHref('MaxStream');
     if (href) {
@@ -401,8 +401,13 @@ async function scrapingLinks(atag, language, siteName, providerContext = null) {
         try {
           const resolved = await resolveHostLink(href);
           const target = resolved || href;
-          const result = await extractMaxStream(target);
-          if (result) streams.push(makeStream('MaxStream', result.url));
+          if (target.includes('uprot')) {
+            const result = await extractUprot(target);
+            if (result) streams.push(makeStream('MaxStream', result.url, result.headers));
+          } else {
+            const result = await extractMaxStream(target);
+            if (result) streams.push(makeStream('MaxStream', result.url));
+          }
         } catch { /* skip */ }
       })());
     }

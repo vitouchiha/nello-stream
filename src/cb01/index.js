@@ -170,7 +170,7 @@ async function searchSeries(showname, year) {
  * Route a resolved stayonline URL to the right extractor.
  * - m1xdrop.net / mixdrop.*  → extractMixDrop
  * - maxstream.*              → extractMaxStream
- * - uprot.net                → skip (captcha required)
+ * - uprot.net                → extractUprot (captcha auto-solved)
  * Returns a stream object or null.
  */
 async function extractFromResolvedUrl(resolvedUrl, displayTitle, providerContext = null) {
