@@ -30,7 +30,10 @@ let _kvCacheLoaded = false; // Whether we've tried loading from KV on this insta
 
 function _getPathType(url) {
   const m = String(url).match(/uprot\.net\/(ms[a-z]+)\//);
-  return m ? `/${m[1]}/` : '/msf/';
+  const raw = m ? `/${m[1]}/` : '/msf/';
+  // /msfi/ shares the same captcha session as /msf/
+  if (raw === '/msfi/') return '/msf/';
+  return raw;
 }
 
 /**
@@ -526,6 +529,9 @@ async function extractUprot(uprotUrl) {
   try {
     let link = String(uprotUrl).trim();
     if (link.includes('/mse/')) link = link.replace('/mse/', '/msf/');
+
+    // /msfld/ is a folder listing — not directly extractable (handled by CB01 provider)
+    if (link.includes('/msfld/')) return null;
 
     // /msei/ uses token-based captcha (per-URL, no session caching)
     if (link.includes('/msei/')) return _extractMseiUprot(link);
