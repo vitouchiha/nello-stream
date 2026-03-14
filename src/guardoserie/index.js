@@ -204,9 +204,10 @@ async function _webshareFetch(url, mergedHeaders) {
 
 /**
  * Fetch with multiple proxy strategies for guardoserie domains:
- * 1. CF Worker (CF-to-CF bypass)
- * 2. WEBSHARE residential proxy (bypasses Cloudflare)
- * 3. PROXY_URL / direct fetch (fallback)
+ * 1. CF Worker (CF-to-CF bypass) — raced in parallel with Webshare
+ * 2. WEBSHARE residential proxy (bypasses Cloudflare) — raced in parallel with CF Worker
+ * 3. Browser (only if BROWSERLESS_URL is configured)
+ * 4. PROXY_URL / direct fetch (fallback)
  */
 async function proxyFetch(url, opts = {}) {
     const isGuardoserie = url.includes('guardoserie');
@@ -218,29 +219,41 @@ async function proxyFetch(url, opts = {}) {
     if (cookies) mergedHeaders['Cookie'] = cookies;
 
     if (isGuardoserie) {
-        // Strategy 1: CF Worker
-        const cfResp = await _cfWorkerFetch(url);
-        if (cfResp) {
-            const setCookieHeaders = cfResp.headers.getSetCookie?.() || [];
-            for (const c of setCookieHeaders) { try { _cookieJar.setCookieSync(c, url); } catch {} }
-            return cfResp;
+        // Race CF Worker and Webshare in parallel (both are fast-fail)
+        const racers = [];
+        const hasCfWorker = !!(process.env.CF_WORKER_URL || '').trim();
+        const hasWebshare = !!(process.env.WEBSHARE_PROXIES || '').trim();
+        const hasBrowserless = !!(process.env.BROWSERLESS_URL || '').trim();
+
+        if (hasCfWorker) racers.push(_cfWorkerFetch(url).catch(() => null));
+        if (hasWebshare) racers.push(_webshareFetch(url, mergedHeaders).catch(() => null));
+
+        if (racers.length > 0) {
+            // Use Promise.any-like: resolve on first non-null result
+            const result = await new Promise((resolve) => {
+                let pending = racers.length;
+                for (const p of racers) {
+                    p.then(r => { if (r) resolve(r); else if (--pending === 0) resolve(null); })
+                     .catch(() => { if (--pending === 0) resolve(null); });
+                }
+            });
+            if (result) {
+                const setCookieHeaders = result.headers.getSetCookie?.() || [];
+                for (const c of setCookieHeaders) { try { _cookieJar.setCookieSync(c, url); } catch {} }
+                return result;
+            }
         }
 
-        // Strategy 2: Headless browser (solves Cloudflare JS challenges)
-        const brResp = await _browserFetch(url);
-        if (brResp) return brResp;
-
-        // Strategy 3: WEBSHARE residential proxy
-        const wsResp = await _webshareFetch(url, mergedHeaders);
-        if (wsResp) {
-            const setCookieHeaders = wsResp.headers.getSetCookie?.() || [];
-            for (const c of setCookieHeaders) { try { _cookieJar.setCookieSync(c, url); } catch {} }
-            return wsResp;
+        // Strategy 3: Headless browser — only if BROWSERLESS_URL is configured
+        if (hasBrowserless) {
+            const brResp = await _browserFetch(url);
+            if (brResp) return brResp;
         }
+
         console.warn(`[Guardoserie] All proxy strategies failed for ${url}, trying direct`);
     }
 
-    // Strategy 3: PROXY_URL agent or direct
+    // Strategy 4: PROXY_URL agent or direct
     const agent = _getAgent();
     const fetchOpts = { ...opts, headers: mergedHeaders };
     if (agent) fetchOpts.agent = agent;
@@ -281,7 +294,7 @@ async function _doFetch(url, opts) {
             method: opts.method || 'GET',
             headers: { ...opts.headers, Host: parsed.host },
             agent,
-            timeout: 30000,
+            timeout: 10000,
         };
 
         const req = mod.request(reqOpts, (res) => {
@@ -831,8 +844,8 @@ async function getStreams(id, type, season, episode, providerContext = null) {
         });
 
         let targetUrl = null;
-        // Limit to top 10 results to avoid timeout while being thorough
-        for (const result of allResults.slice(0, 10)) {
+        // Limit to top 3 results to avoid Vercel timeout (each needs a proxyFetch)
+        for (const result of allResults.slice(0, 3)) {
             // Check title match first to avoid unnecessary fetches
             const nResult = norm(result.title);
 
