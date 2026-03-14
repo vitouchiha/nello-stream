@@ -1,121 +1,357 @@
+'use strict';
+
 /**
- * Uprot.net → MaxStream resolver
- * 
- * Attempts to bypass uprot.net using webshare proxy (Spanish IP).
- * If the proxy IP is in a "trusted" geo, uprot may skip the captcha
- * and redirect directly to the MaxStream embed.
+ * Uprot.net → MaxStream resolver.
  *
- * Flow: POST to uprot link → look for "CONTINUE" link → follow redirects → extract MaxStream URL
+ * Strategy:
+ * 1. POST to uprot init URL → get PHPSESSID + captcha image (base64 embedded).
+ * 2. Per-digit segmentation + CF Worker AI OCR → get 3-digit answer.
+ * 3. POST captcha answer with cookies → get captcha hash cookie (success indicator).
+ * 4. Cache cookies for ~22h.
+ * 5. For each uprot link: POST with cached cookies → find REAL link (buttok button,
+ *    NOT the decoy empty <a> tags) → follow uprots redirect → MaxStream.
+ * 6. Extract video URL from MaxStream page.
+ *
+ * uprot.net accepts direct connections (no proxy needed).
+ * Only the CF Worker is used for AI-based captcha OCR.
  */
 
 const { extractMaxStream } = require('./maxstream');
+const { decodePngGrayscale, ocrDigitsFromPixels, encodePngGrayscale, preprocessCaptcha } = require('../utils/ocr');
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
+const UPROT_INIT_URL = 'https://uprot.net/msf/r4hcq47tarq8';
+const COOKIE_TTL = 22 * 3600 * 1000; // 22h
+const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36';
+const CF_WORKER_URL = 'https://kisskh-proxy.vitobsfm.workers.dev';
 
-function getWebshareProxy() {
-  const raw = (process.env.WEBSHARE_PROXIES || '').trim();
-  if (!raw) return null;
-  const list = raw.split(',').map(s => s.trim()).filter(Boolean);
-  if (!list.length) return null;
-  return list[Math.floor(Math.random() * list.length)];
+// Module-level cookie cache
+let _cachedCookies = null; // { sessid, captchaHash, captchaAnswer, ts }
+
+function _headers(referer) {
+  return {
+    'User-Agent': UA,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.5',
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'Origin': 'https://uprot.net',
+    'Referer': referer || 'https://uprot.net/',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'same-origin',
+    'Sec-Fetch-User': '?1',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1',
+    'DNT': '1',
+  };
 }
 
 /**
- * Try to resolve an uprot.net link to a MaxStream embed URL.
+ * OCR a captcha image via per-digit segmentation + AI:
+ * 1. Decode PNG → grayscale
+ * 2. Binarize at low threshold → clean digit shapes
+ * 3. Column-projection segmentation → 3 digit regions
+ * 4. Extract each digit as clean isolated PNG
+ * 5. Send each digit to CF Worker AI OCR (expectedDigits=1)
+ * 6. Combine results
+ */
+async function _ocrCaptcha(b64) {
+  const raw = Buffer.from(b64, 'base64');
+  let width, height, pixels;
+  try {
+    ({ width, height, pixels } = decodePngGrayscale(raw));
+  } catch { return null; }
+
+  // 1. Try local pixel OCR first (fast, works if templates match)
+  try {
+    const pxAnswer = ocrDigitsFromPixels(width, height, pixels);
+    if (pxAnswer && !pxAnswer.includes('?') && pxAnswer.length >= 2 && pxAnswer.length <= 5) {
+      return { answer: pxAnswer, method: 'pixel' };
+    }
+  } catch { /* pixel OCR failed */ }
+
+  // 2. Per-digit segmentation + AI OCR
+  const threshold = 80;
+  try {
+    // Column projection to find digit segments
+    const colDark = [];
+    for (let x = 0; x < width; x++) {
+      let dark = 0;
+      for (let y = 0; y < height; y++) if (pixels[y * width + x] < threshold) dark++;
+      colDark.push(dark);
+    }
+    const inDigit = colDark.map(v => v > 1);
+    const segments = [];
+    let start = -1;
+    for (let x = 0; x <= width; x++) {
+      if (inDigit[x] && start < 0) start = x;
+      else if (!inDigit[x] && start >= 0) { segments.push([start, x - 1]); start = -1; }
+    }
+    // Merge segments within 2px gap
+    const merged = [];
+    for (const seg of segments) {
+      if (merged.length && seg[0] - merged[merged.length - 1][1] <= 2) {
+        merged[merged.length - 1][1] = seg[1];
+      } else merged.push([...seg]);
+    }
+    // Filter out noise segments (too narrow)
+    const digitSegs = merged.filter(([s, e]) => e - s >= 5);
+    if (digitSegs.length < 2 || digitSegs.length > 5) {
+      console.warn('[Uprot] Segmentation found', digitSegs.length, 'digits (expected 3)');
+    }
+
+    // OCR each digit individually (sequential to avoid CF Worker AI timeout)
+    const auth = process.env.CF_WORKER_AUTH || '';
+    const digitResults = [];
+    for (const [s, e] of digitSegs) {
+      // Find vertical bounds
+      let top = -1, bot = -1;
+      for (let y = 0; y < height; y++) {
+        let d = 0;
+        for (let x = s; x <= e; x++) if (pixels[y * width + x] < threshold) d++;
+        if (d > 0) { if (top < 0) top = y; bot = y; }
+      }
+      if (top < 0) { digitResults.push('?'); continue; }
+
+      // Create clean digit image with padding
+      const pad = 4;
+      const dw = e - s + 1 + pad * 2;
+      const dh = bot - top + 1 + pad * 2;
+      const dp = new Uint8Array(dw * dh).fill(255);
+      for (let y = top; y <= bot; y++) {
+        for (let x = s; x <= e; x++) {
+          dp[(y - top + pad) * dw + (x - s + pad)] = pixels[y * width + x] < threshold ? 0 : 255;
+        }
+      }
+      const png = encodePngGrayscale(dw, dh, dp);
+
+      const resp = await fetch(`${CF_WORKER_URL}/?ocr_digits=1&auth=${auth}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: png.toString('base64'), expectedDigits: 1 }),
+        signal: AbortSignal.timeout(45000),
+      });
+      const data = await resp.json();
+      digitResults.push(data?.answer || '?');
+    }
+
+    const answer = digitResults.join('');
+    if (answer && !answer.includes('?') && answer.length >= 2) {
+      return { answer, method: 'ai-perdigit' };
+    }
+  } catch (e) {
+    console.warn('[Uprot] Per-digit OCR error:', e.message);
+  }
+
+  // 3. Fallback: send full preprocessed image to CF Worker
+  try {
+    const cleanPixels = preprocessCaptcha(width, height, pixels, threshold);
+    const cleanPng = encodePngGrayscale(width, height, cleanPixels);
+    const auth = process.env.CF_WORKER_AUTH || '';
+    const resp = await fetch(`${CF_WORKER_URL}/?ocr_digits=1&auth=${auth}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: cleanPng.toString('base64') }),
+      signal: AbortSignal.timeout(30000),
+    });
+    const data = await resp.json();
+    if (data?.answer) return { answer: data.answer, method: data.method || 'ai-clean' };
+  } catch { /* fallback failed */ }
+
+  return null;
+}
+
+/**
+ * Solve the uprot captcha: POST init → OCR → POST answer → cache cookies.
+ */
+async function _solveCaptcha() {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      // 1. POST to uprot page (empty body) → PHPSESSID + captcha image
+      const r1 = await fetch(UPROT_INIT_URL, {
+        method: 'POST',
+        headers: _headers(UPROT_INIT_URL),
+        redirect: 'manual',
+        signal: AbortSignal.timeout(15000),
+      });
+
+      const setCookie1 = r1.headers.get('set-cookie') || '';
+      const sessMatch = setCookie1.match(/PHPSESSID=([^;,\s]+)/);
+      if (!sessMatch) { console.warn('[Uprot] No PHPSESSID, attempt', attempt); continue; }
+      const sessid = sessMatch[1];
+      const html = await r1.text();
+
+      // Extract captcha image
+      const imgMatch = html.match(/(?:src|data-src)=["'](data:image\/png;base64,([^"']+))["']/i)
+        || html.match(/data:image\/png;base64,([^"']+)/i);
+      if (!imgMatch) { console.warn('[Uprot] No captcha image, attempt', attempt); continue; }
+      const b64 = (imgMatch[2] || imgMatch[1]).replace(/\s/g, '');
+
+      // 2. OCR the captcha
+      const ocr = await _ocrCaptcha(b64);
+      if (!ocr) { console.warn('[Uprot] OCR failed, attempt', attempt); continue; }
+      console.log('[Uprot] OCR:', ocr.answer, '(' + ocr.method + ')');
+
+      // 3. POST captcha answer
+      const r2 = await fetch(UPROT_INIT_URL, {
+        method: 'POST',
+        headers: { ..._headers(UPROT_INIT_URL), 'Cookie': `PHPSESSID=${sessid}` },
+        body: `captcha=${ocr.answer}`,
+        redirect: 'manual',
+        signal: AbortSignal.timeout(15000),
+      });
+
+      const html2 = await r2.text();
+
+      // Extract updated cookies — captcha hash cookie = definitive success indicator
+      const setCookie2 = r2.headers.get('set-cookie') || '';
+      const sessMatch2 = setCookie2.match(/PHPSESSID=([^;,\s]+)/);
+      const hashMatch = setCookie2.match(/captcha=([^;,\s]+)/);
+      const hasCaptchaForm = /data:image\/png;base64/i.test(html2);
+
+      if (!hashMatch || hasCaptchaForm) {
+        console.warn('[Uprot] Wrong answer:', ocr.answer, 'attempt', attempt);
+        continue;
+      }
+
+      _cachedCookies = {
+        sessid: sessMatch2 ? sessMatch2[1] : sessid,
+        captchaHash: hashMatch ? hashMatch[1] : '',
+        captchaAnswer: ocr.answer,
+        ts: Date.now(),
+      };
+      console.log('[Uprot] Captcha solved:', ocr.answer);
+      return _cachedCookies;
+    } catch (e) {
+      console.warn('[Uprot] Solve attempt', attempt, 'error:', e.message);
+    }
+  }
+  return null;
+}
+
+/** Get valid cookies (from cache or solve fresh). */
+async function _getCookies() {
+  if (_cachedCookies && (Date.now() - _cachedCookies.ts) < COOKIE_TTL) {
+    return _cachedCookies;
+  }
+  return _solveCaptcha();
+}
+
+/**
+ * Bypass an uprot link: POST with cached cookies → follow "CONTINUE" → MaxStream.
+ * Returns MaxStream embed URL or null.
+ */
+async function _bypassUprot(uprotUrl, retried) {
+  const cookies = await _getCookies();
+  if (!cookies) return null;
+
+  try {
+    const cookieStr = `PHPSESSID=${cookies.sessid}${cookies.captchaHash ? `; captcha=${cookies.captchaHash}` : ''}`;
+
+    const r = await fetch(uprotUrl, {
+      method: 'POST',
+      headers: { ..._headers(uprotUrl), 'Cookie': cookieStr },
+      body: `captcha=${cookies.captchaAnswer}`,
+      redirect: 'manual',
+      signal: AbortSignal.timeout(15000),
+    });
+
+    const html = await r.text();
+
+    // Find the REAL uprots/maxstream redirect link.
+    // The page has DECOY empty <a> tags with a static dead URL,
+    // a HONEYPOT in display:none div, and the REAL link inside
+    // <a href="..."><button id="buttok">C O N T I N U E</button></a>
+    let redirect = null;
+
+    // Primary: the <a> wrapping a <button id="buttok"> with C O N T I N U E
+    const buttokMatch = html.match(/href=["'](https?:\/\/[^"']+)["'][^>]*>\s*<button[^>]*id=["']buttok["'][^>]*>\s*C\s*O\s*N\s*T\s*I\s*N\s*U\s*E/i);
+    if (buttokMatch) {
+      redirect = buttokMatch[1];
+    }
+
+    // Fallback: any <a> whose inner text/HTML contains "C O N T I N U E" (spaced)
+    if (!redirect) {
+      const contMatch = html.match(/href=["'](https?:\/\/[^"']+)["'][^>]*>[\s\S]*?C\s+O\s+N\s+T\s+I\s+N\s+U\s+E/i);
+      if (contMatch) redirect = contMatch[1];
+    }
+
+    // Last resort: find all uprots URLs, skip the known-decoy pattern (appears 2+ times)
+    if (!redirect) {
+      const allUprots = [...html.matchAll(/href=["'](https?:\/\/[^"']*uprots\/[^"']+)["']/gi)].map(m => m[1]);
+      const counts = {};
+      for (const u of allUprots) counts[u] = (counts[u] || 0) + 1;
+      // The real link appears once; decoys appear multiple times
+      redirect = allUprots.find(u => counts[u] === 1) || null;
+    }
+
+    if (!redirect) {
+      if (/data:image\/png;base64/i.test(html) && !retried) {
+        console.warn('[Uprot] Cookies expired on bypass, re-solving...');
+        _cachedCookies = null;
+        return _solveCaptcha().then(c => c ? _bypassUprot(uprotUrl, true) : null);
+      }
+      console.warn('[Uprot] No redirect link found');
+      return null;
+    }
+
+    // Follow redirect chain through uprots → maxstream
+    for (let i = 0; i < 10 && redirect.includes('uprots'); i++) {
+      try {
+        const rr = await fetch(redirect, {
+          method: 'HEAD',
+          headers: { 'User-Agent': UA },
+          redirect: 'follow',
+          signal: AbortSignal.timeout(10000),
+        });
+        redirect = rr.url || redirect;
+      } catch {
+        break;
+      }
+    }
+
+    // Convert watchfree URL → maxstream embed
+    if (redirect.includes('watchfree')) {
+      const parts = redirect.split('/');
+      const wfIdx = parts.indexOf('watchfree');
+      if (wfIdx >= 0 && parts[wfIdx + 2]) {
+        return `https://maxstream.video/emvvv/${parts[wfIdx + 2]}`;
+      }
+    }
+
+    if (redirect.includes('maxstream')) return redirect;
+
+    console.warn('[Uprot] Unexpected redirect:', redirect);
+    return null;
+  } catch (e) {
+    console.error('[Uprot] Bypass error:', e.message);
+    return null;
+  }
+}
+
+/**
+ * Main entry: resolve an uprot.net link to a playable video URL.
  * Returns { url, headers } or null.
  */
 async function extractUprot(uprotUrl) {
   try {
-    // Normalize mse → msf (as in Python ref)
     let link = String(uprotUrl).trim();
-    if (link.includes('/mse/')) {
-      link = link.replace('/mse/', '/msf/');
-    }
+    if (link.includes('/mse/')) link = link.replace('/mse/', '/msf/');
 
-    const proxy = getWebshareProxy();
-    const fetchOptions = {
-      method: 'POST',
-      headers: {
-        'User-Agent': UA,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Origin': new URL(link).origin,
-        'Referer': link,
-      },
-      redirect: 'follow',
+    const maxstreamUrl = await _bypassUprot(link);
+    if (!maxstreamUrl) return null;
+
+    const result = await extractMaxStream(maxstreamUrl);
+    if (result) return result;
+
+    return {
+      url: maxstreamUrl,
+      headers: { 'User-Agent': UA, 'Referer': 'https://maxstream.video/' },
     };
-
-    // If we have a proxy, use it via the CF Worker proxy
-    // Otherwise try direct (might get captcha)
-    let html;
-    const cfProxy = process.env.CF_PROXY_URL || (typeof global !== 'undefined' && global.CF_PROXY_URL);
-
-    if (cfProxy) {
-      // Route through CF Worker which can use the proxy
-      const sep = cfProxy.includes('?') ? '&' : '?';
-      const proxyUrl = `${cfProxy}${sep}url=${encodeURIComponent(link)}`;
-      const resp = await fetch(proxyUrl, {
-        headers: { 'User-Agent': UA, 'Referer': link },
-        redirect: 'follow',
-      });
-      if (!resp.ok) return null;
-      html = await resp.text();
-    } else {
-      const resp = await fetch(link, fetchOptions);
-      if (!resp.ok) return null;
-      html = await resp.text();
-    }
-
-    // Look for the "C O N T I N U E" link that leads to MaxStream
-    const continueMatch = html.match(/<a[^>]+href="([^"]+)"[^>]*>[^<]*C\s*O\s*N\s*T\s*I\s*N\s*U\s*E[^<]*<\/a>/i);
-    if (!continueMatch) {
-      // Check if we got a captcha page instead
-      if (html.includes('captcha') || html.includes('CAPTCHA')) {
-        console.log('[Extractors] Uprot: captcha required, cannot bypass');
-        return null;
-      }
-      console.log('[Extractors] Uprot: no CONTINUE link found');
-      return null;
-    }
-
-    let maxstreamUrl = continueMatch[1];
-
-    // Follow redirects from uprots domain to get final MaxStream URL
-    if (maxstreamUrl.includes('uprots')) {
-      try {
-        const redirectResp = await fetch(maxstreamUrl, {
-          headers: { 'User-Agent': UA },
-          redirect: 'follow',
-        });
-        const finalUrl = redirectResp.url;
-        // Convert to maxstream embed URL
-        if (finalUrl.includes('watchfree/')) {
-          const parts = finalUrl.split('watchfree/');
-          if (parts[1]) {
-            const videoId = parts[1].split('/')[1];
-            if (videoId) {
-              maxstreamUrl = `https://maxstream.video/emvvv/${videoId}`;
-            }
-          }
-        } else {
-          maxstreamUrl = finalUrl;
-        }
-      } catch {
-        // If redirect following fails, skip
-        return null;
-      }
-    }
-
-    // Now extract the actual video URL from MaxStream
-    if (maxstreamUrl.includes('maxstream')) {
-      return extractMaxStream(maxstreamUrl);
-    }
-
-    return null;
   } catch (e) {
-    console.error('[Extractors] Uprot extraction error:', e);
+    console.error('[Uprot] Extraction error:', e.message);
     return null;
   }
 }
 
 module.exports = { extractUprot };
+
