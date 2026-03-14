@@ -405,8 +405,8 @@ async function getStreams(id, type, season, episode, config = {}) {
     const seenUrls = new Set();
 
     const ABSOLUTE_CAP_MS = 25000; // never wait more than 25s total (allows CB01 to finish)
-    const GRACE_AFTER_FIRST_MS = 8000; // 8s grace after first streams arrive (was 5s)
-    const MIN_WAIT_MS = 10000; // always wait at least 10s for slower providers (was 8s)
+    const GRACE_AFTER_FIRST_MS = 15000; // 15s grace after first streams arrive (gives CB01 time for proxy chain)
+    const MIN_WAIT_MS = 12000; // always wait at least 12s for slower providers
 
     await new Promise((resolveAll) => {
       let resolved = false;
