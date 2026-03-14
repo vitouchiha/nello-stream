@@ -140,12 +140,17 @@ async function searchSeries(showname, year) {
   try {
     const base = getCb01BaseUrl();
     const query = normalizeForSearch(showname);
-    const html = await fetchWithCloudscraper(`${base}/serietv/?s=${query}`, { referer: `${base}/serietv/` });
-    if (!html) return null;
+    const searchUrl = `${base}/serietv/?s=${query}`;
+    console.log('[CB01] searchSeries URL:', searchUrl);
+    const html = await fetchWithCloudscraper(searchUrl, { referer: `${base}/serietv/` });
+    if (!html) { console.log('[CB01] searchSeries: no HTML returned'); return null; }
+    console.log('[CB01] searchSeries: HTML length', html.length);
     const yearPattern = /(19|20)\d{2}/;
 
     const cardRe = /<div[^>]+class="card-content"([\s\S]*?)<\/div>/gi;
+    let cardCount = 0;
     for (const card of html.matchAll(cardRe)) {
+      cardCount++;
       const cardHtml = card[1];
       const hrefMatch = /href=["']([^"']+)["']/.exec(cardHtml);
       if (!hrefMatch) continue;
@@ -153,14 +158,17 @@ async function searchSeries(showname, year) {
 
       // Year is in a <span style="color..."> element (single or double quotes)
       const spanMatch = /<span[^>]+style=["'][^"']*color[^"']*["'][^>]*>([\s\S]*?)<\/span>/i.exec(cardHtml);
-      if (!spanMatch) continue;
+      if (!spanMatch) { console.log('[CB01] searchSeries: card has no color span'); continue; }
       const yearMatch = yearPattern.exec(spanMatch[1]);
-      if (!yearMatch) continue;
+      if (!yearMatch) { console.log('[CB01] searchSeries: no year in span:', spanMatch[1].substring(0, 50)); continue; }
       const diff = Math.abs(parseInt(yearMatch[0], 10) - parseInt(year, 10));
+      console.log('[CB01] searchSeries: card year', yearMatch[0], 'diff', diff, 'url:', href.substring(0, 80));
       if (diff <= 1) return href;
     }
+    console.log('[CB01] searchSeries: checked', cardCount, 'cards, no match');
     return null;
-  } catch {
+  } catch (e) {
+    console.error('[CB01] searchSeries error:', e.message);
     return null;
   }
 }
@@ -411,12 +419,16 @@ async function extractSeriesStreams(pageUrl, season, episode, providerContext = 
       const bodyMatch = html.substring(headEnd).match(/<div[^>]+class="sp-body[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
       if (bodyMatch) {
         const bodyContent = bodyMatch[1];
+        console.log('[CB01] sp-body found for season, length:', bodyContent.length);
         // Check for /msfld/ folder link (whole-series archive)
         const msfldMatch = bodyContent.match(/href=["'](https?:\/\/[^"']*uprot\.net\/msfld\/[^"']+)["']/i);
         if (msfldMatch) {
+          console.log('[CB01] Found msfld folder:', msfldMatch[1]);
           const episodeUrl = await resolveFolder(msfldMatch[1]);
+          console.log('[CB01] Resolved episode URL:', episodeUrl || 'null');
           if (episodeUrl) {
             const s = await extractEpisodeStreams(episodeUrl, providerContext);
+            console.log('[CB01] Episode streams:', s.length);
             if (s.length) return s;
           }
         }
