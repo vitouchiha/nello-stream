@@ -402,7 +402,7 @@ async function _fetchFromImdbId(rawId, type, config) {
         primaryTitle: titleCandidates[0] || title,
         titleCandidates,
       }
-    ), 25_000)); // Reduced: absolute cap is now 20s + buffer
+    ), 40_000)); // Must exceed easystreams ABSOLUTE_CAP_MS (35s)
   }
 
   // Legacy stream_engine is experimental and still includes mock adapters.
