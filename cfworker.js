@@ -31,10 +31,11 @@
  */
 
 export default {
-  // ── Scheduled cron: auto-refresh Eurostreaming cache + domain updates ──
+  // ── Scheduled cron: auto-refresh Eurostreaming cache + domain updates + uprot ──
   async scheduled(event, env, ctx) {
     ctx.waitUntil(_handleScheduledWarm(env));
     ctx.waitUntil(_handleScheduledDomainUpdate(env));
+    ctx.waitUntil(_handleScheduledUprotRefresh(env));
   },
 
   async fetch(request, env, ctx) {
@@ -242,6 +243,26 @@ export default {
       return _handleWarmEs(url, env);
     }
 
+    // ── Uprot diagnostic: fetch captcha page and return raw analysis ──
+    if (url.searchParams.get('uprot_diag') === '1') {
+      return _handleUprotDiag(env);
+    }
+
+    // ── Uprot diagnostic: fetch captcha page and return raw analysis ──
+    if (url.searchParams.get('uprot_diag') === '1') {
+      return _handleUprotDiag(env);
+    }
+
+    // ── Uprot solve only: solve captcha and cache cookies (no url needed) ──
+    if (url.searchParams.get('uprot_solve') === '1') {
+      return _handleUprotSolve(env);
+    }
+
+    // ── OCR digits: accept base64 image, return recognized digits ──
+    if (url.searchParams.get('ocr_digits') === '1' && request.method === 'POST') {
+      return _handleOcrDigits(request, env);
+    }
+
     if (!targetUrl) {
       return _json({ error: 'Missing required ?url= parameter' }, 400);
     }
@@ -263,6 +284,7 @@ export default {
       'deltabit.co', 'www.deltabit.co',
       'turbovid.me', 'www.turbovid.me',
       'uprot.net', 'www.uprot.net',
+      'uprots.me', 'www.uprots.me',
       'maxstream.video', 'www.maxstream.video',
       'guardoserie.digital', 'www.guardoserie.digital',
       'guardoserie.best', 'www.guardoserie.best',
@@ -292,6 +314,13 @@ export default {
     // Returns: { url: 'https://deltabit.co/xxx', cached: bool }
     if (url.searchParams.get('es_resolve') === '1' && parsedTarget.hostname.includes('clicka')) {
       return _handleEsResolve(targetUrl, url, env);
+    }
+
+    // ── Uprot captcha solver + MaxStream extractor ──────────────────────────
+    // Solves uprot captcha, follows redirects to maxstream, extracts video URL.
+    // Usage: ?uprot=1&url=https://uprot.net/msf/xxx[&extract=1]
+    if (url.searchParams.get('uprot') === '1' && parsedTarget.hostname.includes('uprot')) {
+      return _handleUprot(targetUrl, url, env);
     }
 
     // ── Safego captcha solver mode ──────────────────────────────────────────
@@ -738,6 +767,110 @@ function _json(obj, status = 200) {
  * Safego captcha solver — runs GET → OCR → POST → redirect in one Worker
  * invocation so all outbound requests share the same IP.
  */
+
+// ─── AI Vision OCR helper (majority-voting across multiple prompts) ──────────
+
+/**
+ * Run AI OCR on a captcha image using two approaches:
+ * 1. Vision model (Llama 3.2 / LLaVA) with varied prompts
+ * 2. ASCII art + text model (binarize image → text → Llama text model)
+ * Majority-votes among all answers that match expected digit count.
+ * @param {object} env  CF Worker environment (needs env.AI)
+ * @param {Uint8Array} imageBytes  raw PNG bytes
+ * @param {number} [expectedDigits=3]  expected digit count
+ * @returns {Promise<string|null>}  recognised digits or null
+ */
+async function _aiOcrDigits(env, imageBytes, expectedDigits = 3) {
+  if (!env?.AI) return null;
+
+  const allAnswers = [];
+  const imageArr = [...imageBytes];
+
+  // ── Approach 1: Vision model with raw image (3 varied prompts) ──
+  const visionPrompts = [
+    `This CAPTCHA image contains exactly ${expectedDigits} digits drawn over noise lines. Read the digits from left to right. Reply with ONLY those ${expectedDigits} digits.`,
+    `Look at this captcha. It shows a ${expectedDigits}-digit number with crosshatch lines as noise. What is the number? Answer with just the digits, nothing else.`,
+    `What ${expectedDigits}-digit code is shown in this captcha? Ignore background lines. Reply digits only.`,
+  ];
+
+  const _runVision = async (prompt) => {
+    try {
+      const resp = await env.AI.run('@cf/meta/llama-3.2-11b-vision-instruct', {
+        messages: [{ role: 'user', content: prompt }],
+        image: imageArr,
+        max_tokens: 20,
+      });
+      return (resp?.response || '').replace(/\D/g, '');
+    } catch {
+      try {
+        const resp = await env.AI.run('@cf/meta/llama-3.2-11b-vision-instruct', {
+          image: imageArr, prompt, max_tokens: 20,
+        });
+        return (resp?.description || resp?.response || '').replace(/\D/g, '');
+      } catch { /* format 2 failed */ }
+    }
+    try {
+      const resp = await env.AI.run('@cf/llava-hf/llava-1.5-7b-hf', {
+        image: imageArr, prompt, max_tokens: 20,
+      });
+      return (resp?.description || resp?.response || '').replace(/\D/g, '');
+    } catch { return ''; }
+  };
+
+  const visionResults = await Promise.allSettled(visionPrompts.map(_runVision));
+  for (const r of visionResults) {
+    if (r.status === 'fulfilled' && r.value) allAnswers.push(r.value);
+  }
+
+  // ── Approach 2: ASCII art + text model ──
+  // Binarize the image and convert to ASCII art, then use a text model
+  try {
+    const { width, height, pixels } = await _decodePngGrayscale(new Uint8Array(imageArr));
+    // Try multiple thresholds for the ASCII art
+    for (const thresh of [70, 90]) {
+      const lines = [];
+      for (let y = 0; y < height; y++) {
+        let row = '';
+        for (let x = 0; x < width; x++) {
+          row += pixels[y * width + x] < thresh ? '#' : '.';
+        }
+        lines.push(row);
+      }
+      const ascii = lines.join('\n');
+      try {
+        const resp = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+          messages: [
+            { role: 'system', content: `You read digits from ASCII art captcha images. The image shows exactly ${expectedDigits} digits rendered in '#' characters on a '.' background. Respond with ONLY the ${expectedDigits} digits, nothing else.` },
+            { role: 'user', content: ascii },
+          ],
+          max_tokens: 20,
+        });
+        const digits = (resp?.response || '').replace(/\D/g, '');
+        if (digits) allAnswers.push(digits);
+      } catch { /* text model failed */ }
+    }
+  } catch { /* PNG decode failed */ }
+
+  // ── Majority vote ──
+  if (!allAnswers.length) return null;
+
+  // Prefer answers with exactly expectedDigits digits
+  const exact = allAnswers.filter(a => a.length === expectedDigits);
+  if (exact.length) {
+    const freq = {};
+    for (const a of exact) freq[a] = (freq[a] || 0) + 1;
+    return Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0];
+  }
+  // Fallback: any 2-5 digit answer
+  const any = allAnswers.filter(a => a.length >= 2 && a.length <= 5);
+  if (any.length) {
+    const freq = {};
+    for (const a of any) freq[a] = (freq[a] || 0) + 1;
+    return Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0];
+  }
+  return null;
+}
+
 // ─── Pixel OCR engine (no external API dependencies) ─────────────────────────
 
 /** Decompress zlib-wrapped data using Web Streams API (CF Workers). */
@@ -968,17 +1101,12 @@ async function _handleSafego(safegoUrl, reqUrl, env) {
       }
 
       // 3b. AI vision fallback (only if pixel OCR failed)
-      if (!answer && env?.AI) {
+      if (!answer) {
         try {
-          const b64img = btoa(String.fromCharCode(...Uint8Array.from(atob(b64), c => c.charCodeAt(0))));
-          const aiResp = await env.AI.run('@cf/llava-hf/llava-1.5-7b-hf', {
-            image: [...Uint8Array.from(atob(b64), c => c.charCodeAt(0))],
-            prompt: 'This CAPTCHA shows exactly 3 digits. What are the digits? Reply with ONLY the 3 digits, nothing else.',
-            max_tokens: 10,
-          });
-          const aiText = (aiResp?.description || aiResp?.response || '').replace(/\D/g, '');
-          if (aiText && aiText.length >= 2 && aiText.length <= 5) { answer = aiText; ocrMethod = 'ai'; }
-        } catch (aiErr) { /* AI failed */ }
+          const imageBytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+          const aiText = await _aiOcrDigits(env, imageBytes, 3);
+          if (aiText) { answer = aiText; ocrMethod = 'ai'; }
+        } catch { /* AI failed */ }
       }
 
       if (!answer) {
@@ -1501,4 +1629,444 @@ async function _handleScheduledDomainUpdate(env) {
     await _resolveDomains(env);
     await _putDomainState({ lastComplete: Date.now() });
   } catch { /* resolve failed — try next cron run */ }
+}
+
+// ─── Uprot Captcha Auto-Solver ──────────────────────────────────────────────
+
+const _UPROT_INIT_URL = 'https://uprot.net/msf/r4hcq47tarq8';
+const _UPROT_COOKIES_KEY = 'uprot:cookies';
+const _UPROT_COOKIES_TTL = 82800; // 23h
+const _UPROT_COOLDOWN_MS = 20 * 3600 * 1000; // 20h between auto-solves
+const _UPROT_STATE_CACHE_KEY = 'https://internal.worker/uprot-state';
+const _UPROT_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36';
+
+function _uprotHeaders(referer) {
+  return {
+    'User-Agent': _UPROT_UA,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.5',
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'Origin': 'https://uprot.net',
+    'Referer': referer || 'https://uprot.net/',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'same-origin',
+    'Sec-Fetch-User': '?1',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1',
+    'DNT': '1',
+  };
+}
+
+/**
+ * Solve the uprot captcha fresh: GET page → OCR → POST answer → store cookies in KV.
+ * Returns { cookies, captchaData, answer, method } or null.
+ */
+async function _uprotSolveFresh(env) {
+  const MAX_ATTEMPTS = 3;
+  const attempts = [];
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    try {
+      // 1. GET the uprot page to get PHPSESSID + captcha image
+      const getHeaders = { ..._uprotHeaders(_UPROT_INIT_URL) };
+      delete getHeaders['Content-Type'];
+      const r1 = await fetch(_UPROT_INIT_URL, {
+        method: 'GET',
+        headers: getHeaders,
+        redirect: 'manual',
+        signal: AbortSignal.timeout(10000),
+      });
+
+      // Extract PHPSESSID from Set-Cookie
+      const setCookie1 = r1.headers.getAll ? r1.headers.getAll('Set-Cookie').join('; ') : (r1.headers.get('Set-Cookie') || '');
+      const sessMatch = setCookie1.match(/PHPSESSID=([^;,\s]+)/);
+      if (!sessMatch) { attempts.push({ attempt, error: 'no PHPSESSID', status: r1.status, setCookie: setCookie1.substring(0, 200) }); continue; }
+      const sessid = sessMatch[1];
+
+      const html1 = await r1.text();
+
+      // Extract base64 captcha image
+      const imgMatch = html1.match(/(?:src|data-src)=["'](data:image\/png;base64,([^"']+))["']/i)
+        || html1.match(/data:image\/png;base64,([^"']+)/i);
+      if (!imgMatch) { attempts.push({ attempt, error: 'no captcha image', htmlSnippet: html1.substring(0, 500) }); continue; }
+      const b64 = (imgMatch[2] || imgMatch[1]).replace(/\s/g, '');
+
+      // 2. Decode PNG → grayscale pixels
+      let width, height, pixels;
+      try {
+        const raw = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+        ({ width, height, pixels } = await _decodePngGrayscale(raw));
+      } catch (ocrErr) {
+        attempts.push({ attempt, error: `decode: ${ocrErr.message}` });
+        continue;
+      }
+
+      // 3. OCR — reuse the same bitmap template engine from safego
+      let answer = null;
+      let ocrMethod = '';
+
+      // 3a. Pixel OCR (primary)
+      const pxAnswer = _ocrDigitsFromPixels(width, height, pixels);
+      if (pxAnswer && !pxAnswer.includes('?') && pxAnswer.length >= 2 && pxAnswer.length <= 5) {
+        answer = pxAnswer;
+        ocrMethod = 'pixel';
+      }
+
+      // 3b. AI vision fallback
+      if (!answer) {
+        try {
+          const imageBytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+          const aiText = await _aiOcrDigits(env, imageBytes, 3);
+          if (aiText) { answer = aiText; ocrMethod = 'ai'; }
+        } catch { /* AI failed */ }
+      }
+
+      if (!answer) {
+        attempts.push({ attempt, error: 'ocr failed', pxAnswer });
+        continue;
+      }
+
+      // 4. POST the captcha answer
+      const cookies1 = `PHPSESSID=${sessid}`;
+      const r2 = await fetch(_UPROT_INIT_URL, {
+        method: 'POST',
+        headers: {
+          ..._uprotHeaders(_UPROT_INIT_URL),
+          'Cookie': cookies1,
+        },
+        body: `captcha=${answer}`,
+        redirect: 'manual',
+        signal: AbortSignal.timeout(10000),
+      });
+
+      // Extract updated cookies
+      const setCookie2 = r2.headers.get('Set-Cookie') || '';
+      const sessMatch2 = setCookie2.match(/PHPSESSID=([^;,\s]+)/);
+      const captchaMatch = setCookie2.match(/captcha=([^;,\s]+)/);
+
+      const cookieObj = { PHPSESSID: sessMatch2 ? sessMatch2[1] : sessid };
+      if (captchaMatch) cookieObj.captcha = captchaMatch[1];
+
+      const captchaData = { captcha: answer };
+      const r2Body = await r2.text();
+
+      // Check if solve was successful by looking for a CONTINUE link
+      // or if we got back the captcha form (failure)
+      const hasContinue = /C\s*O\s*N\s*T\s*I\s*N\s*U\s*E/i.test(r2Body);
+      const hasCaptchaForm = /data:image\/png;base64/i.test(r2Body);
+
+      if (hasCaptchaForm && !hasContinue) {
+        attempts.push({ attempt, answer, ocrMethod, error: 'wrong answer (captcha form returned)' });
+        continue;
+      }
+
+      // Store in KV
+      const kvData = { cookies: cookieObj, data: captchaData, answer, method: ocrMethod, t: Date.now() };
+      if (env?.ES_CACHE) {
+        try {
+          await env.ES_CACHE.put(_UPROT_COOKIES_KEY, JSON.stringify(kvData), { expirationTtl: _UPROT_COOKIES_TTL });
+        } catch { /* KV write failed */ }
+      }
+
+      return { ...kvData, attempts };
+    } catch (err) {
+      attempts.push({ attempt, error: err.message });
+    }
+  }
+
+  return { failed: true, attempts };
+}
+
+/**
+ * Bypass an uprot link using cached cookies.
+ * POST to the uprot URL with saved cookies+captcha → extract CONTINUE → follow to maxstream.
+ */
+async function _uprotBypassWithCookies(uprotUrl, cookies, captchaData, env) {
+  try {
+    // Build cookie string
+    const cookieStr = Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ');
+
+    const resp = await fetch(uprotUrl, {
+      method: 'POST',
+      headers: {
+        ..._uprotHeaders(uprotUrl),
+        'Cookie': cookieStr,
+      },
+      body: new URLSearchParams(captchaData).toString(),
+      redirect: 'manual',
+      signal: AbortSignal.timeout(10000),
+    });
+
+    const body = await resp.text();
+
+    // Find the "C O N T I N U E" link
+    const continueMatch = /<a[^>]+href="([^"]+)"[^>]*>[^<]*C\s*O\s*N\s*T\s*I\s*N\s*U\s*E[^<]*<\/a>/i.exec(body);
+    if (!continueMatch) return null;
+
+    let maxstreamUrl = continueMatch[1];
+
+    // Follow redirects from uprots domain to maxstream
+    if (maxstreamUrl.includes('uprots')) {
+      for (let hop = 0; hop < 10; hop++) {
+        const redir = await fetch(maxstreamUrl, {
+          headers: { 'User-Agent': _UPROT_UA },
+          redirect: 'manual',
+          signal: AbortSignal.timeout(8000),
+        });
+        const loc = redir.headers.get('Location') || redir.headers.get('location');
+        if (!loc) {
+          // Try following with redirect: 'follow'
+          const followResp = await fetch(maxstreamUrl, {
+            headers: { 'User-Agent': _UPROT_UA },
+            redirect: 'follow',
+            signal: AbortSignal.timeout(8000),
+          });
+          maxstreamUrl = followResp.url;
+          break;
+        }
+        maxstreamUrl = new URL(loc, maxstreamUrl).href;
+        if (!maxstreamUrl.includes('uprots')) break;
+      }
+    }
+
+    // Convert watchfree URL to maxstream embed
+    if (maxstreamUrl.includes('watchfree/') || maxstreamUrl.includes('watchfree.')) {
+      const parts = maxstreamUrl.split('watchfree/');
+      if (parts[1]) {
+        const segments = parts[1].split('/').filter(Boolean);
+        if (segments.length >= 2) {
+          maxstreamUrl = `https://maxstream.video/emvvv/${segments[1]}`;
+        }
+      }
+    }
+
+    return maxstreamUrl;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extract a video URL from a MaxStream page.
+ */
+async function _extractMaxstreamVideo(maxstreamUrl) {
+  try {
+    const resp = await fetch(maxstreamUrl, {
+      headers: {
+        'User-Agent': _UPROT_UA,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Referer': 'https://maxstream.video/',
+      },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!resp.ok) return null;
+    const html = await resp.text();
+
+    // Try packed source first
+    const unpacked = _unpackPacker(html) || html;
+
+    const urlMatch = /sources\W+src\W+(https?:\/\/[^"']+)["']/i.exec(unpacked)
+      || /sources\W+src\W+["'](https?:\/\/[^"']+)["']/i.exec(unpacked)
+      || /file\s*:\s*["'](https?:\/\/[^"']+\.(?:m3u8|mp4)[^"']*)["']/i.exec(unpacked);
+
+    if (urlMatch && urlMatch[1]) return urlMatch[1].trim();
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Main uprot handler: solve/bypass + get maxstream URL.
+ * ?uprot=1&url=https://uprot.net/msf/xxx[&extract=1]
+ */
+async function _handleUprot(uprotUrl, reqUrl, env) {
+  let link = uprotUrl;
+  if (link.includes('/mse/')) link = link.replace('/mse/', '/msf/');
+
+  try {
+    let maxstreamUrl = null;
+
+    // Strategy 1: Try cached cookies first (fast path)
+    if (env?.ES_CACHE) {
+      try {
+        const cached = await env.ES_CACHE.get(_UPROT_COOKIES_KEY, 'json');
+        if (cached && cached.cookies && cached.data && Date.now() - cached.t < 82800000) {
+          maxstreamUrl = await _uprotBypassWithCookies(link, cached.cookies, cached.data, env);
+          if (maxstreamUrl) {
+            // Also extract video if requested
+            if (reqUrl.searchParams.get('extract') === '1' && maxstreamUrl.includes('maxstream')) {
+              const videoUrl = await _extractMaxstreamVideo(maxstreamUrl);
+              if (videoUrl) return _json({ url: videoUrl, maxstream: maxstreamUrl, method: 'cached_cookies' });
+            }
+            return _json({ url: maxstreamUrl, method: 'cached_cookies' });
+          }
+        }
+      } catch { /* KV read/parse failed */ }
+    }
+
+    // Strategy 2: Fresh captcha solve (same IP guarantees consistency)
+    const solved = await _uprotSolveFresh(env);
+    if (!solved || solved.failed) return _json({ error: 'Uprot captcha solve failed', attempts: solved?.attempts }, 502);
+
+    // Now bypass with fresh cookies
+    maxstreamUrl = await _uprotBypassWithCookies(link, solved.cookies, solved.data, env);
+    if (!maxstreamUrl) {
+      return _json({ error: 'Uprot bypass failed after solving captcha', solved: { answer: solved.answer, method: solved.method } }, 502);
+    }
+
+    // Extract video if requested
+    if (reqUrl.searchParams.get('extract') === '1' && maxstreamUrl.includes('maxstream')) {
+      const videoUrl = await _extractMaxstreamVideo(maxstreamUrl);
+      if (videoUrl) return _json({ url: videoUrl, maxstream: maxstreamUrl, method: 'fresh_solve', ocrMethod: solved.method });
+    }
+
+    return _json({ url: maxstreamUrl, method: 'fresh_solve', ocrMethod: solved.method });
+  } catch (err) {
+    return _json({ error: `Uprot error: ${err.message}` }, 502);
+  }
+}
+
+/**
+ * Manual trigger: just solve the captcha and cache cookies.
+ * ?uprot_solve=1
+ */
+async function _handleUprotSolve(env) {
+  const solved = await _uprotSolveFresh(env);
+  if (solved) return _json({ ok: true, answer: solved.answer, method: solved.method, cookies: solved.cookies, attempts: solved.attempts });
+  return _json({ error: 'Captcha solve failed', attempts: solved?.attempts || [] }, 502);
+}
+
+/**
+ * Diagnostic: fetch the uprot page, return raw HTML analysis without solving.
+ */
+async function _handleUprotDiag(env) {
+  try {
+    const getHeaders = { ..._uprotHeaders(_UPROT_INIT_URL) };
+    delete getHeaders['Content-Type'];
+    const r = await fetch(_UPROT_INIT_URL, {
+      method: 'GET',
+      headers: getHeaders,
+      redirect: 'manual',
+      signal: AbortSignal.timeout(10000),
+    });
+    const setCookie = r.headers.getAll ? r.headers.getAll('Set-Cookie').join('; ') : (r.headers.get('Set-Cookie') || '');
+    const html = await r.text();
+    const hasImage = /data:image\/png;base64/.test(html);
+    const hasCaptchaForm = /captcha/i.test(html);
+    const imgMatch = html.match(/(?:src|data-src)=["'](data:image\/png;base64,([^"']+))["']/i)
+      || html.match(/data:image\/png;base64,([^"']+)/i);
+    const b64 = imgMatch ? (imgMatch[2] || imgMatch[1]).replace(/\s/g, '') : null;
+
+    let ocrResult = null;
+    if (b64) {
+      try {
+        const raw = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+        const { width, height, pixels } = await _decodePngGrayscale(raw);
+        const pxAnswer = _ocrDigitsFromPixels(width, height, pixels);
+        ocrResult = { width, height, pxAnswer };
+      } catch (e) { ocrResult = { error: e.message }; }
+    }
+
+    // Check KV for existing cookies
+    let kvData = null;
+    if (env?.ES_CACHE) {
+      try {
+        const kv = await env.ES_CACHE.get(_UPROT_COOKIES_KEY);
+        if (kv) kvData = JSON.parse(kv);
+      } catch {}
+    }
+
+    return _json({
+      status: r.status,
+      setCookie: setCookie.substring(0, 300),
+      htmlLength: html.length,
+      htmlSnippet: html.substring(0, 800),
+      hasImage,
+      hasCaptchaForm,
+      b64Length: b64 ? b64.length : 0,
+      ocrResult,
+      kvCookies: kvData,
+    });
+  } catch (e) {
+    return _json({ error: e.message }, 500);
+  }
+}
+
+/**
+ * OCR endpoint: accept base64 image via POST body, return recognized digits.
+ * Used as AI fallback when local bitmap OCR fails.
+ */
+async function _handleOcrDigits(request, env) {
+  try {
+    const body = await request.json();
+    const b64 = body?.image;
+    if (!b64) return _json({ error: 'Missing image field' }, 400);
+
+    let answer = null;
+    let pxErr = null;
+    let aiErr = null;
+
+    // 1. Try pixel OCR
+    try {
+      const raw = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+      const { width, height, pixels } = await _decodePngGrayscale(raw);
+      const pxAnswer = _ocrDigitsFromPixels(width, height, pixels);
+      if (pxAnswer && !pxAnswer.includes('?') && pxAnswer.length >= 2 && pxAnswer.length <= 5) {
+        answer = pxAnswer;
+        return _json({ answer, method: 'pixel' });
+      }
+      pxErr = 'no match: ' + (pxAnswer || 'null');
+    } catch (e) { pxErr = e.message; }
+
+    // 2. AI vision fallback (majority-voting with Llama 3.2 Vision)
+    const expectedDigits = body?.expectedDigits || 3;
+    try {
+      const imageBytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+      const aiText = await _aiOcrDigits(env, imageBytes, expectedDigits);
+      if (aiText) return _json({ answer: aiText, method: 'ai' });
+      aiErr = 'returned null';
+    } catch (e) { aiErr = e.message; }
+
+    return _json({ error: 'OCR failed', pxErr, aiErr, hasAI: !!env?.AI }, 422);
+  } catch (e) {
+    return _json({ error: e.message }, 500);
+  }
+}
+
+// ── Uprot cron (auto-solve captcha every 20h) ─────────────────────────────────
+async function _getUprotState() {
+  try {
+    const cache = caches.default;
+    const resp = await cache.match(_UPROT_STATE_CACHE_KEY);
+    if (resp) return await resp.json();
+  } catch {}
+  return { lastComplete: 0 };
+}
+
+async function _putUprotState(state) {
+  try {
+    const cache = caches.default;
+    const resp = new Response(JSON.stringify(state), {
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=172800' },
+    });
+    await cache.put(_UPROT_STATE_CACHE_KEY, resp);
+  } catch {}
+}
+
+async function _handleScheduledUprotRefresh(env) {
+  if (!env?.ES_CACHE) return;
+
+  const state = await _getUprotState();
+  if (state.lastComplete && Date.now() - state.lastComplete < _UPROT_COOLDOWN_MS) return;
+
+  try {
+    const solved = await _uprotSolveFresh(env);
+    if (solved && !solved.failed) {
+      await _putUprotState({ lastComplete: Date.now(), answer: solved.answer, method: solved.method });
+    }
+  } catch { /* try next cron run */ }
 }
