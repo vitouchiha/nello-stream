@@ -203,14 +203,29 @@ async function _webshareFetch(url, mergedHeaders) {
 }
 
 /**
+ * Circuit-breaker: after first CF block for guardoserie, skip all subsequent calls.
+ * Resets after 5 minutes (allows retry in next cold start).
+ */
+let _cfBlockedUntil = 0;
+
+/**
  * Fetch with multiple proxy strategies for guardoserie domains:
  * 1. CF Worker (CF-to-CF bypass) — raced in parallel with Webshare
  * 2. WEBSHARE residential proxy (bypasses Cloudflare) — raced in parallel with CF Worker
  * 3. Browser (only if BROWSERLESS_URL is configured)
  * 4. PROXY_URL / direct fetch (fallback)
+ *
+ * Circuit-breaker: if CF blocks the first request, all subsequent requests
+ * within the same invocation return null immediately.
  */
 async function proxyFetch(url, opts = {}) {
     const isGuardoserie = url.includes('guardoserie');
+
+    // Circuit-breaker: skip immediately if guardoserie was already CF-blocked
+    if (isGuardoserie && _cfBlockedUntil > Date.now()) {
+        console.warn(`[Guardoserie] Circuit-breaker: skipping ${url.substring(0, 80)}`);
+        return null;
+    }
 
     // Inject cookies from jar
     let cookies = '';
@@ -258,15 +273,40 @@ async function proxyFetch(url, opts = {}) {
     const fetchOpts = { ...opts, headers: mergedHeaders };
     if (agent) fetchOpts.agent = agent;
 
-    const resp = await _doFetch(url, fetchOpts);
+    try {
+        const resp = await _doFetch(url, fetchOpts);
 
-    // Store set-cookie headers
-    const setCookieHeaders = resp.headers.getSetCookie?.() || [];
-    for (const c of setCookieHeaders) {
-        try { _cookieJar.setCookieSync(c, url); } catch { /* ignore */ }
+        // Check if CF blocked (403 + "Just a moment") — trip the circuit breaker
+        if (isGuardoserie && resp.status === 403) {
+            const body = await resp.text();
+            if (body.includes('Just a moment')) {
+                console.warn(`[Guardoserie] CF blocked — circuit breaker tripped for 5m`);
+                _cfBlockedUntil = Date.now() + 5 * 60_000;
+                return null;
+            }
+            // Non-CF 403, return as-is
+            return {
+                ...resp,
+                text: async () => body,
+                json: async () => JSON.parse(body),
+            };
+        }
+
+        // Store set-cookie headers
+        const setCookieHeaders = resp.headers.getSetCookie?.() || [];
+        for (const c of setCookieHeaders) {
+            try { _cookieJar.setCookieSync(c, url); } catch { /* ignore */ }
+        }
+
+        return resp;
+    } catch (e) {
+        // Network error or timeout — trip circuit breaker for guardoserie
+        if (isGuardoserie) {
+            console.warn(`[Guardoserie] Fetch error — circuit breaker tripped: ${e.message}`);
+            _cfBlockedUntil = Date.now() + 5 * 60_000;
+        }
+        throw e;
     }
-
-    return resp;
 }
 
 /**
@@ -686,6 +726,7 @@ async function getStreams(id, type, season, episode, providerContext = null) {
                         'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
                         'Referer': `${getGuardoserieBaseUrl()}/`
                     } });
+                    if (!resp) continue; // circuit-breaker tripped
                     if (resp.ok) {
                         const html = await resp.text();
                         const players = extractAllPlayerLinksFromHtml(html);
@@ -748,7 +789,7 @@ async function getStreams(id, type, season, episode, providerContext = null) {
                 }
             });
 
-            if (!response.ok) return [];
+            if (!response || !response.ok) return [];
             const searchHtml = await response.text();
             const results = [];
             let match;
@@ -863,7 +904,7 @@ async function getStreams(id, type, season, episode, providerContext = null) {
                         'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
                         'Referer': `${getGuardoserieBaseUrl()}/`
                     } });
-                    if (!pageRes.ok) continue;
+                    if (!pageRes || !pageRes.ok) continue;
                     const pageHtml = await pageRes.text();
 
                     // Target the year specifically using regex
@@ -931,7 +972,7 @@ async function getStreams(id, type, season, episode, providerContext = null) {
                         'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
                         'Referer': `${getGuardoserieBaseUrl()}/`
                     } });
-                    if (directRes.ok) {
+                    if (directRes && directRes.ok) {
                         targetUrl = directUrl;
                         console.log(`[Guardoserie] Direct URL fallback matched: ${directUrl}`);
                         break;
@@ -955,6 +996,7 @@ async function getStreams(id, type, season, episode, providerContext = null) {
                 'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
                 'Referer': `${getGuardoserieBaseUrl()}/`
             } });
+            if (!pageRes) return []; // circuit-breaker
             const pageHtml = await pageRes.text();
             const resolvedEpisodeUrl = extractEpisodeUrlFromSeriesPage(pageHtml, season, episode);
             if (resolvedEpisodeUrl) {
@@ -972,6 +1014,7 @@ async function getStreams(id, type, season, episode, providerContext = null) {
             'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
             'Referer': `${getGuardoserieBaseUrl()}/`
         } });
+        if (!finalRes) return []; // circuit-breaker
         const finalHtml = await finalRes.text();
 
         let playerLinks = extractAllPlayerLinksFromHtml(finalHtml);
@@ -987,11 +1030,13 @@ async function getStreams(id, type, season, episode, providerContext = null) {
                     'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
                     'Referer': `${getGuardoserieBaseUrl()}/`
                 } });
-                const retryHtml = await retryRes.text();
-                const fallbackPlayerLinks = extractAllPlayerLinksFromHtml(retryHtml);
-                if (fallbackPlayerLinks.length > 0) {
-                    playerLinks = fallbackPlayerLinks;
-                    episodeUrl = fallbackEpisodeUrl;
+                if (retryRes) {
+                    const retryHtml = await retryRes.text();
+                    const fallbackPlayerLinks = extractAllPlayerLinksFromHtml(retryHtml);
+                    if (fallbackPlayerLinks.length > 0) {
+                        playerLinks = fallbackPlayerLinks;
+                        episodeUrl = fallbackEpisodeUrl;
+                    }
                 }
             }
         }
