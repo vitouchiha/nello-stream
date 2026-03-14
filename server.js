@@ -600,6 +600,42 @@ app.get('/diag/uprot', async (req, res) => {
   res.json(diag);
 });
 
+// Folder diagnostic — inspect uprot /msfld/ folder HTML structure
+app.get('/diag/folder', async (req, res) => {
+  try {
+    const { fetchUprotPage } = require('./src/extractors/uprot');
+    const url = req.query.url || 'https://uprot.net/msfld/o657vui7vr9p';
+    const season = req.query.s || '01';
+    const episode = req.query.e || '01';
+    const html = await fetchUprotPage(url);
+    if (!html) return res.json({ error: 'fetchUprotPage returned null', url });
+    // Look for episode patterns
+    const sPad = season.padStart(2, '0');
+    const ePad = episode.padStart(2, '0');
+    const patterns = [
+      { name: `S${sPad}E${ePad}`, re: new RegExp(`S${sPad}E${ePad}`, 'i') },
+      { name: `${parseInt(season)}x${ePad}`, re: new RegExp(`${parseInt(season)}x${ePad}`, 'i') },
+      { name: 'E01', re: /E01/i },
+      { name: 'Ep.1', re: /Ep\.?\s*1\b/i },
+      { name: 'Episode', re: /episode/i },
+    ];
+    const found = {};
+    for (const p of patterns) {
+      const m = p.re.exec(html);
+      if (m) found[p.name] = { index: m.index, context: html.substring(Math.max(0, m.index - 30), m.index + 200) };
+    }
+    // All links
+    const allLinks = [...html.matchAll(/href=["']([^"']+)["']/gi)].map(m => m[1]);
+    const msfiLinks = allLinks.filter(u => /msfi/i.test(u));
+    const maxLinks = allLinks.filter(u => /maxstream/i.test(u));
+    // Table rows sample
+    const rows = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)].slice(0, 3).map(m => m[1].substring(0, 300));
+    res.json({ url, htmlLen: html.length, allLinks: allLinks.length, msfiLinks: msfiLinks.length,
+      msfiSample: msfiLinks.slice(0, 5), maxLinks: maxLinks.length, maxSample: maxLinks.slice(0, 5),
+      patterns: found, rowsSample: rows });
+  } catch (e) { res.json({ error: e.message }); }
+});
+
 // ─── Health ───────────────────────────────────────────────────────────────────
 
 app.get('/health', (req, res) => {
