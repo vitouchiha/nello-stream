@@ -95,14 +95,15 @@ async function resolveStayOnline(link) {
 
 /** Normalize a title for URL-safe search query. */
 function normalizeForSearch(title) {
-  return String(title || '')
+  const cleaned = String(title || '')
     .replace(/'/g, ' ')
     .replace(/[àá]/g, 'a')
     .replace(/[èé]/g, 'e')
     .replace(/[ìí]/g, 'i')
     .replace(/[òó]/g, 'o')
     .replace(/[ùú]/g, 'u')
-    .replace(/\s+/g, '+');
+    .trim();
+  return encodeURIComponent(cleaned).replace(/%20/g, '+');
 }
 
 /**
@@ -323,6 +324,22 @@ async function extractSeriesStreams(pageUrl, season, episode, providerContext = 
       return [];
     };
 
+    // Helper: resolve an uprot /msfld/ folder link → individual episode /msfi/ URL
+    const resolveFolder = async (msfldUrl) => {
+      try {
+        const folderHtml = await fetchWithCloudscraper(msfldUrl, { referer: 'https://uprot.net/' });
+        if (!folderHtml) return null;
+        // Match rows like: Will.and.Grace.S01E01.ITA.TVRip.avi ... href='...msfi/...'
+        const seasonPad = seasonStr.padStart(2, '0');
+        const epPat = new RegExp(
+          `S${seasonPad}E${episodePadded}[\\s\\S]*?href=['"]([^'"]*msfi\\/[^'"]+)['"]`,
+          'i'
+        );
+        const m = epPat.exec(folderHtml);
+        return m ? m[1] : null;
+      } catch { return null; }
+    };
+
     // Also try simpler flat episode patterns in the full HTML
     // Pattern 1: {season}&#215;{ep} – grab the line until next episode or </p>
     const flatPattern1 = new RegExp(
@@ -387,6 +404,25 @@ async function extractSeriesStreams(pageUrl, season, episode, providerContext = 
             }
           }
         } catch { /* skip */ }
+      }
+
+      // Fallback: look in the sp-body div that follows this sp-head
+      const headEnd = headMatch.index + headMatch[0].length;
+      const bodyMatch = html.substring(headEnd).match(/<div[^>]+class="sp-body[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+      if (bodyMatch) {
+        const bodyContent = bodyMatch[1];
+        // Check for /msfld/ folder link (whole-series archive)
+        const msfldMatch = bodyContent.match(/href=["'](https?:\/\/[^"']*uprot\.net\/msfld\/[^"']+)["']/i);
+        if (msfldMatch) {
+          const episodeUrl = await resolveFolder(msfldMatch[1]);
+          if (episodeUrl) {
+            const s = await extractEpisodeStreams(episodeUrl, providerContext);
+            if (s.length) return s;
+          }
+        }
+        // Also try any direct episode links in the body
+        const s = await tryAllLinksInBlock(bodyContent);
+        if (s.length) return s;
       }
     }
   } catch (err) {
