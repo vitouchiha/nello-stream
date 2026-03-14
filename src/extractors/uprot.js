@@ -52,6 +52,8 @@ async function _proxyFetch(url, opts = {}) {
     if (!dispatcher) return fetch(url, opts);
     const resp = await fetch(url, { ...opts, dispatcher });
     if (resp.status !== 403 || i === maxRetries - 1) return resp;
+    // Consume body before retry to avoid connection leak
+    await resp.text().catch(() => {});
     console.log(`[Uprot] Proxy fetch 403, retrying (${i + 1}/${maxRetries})...`);
   }
 }
