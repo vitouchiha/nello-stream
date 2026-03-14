@@ -234,7 +234,7 @@ async function proxyFetch(url, opts = {}) {
     if (cookies) mergedHeaders['Cookie'] = cookies;
 
     if (isGuardoserie) {
-        // Race CF Worker and Webshare in parallel (both are fast-fail)
+        // Race ALL strategies in parallel for maximum speed
         const racers = [];
         const hasCfWorker = !!(process.env.CF_WORKER_URL || '').trim();
         const hasWebshare = !!(process.env.WEBSHARE_PROXIES || '').trim();
@@ -242,30 +242,44 @@ async function proxyFetch(url, opts = {}) {
 
         if (hasCfWorker) racers.push(_cfWorkerFetch(url).catch(() => null));
         if (hasWebshare) racers.push(_webshareFetch(url, mergedHeaders).catch(() => null));
+        if (hasBrowserless) racers.push(_browserFetch(url).catch(() => null));
 
-        if (racers.length > 0) {
-            // Use Promise.any-like: resolve on first non-null result
-            const result = await new Promise((resolve) => {
-                let pending = racers.length;
-                for (const p of racers) {
-                    p.then(r => { if (r) resolve(r); else if (--pending === 0) resolve(null); })
-                     .catch(() => { if (--pending === 0) resolve(null); });
+        // Also race the direct/proxy fetch
+        const directRacer = (async () => {
+            const agent = _getAgent();
+            const fetchOpts = { ...opts, headers: mergedHeaders };
+            if (agent) fetchOpts.agent = agent;
+            try {
+                const resp = await _doFetch(url, fetchOpts);
+                if (resp.status === 403) {
+                    const body = await resp.text();
+                    if (body.includes('Just a moment')) return null; // CF blocked
+                    return { ...resp, text: async () => body, json: async () => JSON.parse(body) };
                 }
-            });
-            if (result) {
-                const setCookieHeaders = result.headers.getSetCookie?.() || [];
-                for (const c of setCookieHeaders) { try { _cookieJar.setCookieSync(c, url); } catch {} }
-                return result;
+                return resp;
+            } catch { return null; }
+        })();
+        racers.push(directRacer);
+
+        // Resolve on first non-null result, or null if all fail
+        const result = await new Promise((resolve) => {
+            let pending = racers.length;
+            for (const p of racers) {
+                p.then(r => { if (r) resolve(r); else if (--pending === 0) resolve(null); })
+                 .catch(() => { if (--pending === 0) resolve(null); });
             }
+        });
+
+        if (result) {
+            const setCookieHeaders = result.headers.getSetCookie?.() || [];
+            for (const c of setCookieHeaders) { try { _cookieJar.setCookieSync(c, url); } catch {} }
+            return result;
         }
 
-        // Strategy 3: Headless browser — only if BROWSERLESS_URL is configured
-        if (hasBrowserless) {
-            const brResp = await _browserFetch(url);
-            if (brResp) return brResp;
-        }
-
-        console.warn(`[Guardoserie] All proxy strategies failed for ${url}, trying direct`);
+        // All strategies failed — trip circuit breaker
+        console.warn(`[Guardoserie] All strategies failed — circuit breaker tripped for 5m`);
+        _cfBlockedUntil = Date.now() + 5 * 60_000;
+        return null;
     }
 
     // Strategy 4: PROXY_URL agent or direct
