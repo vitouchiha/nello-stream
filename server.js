@@ -607,8 +607,18 @@ app.get('/diag/folder', async (req, res) => {
     const url = req.query.url || 'https://uprot.net/msfld/o657vui7vr9p';
     const season = req.query.s || '01';
     const episode = req.query.e || '01';
+    
+    // Capture console.log output from the module
+    const logs = [];
+    const origLog = console.log, origWarn = console.warn;
+    console.log = (...args) => { logs.push(args.join(' ')); origLog(...args); };
+    console.warn = (...args) => { logs.push('WARN: ' + args.join(' ')); origWarn(...args); };
+    
     const html = await fetchUprotPage(url);
-    if (!html) return res.json({ error: 'fetchUprotPage returned null', url });
+    
+    console.log = origLog; console.warn = origWarn;
+    
+    if (!html) return res.json({ error: 'fetchUprotPage returned null', url, logs });
     // Look for episode patterns
     const sPad = season.padStart(2, '0');
     const ePad = episode.padStart(2, '0');
@@ -632,7 +642,7 @@ app.get('/diag/folder', async (req, res) => {
     const rows = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)].slice(0, 3).map(m => m[1].substring(0, 300));
     res.json({ url, htmlLen: html.length, allLinks: allLinks.length, msfiLinks: msfiLinks.length,
       msfiSample: msfiLinks.slice(0, 5), maxLinks: maxLinks.length, maxSample: maxLinks.slice(0, 5),
-      patterns: found, rowsSample: rows });
+      patterns: found, rowsSample: rows, logs });
   } catch (e) { res.json({ error: e.message }); }
 });
 
