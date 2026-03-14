@@ -638,11 +638,18 @@ app.get('/diag/folder', async (req, res) => {
     const allLinks = [...html.matchAll(/href=["']([^"']+)["']/gi)].map(m => m[1]);
     const msfiLinks = allLinks.filter(u => /msfi/i.test(u));
     const maxLinks = allLinks.filter(u => /maxstream/i.test(u));
-    // Table rows sample
-    const rows = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)].slice(0, 3).map(m => m[1].substring(0, 300));
+    // Table rows sample — show full rows for first 2 matching episodes
+    const sPadLong = season.padStart(2, '0');
+    const ePadLong = episode.padStart(2, '0');
+    const epRowRe = new RegExp(`<tr[^>]*>((?:[\\s\\S](?!<\\/tr>))*?S${sPadLong}E${ePadLong}[\\s\\S]*?)<\\/tr>`, 'gi');
+    const matchingRows = [...html.matchAll(epRowRe)].slice(0, 2).map(m => m[1]);
+    // Also get first 2 general rows
+    const generalRows = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)].slice(0, 2).map(m => m[1].substring(0, 600));
+    // Extract all links from S01E01 row
+    const rowLinks = matchingRows.length > 0 ? [...matchingRows[0].matchAll(/href=["']([^"']+)["']/gi)].map(m => m[1]) : [];
     res.json({ url, htmlLen: html.length, allLinks: allLinks.length, msfiLinks: msfiLinks.length,
       msfiSample: msfiLinks.slice(0, 5), maxLinks: maxLinks.length, maxSample: maxLinks.slice(0, 5),
-      patterns: found, rowsSample: rows, logs });
+      patterns: found, matchingRows, rowLinks, generalRows: generalRows, logs });
   } catch (e) { res.json({ error: e.message }); }
 });
 
