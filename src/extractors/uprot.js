@@ -27,25 +27,22 @@ const CF_WORKER_URL = 'https://kisskh-proxy.vitobsfm.workers.dev';
 // ─── Proxy-aware fetch for uprot.net ──────────────────────────────────────────
 // Cloudflare blocks datacenter IPs (Vercel, CF Workers) with 403.
 // Use PROXY_URL (residential/rotating proxy) to bypass the block.
-let _proxyDispatcher = null;
-function _getProxyDispatcher() {
-  if (_proxyDispatcher) return _proxyDispatcher;
+// Create a FRESH ProxyAgent per fetch to avoid stale connection pool issues.
+function _createProxyDispatcher() {
   const proxyUrl = (process.env.PROXY_URL || '').trim();
   if (!proxyUrl) return null;
   try {
     const { ProxyAgent } = require('undici');
-    _proxyDispatcher = new ProxyAgent(proxyUrl);
-    console.log('[Uprot] Proxy agent created:', proxyUrl.replace(/:[^:@]+@/, ':***@'));
-    return _proxyDispatcher;
+    return new ProxyAgent(proxyUrl);
   } catch (e) {
     console.warn('[Uprot] Failed to create proxy agent:', e.message);
     return null;
   }
 }
 
-/** fetch() wrapper that uses PROXY_URL when available */
+/** fetch() wrapper that uses PROXY_URL when available (fresh agent per call) */
 function _proxyFetch(url, opts = {}) {
-  const dispatcher = _getProxyDispatcher();
+  const dispatcher = _createProxyDispatcher();
   if (dispatcher) {
     return fetch(url, { ...opts, dispatcher });
   }
@@ -618,7 +615,7 @@ async function extractUprot(uprotUrl) {
     // Primary strategy: delegate to CF Worker — SKIP if PROXY_URL is set
     // because uprot.net blocks all datacenter IPs (Vercel, CF Workers).
     // When proxy is available, local resolution via proxy is faster and more reliable.
-    const cfResult = _getProxyDispatcher() ? null : await _resolveViaCfWorker(link);
+    const cfResult = (process.env.PROXY_URL || '').trim() ? null : await _resolveViaCfWorker(link);
     if (cfResult) return cfResult;
 
     // Fallback: local resolution
@@ -655,7 +652,13 @@ async function fetchUprotPage(url) {
     const cookieStr = `PHPSESSID=${cookies.sessid}${cookies.captchaHash ? `; captcha=${cookies.captchaHash}` : ''}`;
     const r = await _proxyFetch(url, {
       method: 'POST',
-      headers: { ..._headers(url), 'Cookie': cookieStr },
+      headers: {
+        'User-Agent': UA,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Origin': 'https://uprot.net',
+        'Referer': url,
+        'Cookie': cookieStr,
+      },
       body: `captcha=${cookies.captchaAnswer}`,
       redirect: 'manual',
       signal: AbortSignal.timeout(15000),
