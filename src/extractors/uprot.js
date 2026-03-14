@@ -40,13 +40,20 @@ function _createProxyDispatcher() {
   }
 }
 
-/** fetch() wrapper that uses PROXY_URL when available (fresh agent per call) */
-function _proxyFetch(url, opts = {}) {
-  const dispatcher = _createProxyDispatcher();
-  if (dispatcher) {
-    return fetch(url, { ...opts, dispatcher });
+/** fetch() wrapper that uses PROXY_URL when available (fresh agent per call).
+ *  Retries up to 3 times on 403 with rotating proxy (each retry gets a different IP). */
+async function _proxyFetch(url, opts = {}) {
+  const proxyUrl = (process.env.PROXY_URL || '').trim();
+  if (!proxyUrl) return fetch(url, opts);
+
+  const maxRetries = 3;
+  for (let i = 0; i < maxRetries; i++) {
+    const dispatcher = _createProxyDispatcher();
+    if (!dispatcher) return fetch(url, opts);
+    const resp = await fetch(url, { ...opts, dispatcher });
+    if (resp.status !== 403 || i === maxRetries - 1) return resp;
+    console.log(`[Uprot] Proxy fetch 403, retrying (${i + 1}/${maxRetries})...`);
   }
-  return fetch(url, opts);
 }
 
 // Cookie cache per path type (/msf/, /msei/, etc.)
