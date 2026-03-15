@@ -60,8 +60,8 @@ async function _cfWorkerFetch(url) {
     const w = getProxyWorker();
     if (!w) return null;
     try {
-        // Normalize any guardoserie variant → .digital (canonical KV domain)
-        const cfTargetUrl = url.replace(/guardoserie\.[a-z]+/gi, 'guardoserie.digital');
+        // Normalize any guardoserie variant → .ink (current live domain)
+        const cfTargetUrl = url.replace(/guardoserie\.[a-z]+/gi, 'guardoserie.ink');
         const workerUrl = new URL(w.url);
         workerUrl.searchParams.set('url', cfTargetUrl);
         const headers = { 'Accept': 'text/html, */*' };

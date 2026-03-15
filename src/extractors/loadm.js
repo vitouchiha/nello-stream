@@ -4,10 +4,10 @@ const { USER_AGENT } = require('./common');
 /**
  * Extractor for Loadm (loadm.cam)
  * @param {string} playerUrl The player URL (e.g. https://loadm.cam/#qybu1k)
- * @param {string} referer The referer domain (e.g. guardoserie.horse)
+ * @param {string} referer The referer domain (e.g. guardoserie.ink)
  * @returns {Promise<Array>} Array of stream objects
  */
-async function extractLoadm(playerUrl, referer = 'guardoserie.website') {
+async function extractLoadm(playerUrl, referer = 'guardoserie.ink') {
     try {
         if (!playerUrl.includes('#')) return [];
 
