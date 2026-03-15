@@ -81,6 +81,27 @@ export default {
     // ── Parse target URL ────────────────────────────────────────────────────
     const targetUrl = url.searchParams.get('url');
 
+    // ── GuardoSerie push: accept locally-scraped pages and store in KV ─────
+    if (url.searchParams.get('gs_push') === '1' && request.method === 'POST') {
+      if (!env?.ES_CACHE) return _json({ error: 'KV not available' }, 500);
+      try {
+        const body = await request.json();
+        const pages = Array.isArray(body) ? body : [body];
+        let stored = 0;
+        for (const { url: pageUrl, html } of pages) {
+          if (!pageUrl || !html) continue;
+          // Normalize to .digital for consistency with provider's _cfWorkerFetch
+          const normUrl = pageUrl.replace('guardoserie.website', 'guardoserie.digital')
+                                 .replace('guardoserie.best', 'guardoserie.digital');
+          const kvKey = `p:${normUrl}`;
+          const kvVal = JSON.stringify({ b: html, s: 200, l: '', ck: '', ct: 'text/html; charset=UTF-8', t: Date.now() });
+          await env.ES_CACHE.put(kvKey, kvVal, { expirationTtl: 172800 }); // 48h
+          stored++;
+        }
+        return _json({ ok: true, stored, total: pages.length });
+      } catch (e) { return _json({ error: e.message }, 500); }
+    }
+
     // ── GuardoSerie titles index: serve from KV ──────────────────────────
     if (url.searchParams.get('gs_titles') === '1') {
       if (!env?.ES_CACHE) return _json({ error: 'KV not available' }, 500);

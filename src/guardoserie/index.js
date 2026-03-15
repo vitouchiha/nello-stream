@@ -203,10 +203,11 @@ async function _webshareFetch(url, mergedHeaders) {
 }
 
 /**
- * Circuit-breaker: after first CF block for guardoserie, skip all subsequent calls.
- * Resets after 5 minutes (allows retry in next cold start).
+ * Circuit-breaker: after consecutive CF blocks for guardoserie, skip calls.
+ * Resets after 60s or on first success.
  */
 let _cfBlockedUntil = 0;
+let _cfConsecutiveFails = 0;
 
 /**
  * Fetch with multiple proxy strategies for guardoserie domains:
@@ -261,24 +262,34 @@ async function proxyFetch(url, opts = {}) {
         })();
         racers.push(directRacer);
 
-        // Resolve on first non-null result, or null if all fail
-        const result = await new Promise((resolve) => {
-            let pending = racers.length;
-            for (const p of racers) {
-                p.then(r => { if (r) resolve(r); else if (--pending === 0) resolve(null); })
-                 .catch(() => { if (--pending === 0) resolve(null); });
-            }
-        });
+        // Resolve on first non-null result, or null if all fail (capped at 8s)
+        const raceTimeout = new Promise(r => setTimeout(() => r(null), 8000));
+        const result = await Promise.race([
+            new Promise((resolve) => {
+                let pending = racers.length;
+                for (const p of racers) {
+                    p.then(r => { if (r) resolve(r); else if (--pending === 0) resolve(null); })
+                     .catch(() => { if (--pending === 0) resolve(null); });
+                }
+            }),
+            raceTimeout
+        ]);
 
         if (result) {
             const setCookieHeaders = result.headers.getSetCookie?.() || [];
             for (const c of setCookieHeaders) { try { _cookieJar.setCookieSync(c, url); } catch {} }
+            _cfConsecutiveFails = 0; // reset on success
             return result;
         }
 
-        // All strategies failed — trip circuit breaker
-        console.warn(`[Guardoserie] All strategies failed — circuit breaker tripped for 5m`);
-        _cfBlockedUntil = Date.now() + 5 * 60_000;
+        // All strategies failed — trip circuit breaker after 2 consecutive failures
+        _cfConsecutiveFails++;
+        if (_cfConsecutiveFails >= 2) {
+            console.warn(`[Guardoserie] ${_cfConsecutiveFails} consecutive failures — circuit breaker tripped for 60s`);
+            _cfBlockedUntil = Date.now() + 60_000;
+        } else {
+            console.warn(`[Guardoserie] All strategies failed (${_cfConsecutiveFails}/2 before breaker)`);
+        }
         return null;
     }
 
@@ -290,12 +301,15 @@ async function proxyFetch(url, opts = {}) {
     try {
         const resp = await _doFetch(url, fetchOpts);
 
-        // Check if CF blocked (403 + "Just a moment") — trip the circuit breaker
+        // Check if CF blocked (403 + "Just a moment") — count toward circuit breaker
         if (isGuardoserie && resp.status === 403) {
             const body = await resp.text();
             if (body.includes('Just a moment')) {
-                console.warn(`[Guardoserie] CF blocked — circuit breaker tripped for 5m`);
-                _cfBlockedUntil = Date.now() + 5 * 60_000;
+                _cfConsecutiveFails++;
+                if (_cfConsecutiveFails >= 2) {
+                    console.warn(`[Guardoserie] CF blocked — circuit breaker tripped for 60s`);
+                    _cfBlockedUntil = Date.now() + 60_000;
+                }
                 return null;
             }
             // Non-CF 403, return as-is
@@ -314,10 +328,13 @@ async function proxyFetch(url, opts = {}) {
 
         return resp;
     } catch (e) {
-        // Network error or timeout — trip circuit breaker for guardoserie
+        // Network error or timeout — count toward circuit breaker for guardoserie
         if (isGuardoserie) {
-            console.warn(`[Guardoserie] Fetch error — circuit breaker tripped: ${e.message}`);
-            _cfBlockedUntil = Date.now() + 5 * 60_000;
+            _cfConsecutiveFails++;
+            if (_cfConsecutiveFails >= 2) {
+                console.warn(`[Guardoserie] Fetch error — circuit breaker tripped: ${e.message}`);
+                _cfBlockedUntil = Date.now() + 60_000;
+            }
         }
         throw e;
     }
