@@ -265,12 +265,13 @@ async function proxyFetch(url, opts = {}) {
             if (agent) fetchOpts.agent = agent;
             try {
                 const resp = await _doFetch(url, fetchOpts);
-                if (resp.status === 403) {
-                    const body = await resp.text();
-                    if (body.includes('Just a moment')) return null; // CF blocked
-                    return { ...resp, text: async () => body, json: async () => JSON.parse(body) };
-                }
-                return resp;
+                const body = await resp.text();
+                if (resp.status === 403 && body.includes('Just a moment')) return null;
+                return {
+                    ok: resp.ok, status: resp.status, statusCode: resp.statusCode || resp.status,
+                    headers: resp.headers,
+                    text: async () => body, json: async () => JSON.parse(body),
+                };
             } catch { return null; }
         })();
         racers.push(directRacer);

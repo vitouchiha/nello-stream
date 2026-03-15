@@ -27,7 +27,8 @@
   ],
   "crons": [
     { "path": "/api/cron/warm-uprot",     "schedule": "0 3 * * *" },
-    { "path": "/api/cron/domain-health",  "schedule": "0 6 * * *" }
+    { "path": "/api/cron/domain-health",  "schedule": "0 6 * * *" },
+    { "path": "/api/cron/gs-index-push",  "schedule": "0 4 * * *" }
   ],
   "env": {
     "NODE_ENV": "production"

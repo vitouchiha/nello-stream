@@ -240,6 +240,44 @@ registerJob('catalog-warm', async () => {
   return { status: 'ok', ...stats };
 });
 
+// ── GuardoSerie: push static titles index to CF Worker KV ─────────────────────
+// The CF Worker cron can't scrape guardoserie.website (CF-to-CF 403), so Vercel
+// pushes the pre-built gs-titles-index.json to all CF Workers instead.
+registerJob('gs-index-push', async () => {
+  const fs = require('fs');
+  const path = require('path');
+  const { getAllWorkers } = require('../utils/cfWorkerPool');
+
+  const indexPath = path.resolve(__dirname, '..', '..', 'gs-titles-index.json');
+  if (!fs.existsSync(indexPath)) return { status: 'skip', reason: 'no static index file' };
+
+  const index = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+  const entries = Object.keys(index).length;
+  if (entries === 0) return { status: 'skip', reason: 'empty index' };
+
+  const workers = getAllWorkers();
+  if (!workers || workers.length === 0) return { status: 'skip', reason: 'no CF Workers' };
+
+  let pushed = 0;
+  const body = JSON.stringify(index);
+  for (const w of workers) {
+    try {
+      const u = new URL(w.url);
+      u.searchParams.set('gs_titles', '1');
+      const headers = { 'Content-Type': 'application/json' };
+      if (w.auth) headers['x-worker-auth'] = w.auth;
+      const resp = await fetch(u.toString(), {
+        method: 'POST', headers, body,
+        signal: AbortSignal.timeout(10000),
+      });
+      if (resp.ok) pushed++;
+    } catch { /* skip failed worker */ }
+  }
+
+  log.info(`gs-index-push: ${pushed}/${workers.length} workers updated (${entries} entries)`);
+  return { status: 'ok', entries, pushed, total: workers.length };
+});
+
 // ── Internal Timers (Vercel Free: solo 2 cron, il resto gira con setInterval) ─
 
 const _timers = [];
@@ -256,6 +294,7 @@ const INTERNAL_SCHEDULE = [
   { name: 'cache-stats',    intervalMs: 3 * 60 * 60 * 1000 }, // every 3 hours
   { name: 'mirror-scan',    intervalMs: 6 * 60 * 60 * 1000 }, // every 6 hours
   { name: 'catalog-warm',   intervalMs: 2 * 60 * 60 * 1000 }, // every 2 hours
+  { name: 'gs-index-push',  intervalMs: 24 * 60 * 60 * 1000 }, // every 24 hours
 ];
 
 /**

@@ -31,13 +31,13 @@
  */
 
 /**
- * Normalize any guardoserie domain variant → .digital (canonical KV domain).
+ * Normalize any guardoserie domain variant → .website (canonical KV domain).
  * Regex catches ALL TLDs (.website, .best, .horse, .surf, .bar, .blog, etc.)
  * so a domain change only needs updating ALLOWED_HOSTS + _KV_CACHEABLES, not
  * the normalization logic.
  */
 function _normalizeGsUrl(url) {
-  return url.replace(/guardoserie\.[a-z]+/gi, 'guardoserie.digital');
+  return url.replace(/guardoserie\.[a-z]+/gi, 'guardoserie.website');
 }
 
 export default {
@@ -111,9 +111,19 @@ export default {
       } catch (e) { return _json({ error: e.message }, 500); }
     }
 
-    // ── GuardoSerie titles index: serve from KV ──────────────────────────
+    // ── GuardoSerie titles index: serve from KV (GET) or accept push (POST) ──
     if (url.searchParams.get('gs_titles') === '1') {
       if (!env?.ES_CACHE) return _json({ error: 'KV not available' }, 500);
+      if (request.method === 'POST') {
+        try {
+          const body = await request.json();
+          if (!body || typeof body !== 'object' || Object.keys(body).length === 0) {
+            return _json({ error: 'Empty index' }, 400);
+          }
+          await env.ES_CACHE.put('gs:titles', JSON.stringify(body), { expirationTtl: 172800 });
+          return _json({ ok: true, entries: Object.keys(body).length });
+        } catch (e) { return _json({ error: e.message }, 500); }
+      }
       try {
         const index = await env.ES_CACHE.get('gs:titles', 'json');
         if (index) return _json(index);
