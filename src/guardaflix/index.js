@@ -3,6 +3,7 @@
 const { getProviderUrl } = require('../provider_urls.js');
 const { extractFromUrl } = require('../extractors');
 const { formatStream } = require('../formatter.js');
+const cache = require('../cache/cache_manager');
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
 const { TMDB_API_KEY } = require('../utils/config');
@@ -56,19 +57,25 @@ async function getTitleAndYear(id, type) {
 async function searchMovies(title) {
   const base = getBaseUrl();
   try {
-    const resp = await fetch(`${base}/wp-admin/admin-ajax.php`, {
-      method: 'POST',
-      headers: {
-        'User-Agent': USER_AGENT,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Referer': `${base}/`,
-        'Origin': base,
-      },
-      body: `action=action_tr_search_suggest&nonce=${SEARCH_NONCE}&term=${encodeURIComponent(title)}`,
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!resp.ok) return [];
-    const html = await resp.text();
+    // Page cache for search results
+    const sCacheKey = `page:gflix:search:${title}`;
+    let html = await cache.get(sCacheKey);
+    if (!html) {
+      const resp = await fetch(`${base}/wp-admin/admin-ajax.php`, {
+        method: 'POST',
+        headers: {
+          'User-Agent': USER_AGENT,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Referer': `${base}/`,
+          'Origin': base,
+        },
+        body: `action=action_tr_search_suggest&nonce=${SEARCH_NONCE}&term=${encodeURIComponent(title)}`,
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!resp.ok) return [];
+      html = await resp.text();
+      if (html && html.length > 20) cache.set(sCacheKey, html, cache.TTL.MEDIUM);
+    }
     // Parse <a href="...">Title</a> — only movie entries
     const links = [];
     const regex = /class="type-movies"[^<]*<\/span>([^<]+)<\/a>/g;
@@ -88,15 +95,21 @@ async function searchMovies(title) {
 
 async function getEmbedUrl(pageUrl) {
   try {
-    const resp = await fetch(pageUrl, {
-      headers: {
-        'User-Agent': USER_AGENT,
-        'Referer': getBaseUrl() + '/',
-      },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!resp.ok) return null;
-    const html = await resp.text();
+    // Page cache for movie page HTML
+    const pCacheKey = `page:gflix:${pageUrl}`;
+    let html = await cache.get(pCacheKey);
+    if (!html) {
+      const resp = await fetch(pageUrl, {
+        headers: {
+          'User-Agent': USER_AGENT,
+          'Referer': getBaseUrl() + '/',
+        },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!resp.ok) return null;
+      html = await resp.text();
+      if (html && html.length > 100) cache.set(pCacheKey, html, cache.TTL.MEDIUM);
+    }
 
     // Check year from the page (span with class containing 'year')
     const yearMatch = html.match(/<span[^>]*class="[^"]*year[^"]*"[^>]*>(\d{4})/i)
@@ -116,15 +129,21 @@ async function getEmbedUrl(pageUrl) {
 
 async function getPlayerUrl(embedUrl) {
   try {
-    const resp = await fetch(embedUrl, {
-      headers: {
-        'User-Agent': USER_AGENT,
-        'Referer': getBaseUrl() + '/',
-      },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!resp.ok) return null;
-    const html = await resp.text();
+    // Page cache for embed page
+    const eCacheKey = `page:gflix:emb:${embedUrl}`;
+    let html = await cache.get(eCacheKey);
+    if (!html) {
+      const resp = await fetch(embedUrl, {
+        headers: {
+          'User-Agent': USER_AGENT,
+          'Referer': getBaseUrl() + '/',
+        },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!resp.ok) return null;
+      html = await resp.text();
+      if (html && html.length > 50) cache.set(eCacheKey, html, cache.TTL.MEDIUM);
+    }
 
     // Find iframe or data-src with actual video player URL
     const m = html.match(/<iframe[^>]+src="([^"]+)"/i)

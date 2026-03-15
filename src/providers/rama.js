@@ -17,6 +17,7 @@ const { extractBaseSlug } = require('../utils/titleHelper');
 const { enrichFromTmdb, rpdbPosterUrl, topPosterUrl } = require('../utils/tmdb');
 const { wrapStreamUrl } = require('../utils/mediaflow');
 const { createLogger } = require('../utils/logger');
+const cache = require('../cache/cache_manager');
 
 const log = createLogger('rama');
 
@@ -42,6 +43,12 @@ async function getCatalog(skip = 0, search = '', config = {}) {
   if (cached) {
     log.debug('catalog from cache', { skip, search });
     return cached;
+  }
+  // L2: cache_manager fallback
+  const l2 = await cache.get(`rama:${cacheKey}`);
+  if (l2) {
+    catalogCache.set(cacheKey, l2);
+    return l2;
   }
 
   const items = [];
@@ -99,6 +106,7 @@ async function getCatalog(skip = 0, search = '', config = {}) {
 
   const result = items.slice(0, ITEMS_PER_PAGE);
   catalogCache.set(cacheKey, result);
+  cache.set(`rama:${cacheKey}`, result, cache.TTL.CATALOG);
   log.info(`catalog: found ${result.length} items`, { skip, search });
   return result;
 }
@@ -117,6 +125,12 @@ async function getMeta(id, config = {}) {
   if (cached) {
     log.debug('meta from cache', { id: seriesId });
     return { meta: cached };
+  }
+  // L2: cache_manager fallback
+  const l2Meta = await cache.get(`rama:meta:${seriesId}`);
+  if (l2Meta) {
+    metaCache.set(seriesId, l2Meta);
+    return { meta: l2Meta };
   }
 
   const baseId = extractBaseSlug(seriesId.replace(/^rama_/, ''));
@@ -289,6 +303,7 @@ async function getMeta(id, config = {}) {
   }
 
   metaCache.set(seriesId, meta);
+  cache.set(`rama:meta:${seriesId}`, meta, cache.TTL.LONG);
   return { meta };
 }
 
@@ -310,6 +325,12 @@ async function getStreams(id, config = {}) {
   if (cached) {
     log.debug('streams from cache', { cacheKey });
     return cached.map(s => ({ ...s, url: wrapStreamUrl(s.url, config) }));
+  }
+  // L2: cache_manager fallback
+  const l2Streams = await cache.get(`rama:stream:${cacheKey}`);
+  if (l2Streams) {
+    streamCache.set(cacheKey, l2Streams);
+    return l2Streams.map(s => ({ ...s, url: wrapStreamUrl(s.url, config) }));
   }
 
   const { meta } = await getMeta(seriesId, config);
@@ -362,6 +383,7 @@ async function getStreams(id, config = {}) {
   }
 
   streamCache.set(cacheKey, rawStreams);
+  cache.set(`rama:stream:${cacheKey}`, rawStreams, cache.TTL.STREAM);
   return rawStreams.map(s => ({ ...s, url: wrapStreamUrl(s.url, config) }));
 }
 

@@ -25,6 +25,7 @@ const { enrichFromTmdb, rpdbPosterUrl, topPosterUrl } = require('../utils/tmdb')
 const { flareSolverrGetJSONWithPrimer, createSession, destroySession, sessionGet, getFlareSolverrUrl } = require('../utils/flaresolverr');
 const { createLogger } = require('../utils/logger');
 const { getProxyWorker, getPrimaryWorker, broadcastKvWrite } = require('../utils/cfWorkerPool');
+const cache = require('../cache/cache_manager');
 
 const log = createLogger('kisskh');
 
@@ -226,6 +227,12 @@ async function getCatalog(skip = 0, search = '', config = {}) {
     log.debug('catalog from cache');
     return cached;
   }
+  // L2: cache_manager fallback
+  const l2 = await cache.get(`kk:${cacheKey}`);
+  if (l2) {
+    catalogCache.set(cacheKey, l2);
+    return l2;
+  }
 
   const page = Math.floor(skip / 20) + 1;
   const items = search.trim()
@@ -233,6 +240,7 @@ async function getCatalog(skip = 0, search = '', config = {}) {
     : await _listCatalog(page, 20, config.proxyUrl, config.clientIp);
 
   catalogCache.set(cacheKey, items);
+  cache.set(`kk:${cacheKey}`, items, cache.TTL.CATALOG);
   return items;
 }
 
@@ -474,6 +482,12 @@ async function getMeta(id, config = {}) {
     log.debug('meta from cache', { id });
     return { meta: cached };
   }
+  // L2: cache_manager fallback
+  const l2Meta = await cache.get(`kk:meta:${id}`);
+  if (l2Meta) {
+    metaCache.set(id, l2Meta);
+    return { meta: l2Meta };
+  }
 
   const serieId = id.replace(/^kisskh_/, '');
 
@@ -561,6 +575,7 @@ async function getMeta(id, config = {}) {
     }
 
     metaCache.set(id, meta);
+    cache.set(`kk:meta:${id}`, meta, cache.TTL.LONG);
     _kvPut('kk_meta', serieId, meta); // persist to KV (fire-and-forget)
     return { meta };
   } catch (err) {
@@ -611,12 +626,23 @@ async function getStreams(stremioId, config = {}) {
   const cacheKey = `stream:${serieId}:${episodeId}`;
   const cached = streamCache.get(cacheKey);
 
+  // L2: cache_manager fallback
+  let l2Stream;
+  if (!cached) {
+    l2Stream = await cache.get(`kk:${cacheKey}`);
+  }
+
   // Cache stores { url, subtitles } (raw, unwrapped) so MFP wrapping is per-request
   let rawUrl, subtitles;
   if (cached) {
     log.debug('stream from cache', { cacheKey });
     rawUrl = cached.url;
     subtitles = cached.subtitles;
+  } else if (l2Stream) {
+    log.debug('stream from L2 cache', { cacheKey });
+    rawUrl = l2Stream.url;
+    subtitles = l2Stream.subtitles;
+    streamCache.set(cacheKey, l2Stream);
   } else {
     // 1. Try direct API (FlareSolverr session → cf_clearance → JSON response)
     log.info('trying direct API stream extraction', { serieId, episodeId });
@@ -706,6 +732,7 @@ async function getStreams(stremioId, config = {}) {
       return [{ name: '[DEBUG]\\nKissKH', title: 'Stream trovato ma inattivo.\\nRiprova.', url: 'http://localhost/error.mp4' }];
     }
     streamCache.set(cacheKey, { url: rawUrl, subtitles });
+    cache.set(`kk:${cacheKey}`, { url: rawUrl, subtitles }, cache.TTL.STREAM);
   }
 
   // Validate URL before wrapping

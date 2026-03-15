@@ -2038,6 +2038,52 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // ─── Startup ──────────────────────────────────────────────────────────────────
 
+// ── Mount advanced architecture modules ──────────────────────────────────────
+try {
+  // Mount cron job routes (/api/cron/domain-health, /api/cron/mirror-scan, etc.)
+  const cronManager = require('./src/cron/cron_manager');
+  cronManager.mountRoutes(app);
+} catch (err) {
+  log.warn('cron module not loaded: ' + err.message);
+}
+
+// ── System monitoring dashboard endpoint ─────────────────────────────────────
+app.get('/api/system/status', requireDebugAuth, (req, res) => {
+  const report = { ts: new Date().toISOString(), version: manifest.version };
+
+  try {
+    const cacheManager = require('./src/cache/cache_manager');
+    report.cache = cacheManager.getStats();
+  } catch { report.cache = 'not available'; }
+
+  try {
+    const failover = require('./src/domain-failover/failover');
+    report.domainHealth = failover.getHealthReport();
+  } catch { report.domainHealth = 'not available'; }
+
+  try {
+    const { getWorkerHealth, poolSize: ps } = require('./src/utils/cfWorkerPool');
+    report.workerPool = { size: ps(), health: getWorkerHealth() };
+  } catch { report.workerPool = 'not available'; }
+
+  try {
+    const antiban = require('./src/utils/antiban');
+    report.throttle = antiban.getThrottleStats();
+  } catch { report.throttle = 'not available'; }
+
+  try {
+    const scanner = require('./src/mirror-scanner/scanner');
+    report.mirrors = scanner.getAllScanResults();
+  } catch { report.mirrors = 'not available'; }
+
+  try {
+    const cronManager = require('./src/cron/cron_manager');
+    report.cron = cronManager.getStatus();
+  } catch { report.cron = 'not available'; }
+
+  res.json(report);
+});
+
 const PORT = Number(process.env.PORT) || 3000;
 
 if (require.main === module) {

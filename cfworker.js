@@ -163,6 +163,27 @@ export default {
       } catch (e) { return _json({ error: e.message }, 500); }
     }
 
+    // ── Generic page cache KV (used by cache_manager auto-persist) ───────
+    // GET  ?pc={cacheKey}         → read page from KV
+    // POST ?pc={cacheKey} + body  → store page in KV (1h TTL)
+    if (url.searchParams.get('pc')) {
+      if (!env?.ES_CACHE) return _json({ error: 'KV not available' }, 500);
+      const pcKey = url.searchParams.get('pc');
+      const kvKey = `pc:${pcKey}`;
+      if (request.method === 'POST') {
+        try {
+          const body = await request.json();
+          await env.ES_CACHE.put(kvKey, JSON.stringify(body), { expirationTtl: 3600 });
+          return _json({ ok: true });
+        } catch (e) { return _json({ error: e.message }, 500); }
+      }
+      try {
+        const data = await env.ES_CACHE.get(kvKey, 'json');
+        if (data) return _json(data);
+        return _json(null, 404);
+      } catch (e) { return _json({ error: e.message }, 500); }
+    }
+
     // ── GuardoSerie warm-up: fetch + cache list of URLs in KV ─────────────
     if (url.searchParams.get('gs_warm') === '1') {
       if (!env?.ES_CACHE) return _json({ error: 'KV not available' }, 500);

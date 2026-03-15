@@ -30,6 +30,7 @@ const { titleSimilarity } = require('../utils/titleHelper');
 const { findTitleByImdbId } = require('../utils/tmdb');
 const { TMDB_API_KEY } = require('../utils/config');
 const { createLogger } = require('../utils/logger');
+const cache = require('../cache/cache_manager');
 
 const log = createLogger('aggregator');
 
@@ -44,14 +45,8 @@ const ENABLE_GUARDASERIE_LEGACY_IMDB = String(process.env.ENABLE_GUARDASERIE_LEG
 const IMDB_EPISODE_CACHE_TTL = Number(process.env.IMDB_EPISODE_CACHE_TTL) || 6 * 60 * 60_000;
 const IMDB_NO_MATCH_CACHE_TTL = Number(process.env.IMDB_NO_MATCH_CACHE_TTL) || 60_000;
 
-const _imdbEpisodeCache = new Map();
-
-// ─── In-memory stream response cache ──────────────────────────────────────────
-// Short-lived cache for stream results. Avoids redundant scraping when Stremio
-// re-requests the same ID within a few minutes (e.g. user browses back/forth).
-const _streamCache = new Map();
-const STREAM_CACHE_TTL = 5 * 60_000;     // 5 minutes
-const STREAM_CACHE_MAX = 200;            // max entries to prevent memory leaks
+// Stream & episode caches now delegated to cache_manager (L1 LRU + L2 KV)
+// L1: 2000-entry LRU in-memory, L2: CF Worker KV with stale-while-revalidate
 
 // ─── Request deduplication queue ──────────────────────────────────────────────
 // If the same ID is requested concurrently (Stremio often fires 2-3 requests at once),
@@ -124,18 +119,38 @@ async function handleCatalog(type, catalogId, extra = {}, config = {}) {
 
   log.info('catalog request', { type, catalogId, skip, search });
 
+  // Catalog cache (L1 + L2 KV) — avoids re-scraping catalog pages
+  const catCacheKey = `cat:${catalogId}:${skip}:${search}`;
+  const cachedCatalog = await cache.get(catCacheKey, {
+    kvParam: 'cat_cache',
+    kvKey: `${catalogId}:${skip}:${search}`,
+  });
+  if (cachedCatalog) {
+    log.info(`catalog cache hit (${cachedCatalog.metas?.length || 0} metas)`, { catalogId });
+    return cachedCatalog;
+  }
+
   try {
+    let result = null;
+
     if (catalogId === 'kisskh_catalog') {
       const metas = await withTimeout(kisskh.getCatalog(skip, search, config), CATALOG_TIMEOUT, 'kisskh.getCatalog');
-      return { metas };
-    }
-
-    if (catalogId === 'rama_catalog') {
+      result = { metas };
+    } else if (catalogId === 'rama_catalog') {
       const metas = await withTimeout(rama.getCatalog(skip, search, config), CATALOG_TIMEOUT, 'rama.getCatalog');
-      return { metas };
+      result = { metas };
     }
 
     // Only Rama and KissKH catalogs remain
+
+    if (result && result.metas?.length > 0) {
+      cache.set(catCacheKey, result, cache.TTL.CATALOG, {
+        kvParam: 'cat_cache',
+        kvKey: `${catalogId}:${skip}:${search}`,
+      });
+      return result;
+    }
+    return result || { metas: [] };
 
   } catch (err) {
     log.error(`catalog failed: ${err.message}`, { type, catalogId });
@@ -155,6 +170,17 @@ async function handleCatalog(type, catalogId, extra = {}, config = {}) {
 async function handleMeta(type, id, config = {}) {
   log.info('meta request', { type, id });
 
+  // Meta cache (L1 + L2 KV)
+  const metaCacheKey = `meta:${id}`;
+  const cachedMeta = await cache.get(metaCacheKey, {
+    kvParam: 'meta_cache',
+    kvKey: id,
+  });
+  if (cachedMeta) {
+    log.info('meta cache hit', { id });
+    return cachedMeta;
+  }
+
   try {
     let result = { meta: null };
 
@@ -163,6 +189,7 @@ async function handleMeta(type, id, config = {}) {
       if (!result?.meta) result = { meta: _fallbackMetaForId(id, 'series') };
       const videos = Array.isArray(result.meta?.videos) ? result.meta.videos.length : 0;
       log.info('meta response', { id, provider: 'kisskh', hasMeta: !!result.meta, videos });
+      if (result?.meta) cache.set(metaCacheKey, result, cache.TTL.CATALOG, { kvParam: 'meta_cache', kvKey: id });
       return result;
     }
 
@@ -171,6 +198,7 @@ async function handleMeta(type, id, config = {}) {
       if (!result?.meta) result = { meta: _fallbackMetaForId(id, 'series') };
       const videos = Array.isArray(result?.meta?.videos) ? result.meta.videos.length : 0;
       log.info('meta response', { id, provider: 'rama', hasMeta: !!result?.meta, videos });
+      if (result?.meta) cache.set(metaCacheKey, result, cache.TTL.CATALOG, { kvParam: 'meta_cache', kvKey: id });
       return result;
     }
 
@@ -199,10 +227,13 @@ async function handleMeta(type, id, config = {}) {
 async function handleStream(type, id, config = {}) {
   log.info('stream request', { type, id });
 
-  // ─── Stream response cache: return cached result if fresh ────────────────
-  const cacheKey = `${type}:${id}`;
-  const cachedResult = _cacheGet(_streamCache, cacheKey);
-  if (cachedResult !== undefined) {
+  // ─── Stream response cache: L1 (memory LRU) + L2 (CF Worker KV) ─────────
+  const cacheKey = `stream:${type}:${id}`;
+  const cachedResult = await cache.get(cacheKey, {
+    kvParam: 'stream_cache',
+    kvKey: `${type}:${id}`,
+  });
+  if (cachedResult) {
     log.info(`stream cache hit (${cachedResult.streams?.length || 0} streams)`, { id });
     return cachedResult;
   }
@@ -215,12 +246,11 @@ async function handleStream(type, id, config = {}) {
   }
 
   const promise = _handleStreamImpl(type, id, config).then(result => {
-    // Cache the result (evict oldest if over limit)
-    if (_streamCache.size >= STREAM_CACHE_MAX) {
-      const oldest = _streamCache.keys().next().value;
-      _streamCache.delete(oldest);
-    }
-    _cacheSet(_streamCache, cacheKey, result, STREAM_CACHE_TTL);
+    // Persist to L1 + L2 (KV write-through, fire-and-forget)
+    cache.set(cacheKey, result, cache.TTL.STREAM, {
+      kvParam: 'stream_cache',
+      kvKey: `${type}:${id}`,
+    });
     return result;
   }).finally(() => {
     _inflightRequests.delete(inflightKey);
@@ -452,9 +482,12 @@ async function _legacyProviderStreamsForImdb(opts) {
   const normalizedSeason = Number.isInteger(seasonNum) && seasonNum > 0 ? seasonNum : 1;
   const normalizedEpisode = Number.isInteger(episodeNum) && episodeNum > 0 ? episodeNum : 1;
   const seasonForMatch = forceSeasonOne ? 1 : normalizedSeason;
-  const cacheKey = `${provider}:${imdbId}:${seasonForMatch}:${normalizedEpisode}`;
+  const episodeCacheKey = `ep:${provider}:${imdbId}:${seasonForMatch}:${normalizedEpisode}`;
 
-  const cachedEpisodeId = _cacheGet(_imdbEpisodeCache, cacheKey);
+  const cachedEpisodeId = await cache.get(episodeCacheKey, {
+    kvParam: 'ep_cache',
+    kvKey: `${provider}:${imdbId}:${seasonForMatch}:${normalizedEpisode}`,
+  });
   if (cachedEpisodeId === '__NO_MATCH__') return [];
 
   if (cachedEpisodeId) {
@@ -504,7 +537,10 @@ async function _legacyProviderStreamsForImdb(opts) {
     const ep = _matchEpisode(videos, seasonForMatch, normalizedEpisode);
     if (!ep?.id) continue;
 
-    _cacheSet(_imdbEpisodeCache, cacheKey, ep.id, IMDB_EPISODE_CACHE_TTL);
+    cache.set(episodeCacheKey, ep.id, IMDB_EPISODE_CACHE_TTL, {
+      kvParam: 'ep_cache',
+      kvKey: `${provider}:${imdbId}:${seasonForMatch}:${normalizedEpisode}`,
+    });
 
     const streams = await withTimeout(
       streamsFn(ep.id, config),
@@ -521,7 +557,7 @@ async function _legacyProviderStreamsForImdb(opts) {
   }
 
   if (!hadTransientFailure) {
-    _cacheSet(_imdbEpisodeCache, cacheKey, '__NO_MATCH__', IMDB_NO_MATCH_CACHE_TTL);
+    cache.set(episodeCacheKey, '__NO_MATCH__', IMDB_NO_MATCH_CACHE_TTL);
   }
   return [];
 }

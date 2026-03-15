@@ -24,6 +24,7 @@ function getGuardaserieBaseUrl() {
   return getProviderUrl("guardaserie");
 }
 const { TMDB_API_KEY } = require('../utils/config');
+const cache = require('../cache/cache_manager');
 const USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
 
 const { extractFromUrl } = require('../extractors');
@@ -462,15 +463,21 @@ function getStreams(id, type, season, episode, providerContext = null) {
           params.append("story", imdbId);
           const searchUrl = `${getGuardaserieBaseUrl()}/index.php?${params.toString()}`;
 
-          const searchResponse = yield fetch(searchUrl, {
-            headers: {
-              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-              "Referer": getGuardaserieBaseUrl()
+          let searchHtml = yield cache.get(`page:gserie:${searchUrl}`);
+          if (!searchHtml) {
+            const searchResponse = yield fetch(searchUrl, {
+              headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Referer": getGuardaserieBaseUrl()
+              }
+            });
+            if (searchResponse.ok) {
+              searchHtml = yield searchResponse.text();
+              if (searchHtml) cache.set(`page:gserie:${searchUrl}`, searchHtml, cache.TTL.MEDIUM);
             }
-          });
+          }
 
-          if (searchResponse.ok) {
-            const searchHtml = yield searchResponse.text();
+          if (searchHtml) {
             // Match ALL results, not just the first — iterate to find the one whose page contains our IMDb ID
             const resultRegex = /<div class="mlnh-2">\s*<h2>\s*<a href="([^"]+)" title="([^"]+)">/gi;
             let match;
@@ -487,15 +494,21 @@ function getStreams(id, type, season, episode, providerContext = null) {
               if (foundUrl.startsWith('/')) foundUrl = `${getGuardaserieBaseUrl()}${foundUrl}`;
               console.log(`[Guardaserie] Checking IMDb search result: ${foundTitle} → ${foundUrl}`);
 
-              const pageResponse = yield fetch(foundUrl, {
-                headers: {
-                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                  "Referer": getGuardaserieBaseUrl()
+              let candidateHtml = yield cache.get(`page:gserie:${foundUrl}`);
+              if (!candidateHtml) {
+                const pageResponse = yield fetch(foundUrl, {
+                  headers: {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Referer": getGuardaserieBaseUrl()
+                  }
+                });
+                if (pageResponse.ok) {
+                  candidateHtml = yield pageResponse.text();
+                  if (candidateHtml) cache.set(`page:gserie:${foundUrl}`, candidateHtml, cache.TTL.MEDIUM);
                 }
-              });
+              }
 
-              if (pageResponse.ok) {
-                const candidateHtml = yield pageResponse.text();
+              if (candidateHtml) {
 
                 // Verify: page must contain our exact IMDb ID (show_imdb var, IMDb link, or raw text)
                 const imdbVarMatch = candidateHtml.match(/show_imdb\s*=\s*'([^']+)'/i);
@@ -538,13 +551,20 @@ function getStreams(id, type, season, episode, providerContext = null) {
           params.append("subaction", "search");
           params.append("story", searchTitle);
           const searchUrl = `${getGuardaserieBaseUrl()}/index.php?${params.toString()}`;
-          const searchResponse = yield fetch(searchUrl, {
-            headers: {
-              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-              "Referer": getGuardaserieBaseUrl()
+          let searchHtml2 = yield cache.get(`page:gserie:${searchUrl}`);
+          if (!searchHtml2) {
+            const searchResponse = yield fetch(searchUrl, {
+              headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Referer": getGuardaserieBaseUrl()
+              }
+            });
+            if (searchResponse.ok) {
+              searchHtml2 = yield searchResponse.text();
+              if (searchHtml2) cache.set(`page:gserie:${searchUrl}`, searchHtml2, cache.TTL.MEDIUM);
             }
-          });
-          const searchHtml = yield searchResponse.text();
+          }
+          const searchHtml = searchHtml2 || '';
           let match;
           while ((match = resultRegex.exec(searchHtml)) !== null) {
             const foundUrl = match[1];
@@ -584,14 +604,18 @@ function getStreams(id, type, season, episode, providerContext = null) {
           if (matchesYear) {
             console.log(`[Guardaserie] Verifying candidate: ${candidate.title} (${candidate.year})`);
             try {
-              const candidateRes = yield fetch(candidate.url, {
-                headers: {
-                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                  "Referer": getGuardaserieBaseUrl()
-                }
-              });
-              if (!candidateRes.ok) continue;
-              const candidateHtml = yield candidateRes.text();
+              let candidateHtml = yield cache.get(`page:gserie:${candidate.url}`);
+              if (!candidateHtml) {
+                const candidateRes = yield fetch(candidate.url, {
+                  headers: {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Referer": getGuardaserieBaseUrl()
+                  }
+                });
+                if (!candidateRes.ok) continue;
+                candidateHtml = yield candidateRes.text();
+                if (candidateHtml) cache.set(`page:gserie:${candidate.url}`, candidateHtml, cache.TTL.MEDIUM);
+              }
               let verifiedByLinks = false;
               let verifiedByVars = false;
               let imdbVarVal = null;

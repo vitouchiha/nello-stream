@@ -12,13 +12,25 @@ const { checkQualityFromText } = require('../quality_helper.js');
 const { getProxyAgent } = require('../utils/fetcher.js');
 const axios = require('axios');
 const { TMDB_API_KEY } = require('../utils/config');
+const cache = require('../cache/cache_manager');
 const USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
 
 /**
  * Fetch via axios with optional proxy agent (PROXY_URL env).
  * Returns an object with { ok, status, text(), json() } mimicking fetch Response.
+ * Includes page-level caching (L1 + L2).
  */
 async function proxyFetch(url, opts = {}) {
+  // Page cache for GET requests
+  const isGet = !opts.method || opts.method === 'GET';
+  const pageCacheKey = isGet ? `page:sc:${url}` : null;
+  if (pageCacheKey) {
+    const cachedBody = await cache.get(pageCacheKey);
+    if (cachedBody && typeof cachedBody === 'string') {
+      return { ok: true, status: 200, text: async () => cachedBody, json: async () => JSON.parse(cachedBody) };
+    }
+  }
+
   const agent = getProxyAgent();
   const axiosOpts = {
     url,
@@ -30,8 +42,15 @@ async function proxyFetch(url, opts = {}) {
     ...(agent ? { httpsAgent: agent, httpAgent: agent, proxy: false } : {}),
   };
   const resp = await axios(axiosOpts);
+  const ok = resp.status >= 200 && resp.status < 300;
+
+  // Cache successful GET responses
+  if (ok && pageCacheKey && typeof resp.data === 'string' && resp.data.length > 100) {
+    cache.set(pageCacheKey, resp.data, cache.TTL.MEDIUM);
+  }
+
   return {
-    ok: resp.status >= 200 && resp.status < 300,
+    ok,
     status: resp.status,
     text: async () => resp.data,
     json: async () => (typeof resp.data === 'string' ? JSON.parse(resp.data) : resp.data),

@@ -18,6 +18,7 @@ const { formatStream } = require('../formatter.js');
 const { fetchWithCloudscraper } = require('../utils/fetcher.js');
 const { TMDB_API_KEY } = require('../utils/config');
 const { getProxyWorker, getPrimaryWorker } = require('../utils/cfWorkerPool');
+const cache = require('../cache/cache_manager');
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
 
 function getEsBaseUrl() {
@@ -36,6 +37,21 @@ function getEsBaseUrl() {
 async function _esFetch(url, opts = {}) {
   const timeout = opts.timeout || 10000;
 
+  // ── Page cache (L1 + L2) ────────────────────────────────────────────
+  const pageCacheKey = `page:es:${url}`;
+  const cachedBody = await cache.get(pageCacheKey);
+  if (cachedBody && typeof cachedBody === 'string') {
+    return { ok: true, status: 200, url, text: async () => cachedBody, json: async () => JSON.parse(cachedBody) };
+  }
+
+  // Helper: cache successful body and return response
+  const _wrapOk = (body) => {
+    if (body && body.length > 100 && !body.includes('Just a moment')) {
+      cache.set(pageCacheKey, body, cache.TTL.MEDIUM);
+    }
+    return { ok: true, status: 200, url, text: async () => body, json: async () => JSON.parse(body) };
+  };
+
   // 1. Try CF Worker first (fastest and most reliable on Vercel)
   const w = getProxyWorker();
   if (w) {
@@ -47,11 +63,7 @@ async function _esFetch(url, opts = {}) {
       const resp = await fetch(workerUrl.toString(), { headers, signal: AbortSignal.timeout(timeout) });
       const body = await resp.text();
       if (resp.ok && !body.includes('Just a moment')) {
-        return {
-          ok: true, status: resp.status, url: url,
-          text: async () => body,
-          json: async () => JSON.parse(body),
-        };
+        return _wrapOk(body);
       }
     } catch (e) {
       console.log(`[Eurostreaming] CF Worker fetch failed: ${e.message}`);
@@ -66,11 +78,7 @@ async function _esFetch(url, opts = {}) {
       referer: getEsBaseUrl() + '/',
     });
     if (body && !body.includes('Just a moment')) {
-      return {
-        ok: true, status: 200, url: url,
-        text: async () => body,
-        json: async () => JSON.parse(body),
-      };
+      return _wrapOk(body);
     }
   } catch (e) {
     console.log(`[Eurostreaming] cloudscraper failed: ${e.message}`);
@@ -86,11 +94,7 @@ async function _esFetch(url, opts = {}) {
     if (!resp.ok) return null;
     const body = await resp.text();
     if (body.includes('Just a moment')) return null;
-    return {
-      ok: true, status: resp.status, url: resp.url,
-      text: async () => body,
-      json: async () => JSON.parse(body),
-    };
+    return _wrapOk(body);
   } catch {
     return null;
   }

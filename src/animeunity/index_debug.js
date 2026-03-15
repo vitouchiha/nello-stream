@@ -6,10 +6,6 @@ const { formatStream } = require("../formatter.js");
 const { checkQualityFromPlaylist } = require("../quality_helper.js");
 const { getProviderUrl } = require("../provider_urls.js");
 const { createTimeoutSignal } = require("../fetch_helper.js");
-const { fetchWithCloudscraper } = require("../utils/fetcher.js");
-const { getProxyWorker } = require("../utils/cfWorkerPool");
-const mapping = require("../mapping/index");
-const cache = require("../cache/cache_manager");
 
 function getUnityBaseUrl() {
   return getProviderUrl("animeunity");
@@ -21,7 +17,7 @@ function getMappingApiBase() {
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
 
-const FETCH_TIMEOUT = 8000;
+const FETCH_TIMEOUT = 10000;
 const TTL = {
   http: 5 * 60 * 1000,
   animePage: 15 * 60 * 1000,
@@ -298,12 +294,6 @@ async function fetchResource(url, options = {}) {
   if (ttlMs > 0) {
     const cached = getCached(caches.http, key);
     if (cached !== undefined) return cached;
-    // L2: cache_manager fallback
-    const l2 = await cache.get(`page:au:${key}`);
-    if (l2 !== undefined && l2 !== null) {
-      setCached(caches.http, key, l2, ttlMs);
-      return l2;
-    }
   }
 
   const inflightKey = `http:${key}`;
@@ -311,86 +301,27 @@ async function fetchResource(url, options = {}) {
   if (running) return running;
 
   const task = (async () => {
-    let payload;
-
-    if (method === "GET" && !body) {
-      const referer = headers.referer || getUnityBaseUrl();
-      // Try direct fetch first (fast path, avoids cloudscraper overhead on non-CF-protected pages)
-      let htmlText = null;
-      try {
-        const directResp = await fetchWithTimeout(url, {
-          method: "GET",
-          headers: {
-            "user-agent": USER_AGENT,
-            "accept-language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
-            referer,
-          },
-          redirect: "follow",
-        }, Math.min(timeoutMs, 8000));
-        if (directResp.ok) {
-          const txt = await directResp.text();
-          if (!txt.includes("Just a moment") && !txt.includes("Cloudflare")) {
-            htmlText = txt;
-          }
-        }
-      } catch {
-        // fall through to cloudscraper
-      }
-      if (!htmlText) {
-        htmlText = await fetchWithCloudscraper(url, {
-          retries: 1,
-          timeout: timeoutMs,
-          referer,
-        });
-      }
-      // Fallback: CF Worker proxy for AnimeUnity pages blocked on Vercel
-      if (htmlText === null && url.includes("animeunity")) {
-        try {
-          const w = getProxyWorker();
-          if (w) {
-            const proxyResp = await fetchWithTimeout(
-              `${w.url}?url=${encodeURIComponent(url)}&auth=${encodeURIComponent(w.auth)}`,
-              { method: "GET", headers: { "user-agent": USER_AGENT } },
-              12000
-            );
-            if (proxyResp.ok) {
-              const txt = await proxyResp.text();
-              if (txt && !txt.includes("Just a moment")) htmlText = txt;
-            }
-          }
-        } catch { /* CF Worker fallback also failed */ }
-      }
-      if (htmlText === null) {
-        throw new Error(`HTTP 403/Cloudflare failure for ${url}`);
-      }
-
-      payload = as === "json" ? JSON.parse(htmlText) : htmlText;
-    } else {
-      const response = await fetchWithTimeout(
-        url,
-        {
-          method,
-          headers: {
-            "user-agent": USER_AGENT,
-            "accept-language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
-            ...headers
-          },
-          body,
-          redirect: "follow"
+    const response = await fetchWithTimeout(
+      url,
+      {
+        method,
+        headers: {
+          "user-agent": USER_AGENT,
+          "accept-language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
+          ...headers
         },
-        timeoutMs
-      );
+        body,
+        redirect: "follow"
+      },
+      timeoutMs
+    );
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
-      }
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
+    }
 
-      payload = as === "json" ? await response.json() : await response.text();
-    }
-    if (ttlMs > 0) {
-      setCached(caches.http, key, payload, ttlMs);
-      cache.set(`page:au:${key}`, payload, ttlMs);
-    }
+    const payload = as === "json" ? await response.json() : await response.text();
+    if (ttlMs > 0) setCached(caches.http, key, payload, ttlMs);
     return payload;
   })();
 
@@ -757,8 +688,8 @@ function resolveLookupRequest(id, season, episode, providerContext = null) {
         : null;
 
     if (explicit.provider === "kitsu") {
-      // For Kitsu lookups use season from id if provided, otherwise keep the requested season
-      if (explicitSeason !== null) requestedSeason = explicitSeason;
+      // For Kitsu lookups use season only when explicitly provided in the id.
+      requestedSeason = explicitSeason;
     } else if (explicitSeason !== null) {
       requestedSeason = explicitSeason;
     }
@@ -778,7 +709,7 @@ function resolveLookupRequest(id, season, episode, providerContext = null) {
     return {
       provider: "kitsu",
       externalId: String(contextKitsu),
-      season: requestedSeason,
+      season: null,
       episode: requestedEpisode
     };
   }
@@ -825,21 +756,29 @@ async function fetchMappingPayload(lookup) {
   const cached = getCached(caches.mapping, cacheKey);
   if (cached !== undefined) return cached;
 
+  const params = new URLSearchParams();
+  params.set("ep", String(requestedEpisode));
+  if (Number.isInteger(requestedSeason) && requestedSeason >= 0) {
+    params.set("s", String(requestedSeason));
+  }
+
+  const url = `${getMappingApiBase()}/${provider}/${encodeURIComponent(externalId)}?${params.toString()}`;
   try {
-    const options = { episode: requestedEpisode };
-    if (Number.isInteger(requestedSeason) && requestedSeason >= 0) {
-      options.season = requestedSeason;
-    }
-    const payload = await mapping.resolve(provider, externalId, options);
+    const payload = await fetchResource(url, {
+      as: "json",
+      ttlMs: TTL.mapping,
+      cacheKey,
+      timeoutMs: FETCH_TIMEOUT
+    });
     setCached(caches.mapping, cacheKey, payload, TTL.mapping);
     return payload;
   } catch (error) {
-    console.error("[AnimeUnity] internal mapping error:", error.message);
+    console.error("[AnimeUnity] mapping request failed:", error.message);
     return null;
   }
 }
 
-function extractAnimeUnityPaths(mappingPayload) {
+function extractAnimeUnityPaths(mappingPayload) { console.log('MAPPING PAYLOAD:', mappingPayload);
   if (!mappingPayload || typeof mappingPayload !== "object") return [];
   const raw = mappingPayload?.mappings?.animeunity;
   const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
@@ -962,7 +901,6 @@ async function extractStreamsFromAnimePath(animePath, requestedEpisode) {
   if (directUrl && /^https?:\/\//i.test(directUrl)) {
     const lowerLink = directUrl.toLowerCase();
     const isBlocked =
-      lowerLink.endsWith(".mkv") ||
       lowerLink.endsWith(".mkv.mp4") ||
       blockedDomains.some((domain) => lowerLink.includes(domain));
 
@@ -1007,7 +945,7 @@ async function extractStreamsFromAnimePath(animePath, requestedEpisode) {
       });
       const embedUrl = toAbsoluteUrl(String(embedPayload || "").trim());
       if (embedUrl && /^https?:\/\//i.test(embedUrl)) {
-        const vixStreams = await extractVixCloud(embedUrl, animeUrl);
+        const vixStreams = await extractVixCloud(embedUrl);
         if (Array.isArray(vixStreams) && vixStreams.length > 0) {
           streams.push(
             ...vixStreams.map((stream) => ({
@@ -1125,9 +1063,8 @@ async function getStreams(id, type, season, episode, providerContext = null) {
     for (const stream of streams) {
       const normalizedUrl = normalizePlayableMediaUrl(stream.url);
       if (!normalizedUrl) continue;
-      const dedupKey = normalizedUrl + '|' + (stream.language || '');
-      if (seen.has(dedupKey)) continue;
-      seen.add(dedupKey);
+      if (seen.has(normalizedUrl)) continue;
+      seen.add(normalizedUrl);
       deduped.push({ ...stream, url: normalizedUrl });
     }
 

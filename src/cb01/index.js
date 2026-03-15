@@ -15,6 +15,7 @@ const { extractUprot, fetchUprotPage } = require('../extractors/uprot');
 const { fetchWithCloudscraper } = require('../utils/fetcher');
 const { formatStream } = require('../formatter.js');
 const { TMDB_API_KEY } = require('../utils/config');
+const cache = require('../cache/cache_manager');
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
 
 function getCb01BaseUrl() {
@@ -219,7 +220,13 @@ async function extractFromResolvedUrl(resolvedUrl, displayTitle, providerContext
 async function extractMovieStreams(pageUrl, providerContext = null) {
   const streams = [];
   try {
-    const html = await fetchWithCloudscraper(pageUrl, { referer: getCb01BaseUrl() + '/' });
+    // Page cache
+    const pageCacheKey = `page:cb01:${pageUrl}`;
+    let html = await cache.get(pageCacheKey);
+    if (!html) {
+      html = await fetchWithCloudscraper(pageUrl, { referer: getCb01BaseUrl() + '/' });
+      if (html && html.length > 100) cache.set(pageCacheKey, html, cache.TTL.MEDIUM);
+    }
     if (!html) return streams;
 
     // Collect all iframen divs with data-src (works for iframen1, iframen2, etc.)

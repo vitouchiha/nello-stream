@@ -23,6 +23,7 @@ function getGuardaHdBaseUrl() {
   return getProviderUrl("guardahd");
 }
 const { TMDB_API_KEY } = require('../utils/config');
+const cache = require('../cache/cache_manager');
 const USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
 
 const { extractFromUrl } = require('../extractors');
@@ -258,12 +259,18 @@ function getStreams(id, type, season, episode, providerContext = null) {
       let html = '';
       let links = [];
 
-      html = yield fetchWithCloudscraper(primaryUrl, {
-        referer: baseUrl,
-        timeout: 12000,
-        retries: 2,
-        proxyUrl,
-      });
+      // Page-level cache for GuardaHD pages
+      const ghCacheKey = `page:ghd:${primaryUrl}`;
+      html = yield cache.get(ghCacheKey);
+      if (!html) {
+        html = yield fetchWithCloudscraper(primaryUrl, {
+          referer: baseUrl,
+          timeout: 12000,
+          retries: 2,
+          proxyUrl,
+        });
+        if (html && html.length > 100) cache.set(ghCacheKey, html, cache.TTL.MEDIUM);
+      }
       if (html) {
         links = collectLegacyGuardaHdLinks(html);
         log.info('primary page fetched', {
@@ -274,12 +281,17 @@ function getStreams(id, type, season, episode, providerContext = null) {
       }
 
       if (!links.length) {
-        html = yield fetchWithCloudscraper(fallbackMovieUrl, {
-          referer: baseUrl,
-          timeout: 12000,
-          retries: 2,
-          proxyUrl,
-        });
+        const fbCacheKey = `page:ghd:${fallbackMovieUrl}`;
+        html = yield cache.get(fbCacheKey);
+        if (!html) {
+          html = yield fetchWithCloudscraper(fallbackMovieUrl, {
+            referer: baseUrl,
+            timeout: 12000,
+            retries: 2,
+            proxyUrl,
+          });
+          if (html && html.length > 100) cache.set(fbCacheKey, html, cache.TTL.MEDIUM);
+        }
         if (html) {
           links = collectStreamvixMovieLinks(html);
           log.info('fallback page fetched', {
