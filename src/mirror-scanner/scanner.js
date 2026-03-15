@@ -79,6 +79,9 @@ const PROVIDER_TLD_MAP = {
 /** @type {Map<string, { mirrors: string[], lastScanAt: number }>} */
 const _scanResults = new Map();
 
+/** Rotating batch index for scanAll — cycles through providers across invocations */
+let _scanBatchIndex = 0;
+
 // ── Scanner ───────────────────────────────────────────────────────────────────
 
 /**
@@ -200,11 +203,26 @@ async function scanProvider(provider) {
 
 /**
  * Scan all configured providers for mirrors.
+ * @param {object} [opts]
+ * @param {number} [opts.batchSize=3]  Max providers per invocation (for Vercel 60s limit)
  * @returns {Promise<Object>}
  */
-async function scanAll() {
+async function scanAll(opts = {}) {
+  const batchSize = opts.batchSize || 3;
+  const providers = Object.keys(PROVIDER_TLD_MAP);
+
+  // Rotate: pick next batch based on _scanBatchIndex
+  const start = _scanBatchIndex % providers.length;
+  const batch = [];
+  for (let i = 0; i < batchSize && i < providers.length; i++) {
+    batch.push(providers[(start + i) % providers.length]);
+  }
+  _scanBatchIndex = (start + batchSize) % providers.length;
+
+  log.info('mirror-scan batch', { batch, index: start, total: providers.length });
+
   const results = {};
-  for (const provider of Object.keys(PROVIDER_TLD_MAP)) {
+  for (const provider of batch) {
     results[provider] = await scanProvider(provider);
   }
   return results;
