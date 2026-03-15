@@ -7,7 +7,7 @@ const { USER_AGENT } = require('./common');
  * @param {string} referer The referer domain (e.g. guardoserie.horse)
  * @returns {Promise<Array>} Array of stream objects
  */
-async function extractLoadm(playerUrl, referer = 'guardoserie.horse') {
+async function extractLoadm(playerUrl, referer = 'guardoserie.website') {
     try {
         if (!playerUrl.includes('#')) return [];
 
