@@ -509,6 +509,59 @@ app.get([
   }
 });
 
+// EuroStreaming diagnostic endpoint — tests full chain on Vercel
+app.get('/diag/eurostreaming', async (req, res) => {
+  const imdbId = String(req.query.id || 'tt6156584').split(':')[0];
+  const season = Number(req.query.s || req.query.id?.split(':')[1] || 4);
+  const episode = Number(req.query.e || req.query.id?.split(':')[2] || 1);
+  const diag = { imdbId, season, episode, ts: new Date().toISOString(), steps: [] };
+
+  try {
+    // Step 1: Check es-titles-index.json exists
+    const path = require('path');
+    const fs = require('fs');
+    const idxPath = path.resolve(__dirname, 'es-titles-index.json');
+    const idxExists = fs.existsSync(idxPath);
+    diag.steps.push({ step: 'index_file', exists: idxExists, path: idxPath });
+
+    if (idxExists) {
+      const idx = JSON.parse(fs.readFileSync(idxPath, 'utf-8'));
+      diag.steps.push({ step: 'index_loaded', entries: Object.keys(idx).length });
+    }
+
+    // Step 2: Check es-cache dir
+    const cacheDir = path.resolve(__dirname, 'es-cache');
+    const cacheDirExists = fs.existsSync(cacheDir);
+    diag.steps.push({ step: 'cache_dir', exists: cacheDirExists, path: cacheDir });
+    if (cacheDirExists) {
+      const files = fs.readdirSync(cacheDir);
+      diag.steps.push({ step: 'cache_files', count: files.length, sample: files.slice(0, 5) });
+    }
+
+    // Step 3: Check env vars
+    diag.steps.push({
+      step: 'env',
+      TMDB_API_KEY: !!process.env.TMDB_API_KEY,
+      CF_WORKER_URL: !!process.env.CF_WORKER_URL,
+      CF_WORKER_AUTH: !!process.env.CF_WORKER_AUTH,
+    });
+
+    // Step 4: Call EuroStreaming module
+    const es = require('./src/eurostreaming/index');
+    const t0 = Date.now();
+    const ctx = { imdbId, primaryTitle: req.query.title || '', titleCandidates: req.query.title ? [req.query.title] : [] };
+    const streams = await Promise.race([
+      es.getStreams(imdbId, 'series', season, episode, ctx),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout:20s')), 20000)),
+    ]);
+    diag.steps.push({ step: 'getStreams', ms: Date.now() - t0, count: streams.length, streams: streams.map(s => ({ name: s.name, url: (s.url || '').substring(0, 120) })) });
+  } catch (err) {
+    diag.steps.push({ step: 'error', message: err.message, stack: (err.stack || '').split('\n').slice(0, 5) });
+  }
+
+  res.json(diag);
+});
+
 // Uprot diagnostic endpoint — tests the bypass chain from Vercel's IP
 app.get('/diag/uprot', async (req, res) => {
   const uprotUrl = req.query.url || 'https://uprot.net/msf/r4hcq47tarq8';
@@ -940,6 +993,13 @@ app.get('/debug/providers-stream', requireDebugAuth, async (req, res) => {
   };
   const compositeId = type === 'movie' ? imdbId : `${imdbId}:${season}:${episode}`;
 
+  // Pre-resolve title for eurostreaming context (needs primaryTitle)
+  let _esTitle = null;
+  try {
+    const _t = await resolveTitleForDebug();
+    _esTitle = _t?.title || null;
+  } catch {}
+
   const tests = [
     {
       name: 'kisskh',
@@ -984,6 +1044,26 @@ app.get('/debug/providers-stream', requireDebugAuth, async (req, res) => {
     {
       name: 'animesaturn',
       run: async () => (await require('./src/animesaturn').getStreams(imdbId, type, season, episode)) || [],
+    },
+    {
+      name: 'eurostreaming',
+      run: async () => {
+        const es = require('./src/eurostreaming/index');
+        const ctx = { imdbId, primaryTitle: _esTitle || imdbId, titleCandidates: [_esTitle].filter(Boolean) };
+        return (await es.getStreams(imdbId, type, season, episode, ctx)) || [];
+      },
+    },
+    {
+      name: 'cb01',
+      run: async () => (await require('./src/cb01').getStreams(imdbId, type, season, episode)) || [],
+    },
+    {
+      name: 'toonitalia',
+      run: async () => (await require('./src/toonitalia').getStreams(imdbId, type, season, episode)) || [],
+    },
+    {
+      name: 'loonex',
+      run: async () => (await require('./src/loonex').getStreams(imdbId, type, season, episode)) || [],
     },
   ];
 
