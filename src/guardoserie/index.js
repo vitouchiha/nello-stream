@@ -903,7 +903,7 @@ async function getStreams(id, type, season, episode, providerContext = null) {
                             for (const { url: playerLink, label: tabLabel } of players) {
                                 const langTag = tabLabel ? ` [${tabLabel}]` : '';
                                 if (playerLink.includes('loadm')) {
-                                    const domain = 'guardoserie.horse';
+                                    const domain = new URL(getGuardoserieBaseUrl()).hostname;
                                     const extracted = await extractLoadm(playerLink, domain);
                                     for (const st of (extracted || [])) {
                                         let quality = "HD";
@@ -1218,7 +1218,7 @@ async function getStreams(id, type, season, episode, providerContext = null) {
             const langTag = tabLabel ? ` [${tabLabel}]` : '';
 
             if (playerLink.includes('loadm')) {
-                const domain = 'guardoserie.horse';
+                const domain = new URL(getGuardoserieBaseUrl()).hostname;
                 console.log(`[Guardoserie] Extracting Loadm: ${playerLink}`);
                 const extracted = await extractLoadm(playerLink, domain);
                 console.log(`[Guardoserie] Loadm extraction results: ${extracted?.length || 0}`);
