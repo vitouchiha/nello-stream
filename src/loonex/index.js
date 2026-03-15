@@ -111,7 +111,13 @@ async function searchSeries(searchTitle, imdbId, tmdbId) {
         normalizeTitle(title).includes(normalizedSearch) ||
         normalizedSearch.includes(normalizeTitle(title))
       ) {
-        return { title, url: entry.url, normalizedTitle: normalizeTitle(title) };
+        // Rebuild URL using current base domain (survives domain changes)
+        let freshUrl = entry.url;
+        try {
+          const parsed = new URL(entry.url);
+          freshUrl = getBaseUrl() + parsed.pathname + parsed.search;
+        } catch { /* keep original */ }
+        return { title, url: freshUrl, normalizedTitle: normalizeTitle(title) };
       }
     }
     // .gz loaded but no match — still fall through to live to cover updates
