@@ -27,7 +27,7 @@ const log = createLogger('mirror-scan');
 const PROVIDER_TLD_MAP = {
   guardoserie: {
     base: 'guardoserie',
-    tlds: ['digital', 'best', 'horse', 'surf', 'bar', 'blog', 'website', 'online', 'top', 'life', 'site', 'fun', 'space', 'click', 'link', 'uno'],
+    tlds: ['ink', 'digital', 'best', 'horse', 'surf', 'bar', 'blog', 'website', 'online', 'top', 'life', 'site', 'fun', 'space', 'click', 'link', 'uno'],
     fingerprint: '/serie/',  // expected content in valid page
   },
   eurostreaming: {
