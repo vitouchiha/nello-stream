@@ -2,6 +2,7 @@
 
 const zlib = require('zlib');
 const { USER_AGENT, unpackPackedSource } = require('./common');
+const { getProxyWorker } = require('../utils/cfWorkerPool');
 
 const TURBO_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36';
 
@@ -13,15 +14,14 @@ const TURBO_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, lik
  * Returns a Response-compatible object.
  */
 async function _proxyFetch(url, options = {}) {
-  const cfBase = (process.env.CF_WORKER_URL || '').trim();
-  if (!cfBase) return fetch(url, options); // Direct (local dev)
+  const w = getProxyWorker();
+  if (!w) return fetch(url, options); // Direct (local dev)
 
-  const workerUrl = new URL(cfBase.replace(/\/$/, ''));
+  const workerUrl = new URL(w.url);
   workerUrl.searchParams.set('url', url);
 
-  const cfAuth = (process.env.CF_WORKER_AUTH || '').trim();
   const outHeaders = {};
-  if (cfAuth) outHeaders['x-worker-auth'] = cfAuth;
+  if (w.auth) outHeaders['x-worker-auth'] = w.auth;
 
   const isPost = (options.method || 'GET').toUpperCase() === 'POST';
   const isManual = options.redirect === 'manual';

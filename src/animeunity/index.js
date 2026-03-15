@@ -7,6 +7,7 @@ const { checkQualityFromPlaylist } = require("../quality_helper.js");
 const { getProviderUrl } = require("../provider_urls.js");
 const { createTimeoutSignal } = require("../fetch_helper.js");
 const { fetchWithCloudscraper } = require("../utils/fetcher.js");
+const { getProxyWorker } = require("../utils/cfWorkerPool");
 const mapping = require("../mapping/index");
 
 function getUnityBaseUrl() {
@@ -338,16 +339,17 @@ async function fetchResource(url, options = {}) {
       // Fallback: CF Worker proxy for AnimeUnity pages blocked on Vercel
       if (htmlText === null && url.includes("animeunity")) {
         try {
-          const cfWorkerUrl = process.env.CF_WORKER_URL || "https://kisskh-proxy.vitobsfm.workers.dev";
-          const cfAuth = process.env.CF_WORKER_AUTH || '';
-          const proxyResp = await fetchWithTimeout(
-            `${cfWorkerUrl}?url=${encodeURIComponent(url)}&auth=${encodeURIComponent(cfAuth)}`,
-            { method: "GET", headers: { "user-agent": USER_AGENT } },
-            12000
-          );
-          if (proxyResp.ok) {
-            const txt = await proxyResp.text();
-            if (txt && !txt.includes("Just a moment")) htmlText = txt;
+          const w = getProxyWorker();
+          if (w) {
+            const proxyResp = await fetchWithTimeout(
+              `${w.url}?url=${encodeURIComponent(url)}&auth=${encodeURIComponent(w.auth)}`,
+              { method: "GET", headers: { "user-agent": USER_AGENT } },
+              12000
+            );
+            if (proxyResp.ok) {
+              const txt = await proxyResp.text();
+              if (txt && !txt.includes("Just a moment")) htmlText = txt;
+            }
           }
         } catch { /* CF Worker fallback also failed */ }
       }

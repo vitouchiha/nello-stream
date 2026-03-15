@@ -29,7 +29,12 @@ const defaultProviderUrlsFile =
 const PROVIDER_URLS_FILE = defaultProviderUrlsFile;
 const RELOAD_INTERVAL_MS = 1500;
 const PROVIDER_URLS_URL = "https://raw.githubusercontent.com/realbestia1/easystreams/refs/heads/main/provider_urls.json";
-const CF_WORKER_DOMAINS_URL = "https://kisskh-proxy.vitobsfm.workers.dev/?provider_urls=1";
+// Dynamic: derived from CF Worker pool primary worker
+const { getPrimaryWorker } = require('./utils/cfWorkerPool');
+function _getCfWorkerDomainsUrl() {
+  const w = getPrimaryWorker();
+  return w ? `${w.url}/?provider_urls=1` : '';
+}
 const REMOTE_RELOAD_INTERVAL_MS = 10000;
 const CF_WORKER_RELOAD_INTERVAL_MS = 60000; // check CF Worker every 60s
 const REMOTE_FETCH_TIMEOUT_MS = 5000;
@@ -219,7 +224,8 @@ rebuildMergedData();
 
 // ── CF Worker domain resolver fetch ─────────────────────────────────────────
 async function refreshFromCfWorkerIfNeeded(force = false) {
-  if (!CF_WORKER_DOMAINS_URL) return;
+  const cfWorkerDomainsUrl = _getCfWorkerDomainsUrl();
+  if (!cfWorkerDomainsUrl) return;
   if (cfWorkerInFlight) return;
 
   const now = Date.now();
@@ -232,7 +238,7 @@ async function refreshFromCfWorkerIfNeeded(force = false) {
   cfWorkerInFlight = (async () => {
     const timeoutConfig = createTimeoutSignal(REMOTE_FETCH_TIMEOUT_MS);
     try {
-      const response = await fetchImpl(CF_WORKER_DOMAINS_URL, {
+      const response = await fetchImpl(cfWorkerDomainsUrl, {
         signal: timeoutConfig.signal,
         headers: { "accept": "application/json" },
       });

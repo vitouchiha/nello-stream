@@ -19,11 +19,11 @@
 const { extractMaxStream } = require('./maxstream');
 const { decodePngGrayscale, ocrDigitsFromPixels, encodePngGrayscale, preprocessCaptcha } = require('../utils/ocr');
 const { proxyFetch } = require('../utils/proxy');
+const { getPrimaryWorker, broadcastKvWrite } = require('../utils/cfWorkerPool');
 
 const UPROT_INIT_URL = 'https://uprot.net/msf/r4hcq47tarq8';
 const COOKIE_TTL = 22 * 3600 * 1000; // 22h
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36';
-const CF_WORKER_URL = 'https://kisskh-proxy.vitobsfm.workers.dev';
 
 // Alias for the smart proxy fetch (tries multiple proxy IPs on failure)
 const _proxyFetch = proxyFetch;
@@ -46,10 +46,10 @@ function _getPathType(url) {
 async function _loadCookiesFromKv() {
   if (_kvCacheLoaded) return;
   _kvCacheLoaded = true;
-  const auth = process.env.CF_WORKER_AUTH || '';
-  if (!auth) return;
+  const w = getPrimaryWorker();
+  if (!w || !w.auth) return;
   try {
-    const resp = await fetch(`${CF_WORKER_URL}/?uprot_kv=1&auth=${encodeURIComponent(auth)}`, {
+    const resp = await fetch(`${w.url}/?uprot_kv=1&auth=${encodeURIComponent(w.auth)}`, {
       signal: AbortSignal.timeout(8000),
     });
     if (!resp.ok) return;
@@ -73,20 +73,12 @@ async function _loadCookiesFromKv() {
  * Save cookies to CF Worker KV (persists across Vercel cold starts).
  */
 async function _saveCookiesToKv(cookies) {
-  const auth = process.env.CF_WORKER_AUTH || '';
-  if (!auth) return;
-  try {
-    await fetch(`${CF_WORKER_URL}/?uprot_kv=1&auth=${encodeURIComponent(auth)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        cookies: { PHPSESSID: cookies.sessid, captcha: cookies.captchaHash },
-        data: { captcha: cookies.captchaAnswer },
-        t: cookies.ts,
-      }),
-      signal: AbortSignal.timeout(5000),
-    }).catch(() => {});
-  } catch { /* best effort */ }
+  // Broadcast to ALL workers in the pool
+  broadcastKvWrite('uprot_kv', '1', {
+    cookies: { PHPSESSID: cookies.sessid, captcha: cookies.captchaHash },
+    data: { captcha: cookies.captchaAnswer },
+    t: cookies.ts,
+  });
 }
 
 function _headers(referer) {
@@ -162,7 +154,7 @@ async function _ocrCaptcha(b64) {
     }
 
     // OCR each digit individually (sequential to avoid CF Worker AI timeout)
-    const auth = process.env.CF_WORKER_AUTH || '';
+    const ocrWorker = getPrimaryWorker();
     // Build digit images first, then OCR in parallel for speed
     const digitPngs = [];
     for (const [s, e] of digitSegs) {
@@ -190,9 +182,9 @@ async function _ocrCaptcha(b64) {
 
     // OCR all digits in parallel (faster than sequential)
     const digitResults = await Promise.all(digitPngs.map(async (png) => {
-      if (!png) return '?';
+      if (!png || !ocrWorker) return '?';
       try {
-        const resp = await fetch(`${CF_WORKER_URL}/?ocr_digits=1&auth=${auth}`, {
+        const resp = await fetch(`${ocrWorker.url}/?ocr_digits=1&auth=${ocrWorker.auth}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ image: png.toString('base64'), expectedDigits: 1 }),
@@ -215,8 +207,9 @@ async function _ocrCaptcha(b64) {
   try {
     const cleanPixels = preprocessCaptcha(width, height, pixels, threshold);
     const cleanPng = encodePngGrayscale(width, height, cleanPixels);
-    const auth = process.env.CF_WORKER_AUTH || '';
-    const resp = await fetch(`${CF_WORKER_URL}/?ocr_digits=1&auth=${auth}`, {
+    const fw = getPrimaryWorker();
+    if (!fw) return null;
+    const resp = await fetch(`${fw.url}/?ocr_digits=1&auth=${fw.auth}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ image: cleanPng.toString('base64') }),
@@ -548,17 +541,17 @@ async function _extractMseiUprot(url) {
  * Returns { url, headers } or null.
  */
 async function _resolveViaCfWorker(uprotUrl) {
-  const auth = process.env.CF_WORKER_AUTH || '';
-  if (!auth) return null;
+  const w = getPrimaryWorker();
+  if (!w || !w.auth) return null;
   try {
     const params = new URLSearchParams({
       url: uprotUrl,
       uprot: '1',
       extract: '1',
-      auth,
+      auth: w.auth,
     });
     console.log('[Uprot] Delegating to CF Worker:', uprotUrl);
-    const resp = await fetch(`${CF_WORKER_URL}/?${params}`, {
+    const resp = await fetch(`${w.url}/?${params}`, {
       signal: AbortSignal.timeout(18000),
       headers: { 'User-Agent': UA },
     });
