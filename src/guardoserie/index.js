@@ -292,13 +292,16 @@ async function proxyFetch(url, opts = {}) {
             const setCookieHeaders = result.headers.getSetCookie?.() || [];
             for (const c of setCookieHeaders) { try { _cookieJar.setCookieSync(c, url); } catch {} }
             _cfConsecutiveFails = 0; // reset on success
-            // Cache the page body for future requests
-            result.text().then(body => {
-                if (body && body.length > 100 && !body.includes('Just a moment')) {
-                    cache.set(pageCacheKey, body, cache.TTL.MEDIUM);
-                }
-            }).catch(() => {});
-            return result;
+            // Buffer the body once so callers can read .text() without "body already read"
+            const body = await result.text();
+            if (body && body.length > 100 && !body.includes('Just a moment')) {
+                try { cache.set(pageCacheKey, body, cache.TTL.MEDIUM); } catch {}
+            }
+            return {
+                ok: result.ok, status: result.status, statusCode: result.statusCode || result.status,
+                headers: result.headers,
+                text: async () => body, json: async () => JSON.parse(body),
+            };
         }
 
         // All strategies failed — trip circuit breaker after 2 consecutive failures
