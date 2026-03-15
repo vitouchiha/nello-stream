@@ -103,6 +103,8 @@ registerJob('domain-health', async () => {
   const failover = require('../domain-failover/failover');
   const results = await failover.runHealthChecks();
   const report = failover.getHealthReport();
+  // Persist health data to KV after each check
+  await failover.persistToKv();
   return {
     status: 'ok',
     checksRun: Object.keys(results).length,
@@ -273,8 +275,29 @@ function startTimers() {
     log.info(`internal timer started: ${name} every ${Math.round(intervalMs / 60000)}min`);
   }
 
-  // Run domain-health immediately on boot (after 5s delay)
-  setTimeout(() => runJob('domain-health').catch(() => {}), 5000);
+  // Load persisted state from KV, then run domain-health
+  loadStateFromKv()
+    .then(() => runJob('domain-health'))
+    .catch(err => log.warn('boot KV load or health check failed:', err.message));
+}
+
+/**
+ * Load mirrors + health data from CF Worker KV on cold start.
+ * Should run before first health check so we start with known state.
+ */
+async function loadStateFromKv() {
+  const failover = require('../domain-failover/failover');
+  const scanner = require('../mirror-scanner/scanner');
+
+  const t0 = Date.now();
+  const [healthOk, mirrorsOk] = await Promise.all([
+    failover.loadFromKv(),
+    scanner.loadFromKv(),
+  ]);
+  const ms = Date.now() - t0;
+
+  log.info('KV state loaded on boot', { healthOk, mirrorsOk, ms });
+  return { healthOk, mirrorsOk, ms };
 }
 
 // ── Express Route Factory ─────────────────────────────────────────────────────

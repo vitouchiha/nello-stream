@@ -25,6 +25,7 @@
 
 const { createLogger } = require('../utils/logger');
 const sysConfig = require('../config/system');
+const { kvWriteAwait, kvRead } = require('../utils/cfWorkerPool');
 
 const log = createLogger('failover');
 
@@ -322,6 +323,87 @@ async function runHealthChecks() {
   return results;
 }
 
+// ── KV Persistence ────────────────────────────────────────────────────────────
+
+/** Persist health data + alternatives to CF Worker KV (awaitable) */
+async function persistToKv() {
+  try {
+    const data = { health: {}, alternatives: {} };
+
+    for (const [provider, list] of _healthMap) {
+      data.health[provider] = list.map(h => ({
+        url: h.url, status: h.status, consecutiveFails: h.consecutiveFails,
+        totalRequests: h.totalRequests, totalSuccess: h.totalSuccess,
+        avgResponseMs: h.avgResponseMs, lastCheckAt: h.lastCheckAt,
+        downSince: h.downSince, score: h.score, lastError: h.lastError,
+      }));
+    }
+
+    for (const [provider, urls] of _alternatives) {
+      data.alternatives[provider] = urls;
+    }
+
+    const ok = await kvWriteAwait('sfm_state', 'health', data);
+    log.info('persisted health to KV', { providers: Object.keys(data.health).length, writesOk: ok });
+  } catch (e) {
+    log.warn('KV persist health failed', { error: e.message });
+  }
+}
+
+/**
+ * Load health data + alternatives from KV on cold start.
+ * @returns {Promise<boolean>}
+ */
+async function loadFromKv() {
+  try {
+    const data = await kvRead('sfm_state', 'health');
+    if (!data || typeof data !== 'object') return false;
+
+    let loaded = 0;
+
+    // Restore alternatives first
+    if (data.alternatives) {
+      for (const [provider, urls] of Object.entries(data.alternatives)) {
+        if (Array.isArray(urls) && urls.length > 0) {
+          _alternatives.set(provider, urls);
+        }
+      }
+    }
+
+    // Restore health records
+    if (data.health) {
+      for (const [provider, list] of Object.entries(data.health)) {
+        if (!Array.isArray(list)) continue;
+        const restored = [];
+        for (const h of list) {
+          if (!h.url) continue;
+          restored.push({
+            url: h.url, status: h.status || 'up',
+            consecutiveFails: h.consecutiveFails || 0,
+            totalRequests: h.totalRequests || 0,
+            totalSuccess: h.totalSuccess || 0,
+            avgResponseMs: h.avgResponseMs || 0,
+            lastCheckAt: h.lastCheckAt || 0,
+            downSince: h.downSince || 0,
+            score: h.score || 50,
+            lastError: h.lastError || '',
+          });
+        }
+        if (restored.length > 0) {
+          _healthMap.set(provider, restored);
+          loaded++;
+        }
+      }
+    }
+
+    log.info('loaded health from KV', { providers: loaded, alternatives: _alternatives.size });
+    return loaded > 0;
+  } catch (e) {
+    log.warn('KV load health failed', { error: e.message });
+    return false;
+  }
+}
+
 module.exports = {
   registerAlternatives,
   getBestDomain,
@@ -331,4 +413,6 @@ module.exports = {
   getProviderHealth,
   healthCheck,
   runHealthChecks,
+  persistToKv,
+  loadFromKv,
 };

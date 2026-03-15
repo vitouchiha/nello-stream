@@ -184,6 +184,29 @@ export default {
       } catch (e) { return _json({ error: e.message }, 500); }
     }
 
+    // ── SFM state persistence: mirrors, health, scan-index ──────────────
+    // GET  ?sfm_state={key}         → read state from KV  (keys: mirrors, health, scan_index)
+    // POST ?sfm_state={key} + body  → write state to KV   (no TTL — persists forever)
+    if (url.searchParams.get('sfm_state')) {
+      if (!env?.ES_CACHE) return _json({ error: 'KV not available' }, 500);
+      const stateKey = url.searchParams.get('sfm_state');
+      const allowed = ['mirrors', 'health', 'scan_index'];
+      if (!allowed.includes(stateKey)) return _json({ error: `Invalid state key. Allowed: ${allowed.join(', ')}` }, 400);
+      const kvKey = `sfm:${stateKey}`;
+      if (request.method === 'POST') {
+        try {
+          const body = await request.json();
+          await env.ES_CACHE.put(kvKey, JSON.stringify(body));
+          return _json({ ok: true, key: kvKey });
+        } catch (e) { return _json({ error: e.message }, 500); }
+      }
+      try {
+        const data = await env.ES_CACHE.get(kvKey, 'json');
+        if (data) return _json(data);
+        return _json(null, 404);
+      } catch (e) { return _json({ error: e.message }, 500); }
+    }
+
     // ── GuardoSerie warm-up: fetch + cache list of URLs in KV ─────────────
     if (url.searchParams.get('gs_warm') === '1') {
       if (!env?.ES_CACHE) return _json({ error: 'KV not available' }, 500);
