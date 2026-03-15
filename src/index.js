@@ -15,6 +15,7 @@ const { wrapProviderStreamsWithMfp } = require('./utils/mediaflow');
 const mapping = require('./mapping/index');
 
 const { TMDB_API_KEY } = require('./utils/config');
+const cache = require('./cache/cache_manager');
 const CONTEXT_TIMEOUT = 3000;
 
 async function fetchJsonWithTimeout(url, timeoutMs = CONTEXT_TIMEOUT) {
@@ -264,6 +265,17 @@ async function getStreams(id, type, season, episode, config = {}) {
             ? parsedNormalizedSeason
             : null;
     const normalizedEpisode = Number.isInteger(episode) ? episode : (Number.parseInt(episode, 10) || 1);
+
+    // Easystreams result cache (L1 + L2 KV)
+    const esCacheKey = `es:${id}:${normalizedType}:${normalizedSeason}:${normalizedEpisode}`;
+    const cachedStreams = await cache.get(esCacheKey, {
+      kvParam: 'es_cache',
+      kvKey: `${id}:${normalizedType}:${normalizedSeason}:${normalizedEpisode}`,
+    });
+    if (cachedStreams && Array.isArray(cachedStreams) && cachedStreams.length > 0) {
+      return cachedStreams;
+    }
+
     const providerContext = await resolveProviderRequestContext(id, normalizedType, normalizedSeason, normalizedEpisode, false);
     const parsedCanonicalSeason = Number.parseInt(providerContext?.canonicalSeason, 10);
     const effectiveSeason =
@@ -460,6 +472,14 @@ async function getStreams(id, type, season, episode, config = {}) {
         forceFinish();
       });
     });
+
+    // Persist to cache if we have results
+    if (allStreams.length > 0) {
+      cache.set(esCacheKey, allStreams, cache.TTL.STREAM, {
+        kvParam: 'es_cache',
+        kvKey: `${id}:${normalizedType}:${normalizedSeason}:${normalizedEpisode}`,
+      });
+    }
 
     return allStreams;
 }

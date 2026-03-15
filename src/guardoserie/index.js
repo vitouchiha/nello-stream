@@ -7,6 +7,7 @@ const { CookieJar } = require('tough-cookie');
 const { launchBrowser } = require('../utils/browser.js');
 const { getProxyWorker, getPrimaryWorker } = require('../utils/cfWorkerPool');
 const mapping = require('../mapping/index');
+const cache = require('../cache/cache_manager');
 
 function getGuardoserieBaseUrl() {
     return getProviderUrl('guardoserie');
@@ -222,6 +223,17 @@ let _cfConsecutiveFails = 0;
 async function proxyFetch(url, opts = {}) {
     const isGuardoserie = url.includes('guardoserie');
 
+    // ── Page-level cache (L1 + L2 KV) ──────────────────────────────────
+    const pageCacheKey = `page:guardoserie:${url}`;
+    const cachedBody = await cache.get(pageCacheKey);
+    if (cachedBody && typeof cachedBody === 'string') {
+        return {
+            ok: true, status: 200, statusCode: 200,
+            headers: { get: () => null, getSetCookie: () => [] },
+            text: async () => cachedBody, json: async () => JSON.parse(cachedBody),
+        };
+    }
+
     // Circuit-breaker: skip immediately if guardoserie was already CF-blocked
     if (isGuardoserie && _cfBlockedUntil > Date.now()) {
         console.warn(`[Guardoserie] Circuit-breaker: skipping ${url.substring(0, 80)}`);
@@ -279,6 +291,12 @@ async function proxyFetch(url, opts = {}) {
             const setCookieHeaders = result.headers.getSetCookie?.() || [];
             for (const c of setCookieHeaders) { try { _cookieJar.setCookieSync(c, url); } catch {} }
             _cfConsecutiveFails = 0; // reset on success
+            // Cache the page body for future requests
+            result.text().then(body => {
+                if (body && body.length > 100 && !body.includes('Just a moment')) {
+                    cache.set(pageCacheKey, body, cache.TTL.MEDIUM);
+                }
+            }).catch(() => {});
             return result;
         }
 

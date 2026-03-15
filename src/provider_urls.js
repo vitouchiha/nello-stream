@@ -200,7 +200,15 @@ function findFromJson(providerKey) {
 
 function getProviderUrl(providerKey) {
   const fromJson = findFromJson(providerKey);
-  return fromJson || "";
+  if (!fromJson) return "";
+
+  // Route through domain failover: returns primary if healthy, or best alternative
+  try {
+    const failover = require('./domain-failover/failover');
+    return failover.getBestDomain(normalizeKey(providerKey), fromJson) || fromJson;
+  } catch {
+    return fromJson;
+  }
 }
 
 function getProviderUrlsFilePath() {

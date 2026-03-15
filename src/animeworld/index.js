@@ -5,6 +5,7 @@ const { checkQualityFromPlaylist } = require("../quality_helper.js");
 const { getProviderUrl } = require("../provider_urls.js");
 const { createTimeoutSignal } = require("../fetch_helper.js");
 const mapping = require("../mapping/index");
+const cache = require("../cache/cache_manager");
 
 function getWorldBaseUrl() {
   return getProviderUrl("animeworld");
@@ -480,6 +481,12 @@ async function fetchResource(url, options = {}) {
   if (ttlMs > 0) {
     const cached = getCached(caches.http, key);
     if (cached !== undefined) return cached;
+    // L2: cache_manager fallback
+    const l2 = await cache.get(`page:aw:${key}`);
+    if (l2 !== undefined && l2 !== null) {
+      setCached(caches.http, key, l2, ttlMs);
+      return l2;
+    }
   }
 
   const inflightKey = `http:${key}`;
@@ -507,7 +514,10 @@ async function fetchResource(url, options = {}) {
     }
 
     const payload = as === "json" ? await response.json() : await response.text();
-    if (ttlMs > 0) setCached(caches.http, key, payload, ttlMs);
+    if (ttlMs > 0) {
+      setCached(caches.http, key, payload, ttlMs);
+      cache.set(`page:aw:${key}`, payload, ttlMs);
+    }
     return payload;
   })();
 

@@ -11,6 +11,13 @@
   "routes": [
     { "src": "/(.*)", "dest": "api/index.js" }
   ],
+  "crons": [
+    { "path": "/api/cron/domain-health", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/mirror-scan",   "schedule": "0 */6 * * *" },
+    { "path": "/api/cron/worker-health",  "schedule": "*/10 * * * *" },
+    { "path": "/api/cron/cache-stats",    "schedule": "0 * * * *" },
+    { "path": "/api/cron/warm-uprot",     "schedule": "0 */4 * * *" }
+  ],
   "env": {
     "NODE_ENV": "production"
   }

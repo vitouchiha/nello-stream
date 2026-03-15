@@ -5,6 +5,7 @@ const { formatStream } = require("../formatter.js");
 const { fetchWithAxios } = require("../utils/fetcher.js");
 const { extractFromUrl } = require("../extractors/index.js");
 const { TMDB_API_KEY } = require("../utils/config");
+const cache = require("../cache/cache_manager");
 
 function getBaseUrl() {
   return getProviderUrl("toonitalia") || "https://toonitalia.xyz";
@@ -68,7 +69,14 @@ async function getSeriesInfoFromTMDb(imdbId, tmdbId, tmdbApiKey) {
 async function searchContent(query) {
   try {
     const searchQuery = normalizeTitle(query);
-    const html = await fetchWithAxios(`${getSearchUrl()}${encodeURIComponent(searchQuery)}`, { responseType: "text" });
+    const searchUrl = `${getSearchUrl()}${encodeURIComponent(searchQuery)}`;
+    // Page cache for search results
+    const sCacheKey = `page:toon:search:${searchQuery}`;
+    let html = await cache.get(sCacheKey);
+    if (!html) {
+      html = await fetchWithAxios(searchUrl, { responseType: "text" });
+      if (html && html.length > 100) cache.set(sCacheKey, html, cache.TTL.MEDIUM);
+    }
     if (!html) return null;
 
     const $ = cheerio.load(html);
@@ -97,7 +105,13 @@ async function searchContent(query) {
 
 async function extractEpisodes(contentUrl, tmdbSeasonCount, preferredSection) {
     try {
-        const html = await fetchWithAxios(contentUrl, { responseType: "text" });
+        // Page cache for content page
+        const cCacheKey = `page:toon:${contentUrl}`;
+        let html = await cache.get(cCacheKey);
+        if (!html) {
+            html = await fetchWithAxios(contentUrl, { responseType: "text" });
+            if (html && html.length > 100) cache.set(cCacheKey, html, cache.TTL.MEDIUM);
+        }
         if (!html) return [];
         const $ = cheerio.load(html);
         const episodes = [];

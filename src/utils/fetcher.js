@@ -21,6 +21,22 @@ const { createLogger } = require('./logger');
 
 const log = createLogger('fetcher');
 
+// Lazy-load to avoid circular deps
+let _antiban = null;
+function _getAntiban() {
+  if (!_antiban) { try { _antiban = require('./antiban'); } catch { _antiban = null; } }
+  return _antiban;
+}
+let _failover = null;
+function _getFailover() {
+  if (!_failover) { try { _failover = require('../domain-failover/failover'); } catch { _failover = null; } }
+  return _failover;
+}
+
+function _extractHost(url) {
+  try { return new URL(url).hostname; } catch { return ''; }
+}
+
 // ─── Proxy support ────────────────────────────────────────────────────────────
 
 const _agentCache = new Map();
@@ -79,21 +95,26 @@ function randomUA() {
 async function fetchWithCloudscraper(url, { retries = 3, timeout = 12_000, retryDelay = 2_000, referer, proxyUrl, clientIp } = {}) {
   // Per-request proxyUrl overrides env var
   const effectiveProxy = (proxyUrl || process.env.PROXY_URL || '').trim() || null;
+  const antiban = _getAntiban();
+  const failover = _getFailover();
+  const host = _extractHost(url);
+
+  // Use antiban headers if available
+  const antibanHeaders = antiban ? antiban.getRandomHeaders(url) : {};
+
   for (let attempt = 1; attempt <= retries; attempt++) {
+    // Anti-ban throttle (per-host delay)
+    if (antiban) await antiban.throttle(url);
+
+    const startMs = Date.now();
     try {
       log.debug(`Attempt ${attempt}/${retries} — ${url}`);
       const reqOpts = {
         uri: url,
         headers: {
-          'User-Agent': randomUA(),
+          ...antibanHeaders,
           'Referer': referer || url,
-          'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
           ...(clientIp ? { 'X-Forwarded-For': clientIp } : {}),
-          'Upgrade-Insecure-Requests': '1',
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache',
-          'Connection': 'keep-alive',
-          'Accept-Encoding': 'gzip, deflate, br',
         },
         followAllRedirects: true,
         maxRedirects: 3,
@@ -106,15 +127,26 @@ async function fetchWithCloudscraper(url, { retries = 3, timeout = 12_000, retry
 
       if (response.statusCode === 404) {
         log.warn(`404 not found — ${url}`);
+        if (antiban) antiban.release(url);
         return null;
       }
       if (response.statusCode >= 200 && response.statusCode < 300) {
         log.debug(`OK ${response.statusCode} — ${url}`);
+        if (failover && host) failover.recordSuccess(host, url, Date.now() - startMs);
+        if (antiban) { antiban.resetBackoff(url); antiban.release(url); }
         return response.body;
       }
+      // Ban detection (429/403)
+      if (antiban && (response.statusCode === 429 || response.statusCode === 403)) {
+        antiban.handleBanResponse(url, response.statusCode);
+      }
+      if (failover && host) failover.recordFailure(host, url, `HTTP ${response.statusCode}`);
       log.warn(`HTTP ${response.statusCode} — ${url}, retrying`);
+      if (antiban) antiban.release(url);
       await _sleep(retryDelay);
     } catch (err) {
+      if (failover && host) failover.recordFailure(host, url, err.message);
+      if (antiban) antiban.release(url);
       log.warn(`Error attempt ${attempt}/${retries}: ${err.message}`, { url });
       const delay = err.message.toLowerCase().includes('cloudflare') ? 10_000 : retryDelay;
       if (attempt < retries) await _sleep(delay);
@@ -135,8 +167,13 @@ async function fetchWithCloudscraper(url, { retries = 3, timeout = 12_000, retry
  * @returns {Promise<any|null>}
  */
 async function fetchWithAxios(url, { headers = {}, timeout = 10_000, responseType = 'json', retries = 2, proxyUrl, clientIp } = {}) {
+  const antiban = _getAntiban();
+  const failover = _getFailover();
+  const host = _extractHost(url);
+  const antibanHeaders = antiban ? antiban.getRandomHeaders(url) : {};
+
   const mergedHeaders = {
-    'User-Agent': randomUA(),
+    ...antibanHeaders,
     'Accept': 'application/json, text/plain, */*',
     ...(clientIp ? { 'X-Forwarded-For': clientIp } : {}),
     ...headers,
@@ -144,6 +181,8 @@ async function fetchWithAxios(url, { headers = {}, timeout = 10_000, responseTyp
   // Per-request proxyUrl overrides env var
   const proxyAgent = proxyUrl ? makeProxyAgent(proxyUrl) : getProxyAgent();
   for (let attempt = 1; attempt <= retries; attempt++) {
+    if (antiban) await antiban.throttle(url);
+    const startMs = Date.now();
     try {
       const { data } = await axios.get(url, {
         headers: mergedHeaders,
@@ -151,8 +190,16 @@ async function fetchWithAxios(url, { headers = {}, timeout = 10_000, responseTyp
         responseType,
         ...(proxyAgent ? { httpsAgent: proxyAgent, httpAgent: proxyAgent, proxy: false } : {}),
       });
+      if (failover && host) failover.recordSuccess(host, url, Date.now() - startMs);
+      if (antiban) { antiban.resetBackoff(url); antiban.release(url); }
       return data;
     } catch (err) {
+      if (failover && host) failover.recordFailure(host, url, err.message);
+      if (antiban) {
+        const status = err.response?.status;
+        if (status === 429 || status === 403) antiban.handleBanResponse(url, status);
+        antiban.release(url);
+      }
       log.warn(`axios attempt ${attempt}/${retries}: ${err.message}`, { url });
       if (attempt < retries) await _sleep(2_000);
     }

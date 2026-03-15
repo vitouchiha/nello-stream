@@ -5,6 +5,7 @@ const { formatStream } = require("../formatter.js");
 const { fetchWithAxios } = require("../utils/fetcher.js");
 const { getLoonexTitle } = require("../config/loonexTitleMap.js");
 const { TMDB_API_KEY } = require("../utils/config");
+const cache = require("../cache/cache_manager");
 
 function getBaseUrl() {
   return getProviderUrl("loonex") || "https://loonex.eu";
@@ -78,7 +79,13 @@ async function searchSeries(searchTitle, imdbId, tmdbId) {
 
   const normalizedSearch = normalizeTitle(targetTitle);
   const catUrl = getBaseUrl() + "/cartoni/";
-  const html = await fetchWithAxios(catUrl, { responseType: "text" });
+  // Page cache for catalog
+  const catCacheKey = `page:loonex:catalog`;
+  let html = await cache.get(catCacheKey);
+  if (!html) {
+    html = await fetchWithAxios(catUrl, { responseType: "text" });
+    if (html && html.length > 100) cache.set(catCacheKey, html, cache.TTL.MEDIUM);
+  }
   if (!html) return null;
 
   const $ = cheerio.load(html);
@@ -106,7 +113,13 @@ async function searchSeries(searchTitle, imdbId, tmdbId) {
 }
 
 async function getEpisodes(seriesUrl) {
-  const html = await fetchWithAxios(seriesUrl, { responseType: "text" });
+  // Page cache for series page
+  const epCacheKey = `page:loonex:${seriesUrl}`;
+  let html = await cache.get(epCacheKey);
+  if (!html) {
+    html = await fetchWithAxios(seriesUrl, { responseType: "text" });
+    if (html && html.length > 100) cache.set(epCacheKey, html, cache.TTL.MEDIUM);
+  }
   if (!html) return [];
   const $ = cheerio.load(html);
   const episodes = [];
