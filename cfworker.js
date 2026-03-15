@@ -31,11 +31,12 @@
  */
 
 export default {
-  // ── Scheduled cron: auto-refresh Eurostreaming cache + domain updates + uprot ──
+  // ── Scheduled cron: auto-refresh Eurostreaming cache + domain updates + uprot + GuardoSerie ──
   async scheduled(event, env, ctx) {
     ctx.waitUntil(_handleScheduledWarm(env));
     ctx.waitUntil(_handleScheduledDomainUpdate(env));
     ctx.waitUntil(_handleScheduledUprotRefresh(env));
+    ctx.waitUntil(_handleScheduledGsWarm(env));
   },
 
   async fetch(request, env, ctx) {
@@ -79,6 +80,16 @@ export default {
 
     // ── Parse target URL ────────────────────────────────────────────────────
     const targetUrl = url.searchParams.get('url');
+
+    // ── GuardoSerie titles index: serve from KV ──────────────────────────
+    if (url.searchParams.get('gs_titles') === '1') {
+      if (!env?.ES_CACHE) return _json({ error: 'KV not available' }, 500);
+      try {
+        const index = await env.ES_CACHE.get('gs:titles', 'json');
+        if (index) return _json(index);
+        return _json({ error: 'Index not built yet' }, 404);
+      } catch (e) { return _json({ error: e.message }, 500); }
+    }
 
     // ── GuardoSerie warm-up: fetch + cache list of URLs in KV ─────────────
     if (url.searchParams.get('gs_warm') === '1') {
@@ -288,6 +299,7 @@ export default {
       'maxstream.video', 'www.maxstream.video',
       'guardoserie.digital', 'www.guardoserie.digital',
       'guardoserie.best', 'www.guardoserie.best',
+      'guardoserie.website', 'www.guardoserie.website',
       'animeunity.so', 'www.animeunity.so',
     ]);
     if (!ALLOWED_HOSTS.has(parsedTarget.hostname)) {
@@ -399,7 +411,7 @@ export default {
     }
 
     // ── KV cache: domains where responses are cached globally ──────────────
-    const _KV_CACHEABLES = { 'eurostream.ing': 86400, 'eurostreamings.life': 86400, 'clicka.cc': 86400, 'deltabit.co': 3600, 'guardoserie.digital': 86400, 'guardoserie.best': 86400 };
+    const _KV_CACHEABLES = { 'eurostream.ing': 86400, 'eurostreamings.life': 86400, 'clicka.cc': 86400, 'deltabit.co': 3600, 'guardoserie.digital': 86400, 'guardoserie.best': 86400, 'guardoserie.website': 86400 };
     const hostNorm = parsedTarget.hostname.replace(/^www\./, '');
     const kvTtl = _KV_CACHEABLES[hostNorm] || 0;
     const isPost = url.searchParams.get('method') === 'POST';
@@ -731,6 +743,92 @@ async function _handleScheduledWarm(env) {
 
   // More pages remain — save progress (in Cache API, not KV)
   await _putWarmState({ nextPage, titles, lastComplete: 0 });
+}
+
+// ─── GuardoSerie index warm: scrape /serie/ listing pages ────────────────────
+const _GS_WARM_STATE_KEY = new Request('https://gs.internal/warm-state');
+const _GS_PAGES_PER_RUN = 30;
+const _GS_COOLDOWN_MS = 24 * 3600_000;
+
+async function _handleScheduledGsWarm(env) {
+  if (!env?.ES_CACHE) return;
+
+  const cache = caches.default;
+  let state = { nextPage: 1, titles: {}, lastComplete: 0 };
+  try {
+    const cached = await cache.match(_GS_WARM_STATE_KEY);
+    if (cached) state = await cached.json();
+  } catch { /* start fresh */ }
+
+  if (state.lastComplete && Date.now() - state.lastComplete < _GS_COOLDOWN_MS) return;
+
+  const BASE = 'https://guardoserie.website';
+  let { nextPage, titles } = state;
+  if (!titles || typeof titles !== 'object') titles = {};
+
+  for (let i = 0; i < _GS_PAGES_PER_RUN; i++) {
+    let html;
+    try {
+      const r = await fetch(`${BASE}/serie/page/${nextPage}/`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'it-IT,it;q=0.9',
+        },
+        redirect: 'follow',
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!r.ok) break;
+      html = await r.text();
+      if (html.includes('Just a moment')) break;
+    } catch { break; }
+
+    // Extract serie links
+    const regex = /<a[^>]+href="(https?:\/\/[^"]*\/serie\/([^/"]+)\/?)"[^>]*title="([^"]+)"/g;
+    let m, count = 0;
+    while ((m = regex.exec(html)) !== null) {
+      const slug = m[2];
+      const rawTitle = m[3]
+        .replace(/&#\d+;/g, c => String.fromCharCode(parseInt(c.slice(2, -1), 10)))
+        .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+      const key = rawTitle.toLowerCase();
+      if (!titles[key]) titles[key] = [];
+      if (!titles[key].some(e => e.slug === slug)) {
+        titles[key].push({ slug, url: m[1] });
+        count++;
+      }
+      // Also index by slug
+      const slugKey = slug.replace(/-/g, ' ');
+      if (slugKey !== key) {
+        if (!titles[slugKey]) titles[slugKey] = [];
+        if (!titles[slugKey].some(e => e.slug === slug)) titles[slugKey].push({ slug, url: m[1] });
+      }
+    }
+
+    if (count === 0 && Object.keys(titles).length > 0) {
+      // Likely past last page — store and finish
+      try { await env.ES_CACHE.put('gs:titles', JSON.stringify(titles), { expirationTtl: 172800 }); } catch {}
+      const resp = new Response(JSON.stringify({ nextPage: 1, titles: {}, lastComplete: Date.now() }), {
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=172800' },
+      });
+      await cache.put(_GS_WARM_STATE_KEY, resp);
+      return;
+    }
+    nextPage++;
+  }
+
+  // Store titles so far
+  if (Object.keys(titles).length > 0) {
+    try { await env.ES_CACHE.put('gs:titles', JSON.stringify(titles), { expirationTtl: 172800 }); } catch {}
+  }
+
+  // Save progress
+  try {
+    const resp = new Response(JSON.stringify({ nextPage, titles, lastComplete: 0 }), {
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=172800' },
+    });
+    await cache.put(_GS_WARM_STATE_KEY, resp);
+  } catch { /* ignore */ }
 }
 
 /** Format proxy response for all modes (nofollow, wantCookie, passthrough). */
