@@ -2001,6 +2001,8 @@ try {
   // Mount cron job routes (/api/cron/domain-health, /api/cron/mirror-scan, etc.)
   const cronManager = require('./src/cron/cron_manager');
   cronManager.mountRoutes(app);
+  // Start internal timers (Vercel Free only allows 2 crons, rest run via setInterval)
+  cronManager.startTimers();
 } catch (err) {
   log.warn('cron module not loaded: ' + err.message);
 }

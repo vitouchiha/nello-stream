@@ -238,6 +238,45 @@ registerJob('catalog-warm', async () => {
   return { status: 'ok', ...stats };
 });
 
+// ── Internal Timers (Vercel Free: solo 2 cron, il resto gira con setInterval) ─
+
+const _timers = [];
+
+/**
+ * Internal timer schedule — these jobs run via setInterval inside the process.
+ * Vercel crons handle only warm-uprot (daily) and domain-health (daily).
+ * All other jobs run internally at the intervals below.
+ * External services (cron-job.org) can also call the HTTP endpoints as backup.
+ */
+const INTERNAL_SCHEDULE = [
+  { name: 'domain-health',  intervalMs: 10 * 60 * 1000 },   // every 10 min
+  { name: 'worker-health',  intervalMs: 30 * 60 * 1000 },   // every 30 min
+  { name: 'cache-stats',    intervalMs: 3 * 60 * 60 * 1000 }, // every 3 hours
+  { name: 'mirror-scan',    intervalMs: 6 * 60 * 60 * 1000 }, // every 6 hours
+  { name: 'catalog-warm',   intervalMs: 2 * 60 * 60 * 1000 }, // every 2 hours
+];
+
+/**
+ * Start internal timers for jobs not covered by Vercel crons.
+ * Call once from server.js after app is ready.
+ */
+function startTimers() {
+  if (_timers.length > 0) return; // already started
+
+  for (const { name, intervalMs } of INTERNAL_SCHEDULE) {
+    if (!_jobs.has(name)) continue;
+    const id = setInterval(() => {
+      runJob(name).catch(err => log.error(`timer ${name} error:`, err.message));
+    }, intervalMs);
+    id.unref(); // don't prevent process exit
+    _timers.push({ name, id, intervalMs });
+    log.info(`internal timer started: ${name} every ${Math.round(intervalMs / 60000)}min`);
+  }
+
+  // Run domain-health immediately on boot (after 5s delay)
+  setTimeout(() => runJob('domain-health').catch(() => {}), 5000);
+}
+
 // ── Express Route Factory ─────────────────────────────────────────────────────
 
 /**
@@ -285,5 +324,6 @@ module.exports = {
   runJob,
   getStatus,
   mountRoutes,
+  startTimers,
   cronAuth,
 };

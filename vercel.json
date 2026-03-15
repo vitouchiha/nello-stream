@@ -26,12 +26,8 @@
     { "src": "/(.*)", "dest": "api/index.js" }
   ],
   "crons": [
-    { "path": "/api/cron/domain-health",  "schedule": "*/10 * * * *" },
-    { "path": "/api/cron/mirror-scan",    "schedule": "0 */6 * * *" },
-    { "path": "/api/cron/worker-health",  "schedule": "0 */30 * * *" },
-    { "path": "/api/cron/cache-stats",    "schedule": "0 */3 * * *" },
-    { "path": "/api/cron/warm-uprot",     "schedule": "0 */4 * * *" },
-    { "path": "/api/cron/catalog-warm",   "schedule": "0 */2 * * *" }
+    { "path": "/api/cron/warm-uprot",     "schedule": "0 3 * * *" },
+    { "path": "/api/cron/domain-health",  "schedule": "0 6 * * *" }
   ],
   "env": {
     "NODE_ENV": "production"
