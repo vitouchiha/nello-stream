@@ -5,6 +5,7 @@ const { checkQualityFromPlaylist } = require('../quality_helper');
 const { getProviderUrl } = require('../provider_urls.js');
 const { CookieJar } = require('tough-cookie');
 const { launchBrowser } = require('../utils/browser.js');
+const { getProxyWorker, getPrimaryWorker } = require('../utils/cfWorkerPool');
 const mapping = require('../mapping/index');
 
 function getGuardoserieBaseUrl() {
@@ -55,16 +56,15 @@ const BROWSER_HEADERS = {
  * Returns a fetch-like response or null if CF Worker is not configured / fails.
  */
 async function _cfWorkerFetch(url) {
-    const cfBase = (process.env.CF_WORKER_URL || '').trim();
-    if (!cfBase) return null;
-    const cfAuth = (process.env.CF_WORKER_AUTH || '').trim();
+    const w = getProxyWorker();
+    if (!w) return null;
     try {
         // Normalize any guardoserie variant → .digital (canonical KV domain)
         const cfTargetUrl = url.replace(/guardoserie\.[a-z]+/gi, 'guardoserie.digital');
-        const workerUrl = new URL(cfBase.replace(/\/$/, ''));
+        const workerUrl = new URL(w.url);
         workerUrl.searchParams.set('url', cfTargetUrl);
         const headers = { 'Accept': 'text/html, */*' };
-        if (cfAuth) headers['x-worker-auth'] = cfAuth;
+        if (w.auth) headers['x-worker-auth'] = w.auth;
         const resp = await fetch(workerUrl.toString(), { headers, signal: AbortSignal.timeout(8000) });
         const body = await resp.text();
         if (!resp.ok || body.includes('Just a moment')) return null;
@@ -549,14 +549,13 @@ async function _searchViaGsIndex(searchTitles) {
 
     // Fallback to KV if no static file (e.g. on Vercel where file is gitignored)
     if (!index) {
-        const cfBase = (process.env.CF_WORKER_URL || '').trim();
-        if (!cfBase) return [];
+        const w = getPrimaryWorker();
+        if (!w) return [];
         try {
-            const wUrl = new URL(cfBase.replace(/\/$/, ''));
+            const wUrl = new URL(w.url);
             wUrl.searchParams.set('gs_titles', '1');
             const headers = {};
-            const cfAuth = (process.env.CF_WORKER_AUTH || '').trim();
-            if (cfAuth) headers['x-worker-auth'] = cfAuth;
+            if (w.auth) headers['x-worker-auth'] = w.auth;
             const resp = await fetch(wUrl.toString(), { headers, signal: AbortSignal.timeout(5000) });
             if (resp.ok) {
                 index = await resp.json();

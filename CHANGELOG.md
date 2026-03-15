@@ -1,3 +1,30 @@
+## [3.0.62] - 2026-03-15
+
+### Added
+- **CF Worker Pool** — Nuovo modulo `src/utils/cfWorkerPool.js` per distribuire le richieste proxy su più account Cloudflare Workers, evitando i limiti giornalieri (100K req/day free).
+  - `CF_WORKER_URLS` (comma-separated) + `CF_WORKER_AUTHS` per configurare più worker.
+  - `getProxyWorker()` — round-robin per le chiamate proxy (il grosso del traffico).
+  - `getPrimaryWorker()` — sempre il primo worker per letture KV consistenti.
+  - `broadcastKvWrite()` — fire-and-forget POST a TUTTI i worker per replicare dati KV.
+  - Backward compatible: fallback a `CF_WORKER_URL`/`CF_WORKER_AUTH` singolo se `*_URLS` non settato.
+
+### Changed
+- **Tutte le chiamate CF Worker centralizzate** — 10 file di produzione ora usano il pool:
+  - `kisskh.js`: `_kvGet` → primary, `_kvPut` → broadcast, proxy → round-robin
+  - `guardoserie/index.js`: proxy → round-robin, `gs_titles` → primary
+  - `eurostreaming/index.js`: proxy → round-robin, `es_titles`/`es_post_data` → primary
+  - `uprot.js`: KV → primary, OCR → primary, delegation → primary, save → broadcast
+  - `turbovidda.js`: proxy → round-robin
+  - `animeunity/index.js`: proxy → round-robin
+  - `mapping/index.js`: `au_search` → round-robin
+  - `provider_urls.js`: domain resolver → primary (dinamico)
+  - `server.js`: tutti gli endpoint diagnostici → primary
+
+### Security
+- **Rimossi URL CF Worker hardcoded** — Nessun URL worker hardcoded rimasto nel codice. Tutti passano dal pool module.
+
+---
+
 ## [3.0.60] - 2026-03-14
 
 ### Security

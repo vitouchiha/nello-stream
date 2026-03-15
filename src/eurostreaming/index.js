@@ -17,6 +17,7 @@ const { extractTurbovidda, bypassSafego } = require('../extractors/turbovidda');
 const { formatStream } = require('../formatter.js');
 const { fetchWithCloudscraper } = require('../utils/fetcher.js');
 const { TMDB_API_KEY } = require('../utils/config');
+const { getProxyWorker, getPrimaryWorker } = require('../utils/cfWorkerPool');
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
 
 function getEsBaseUrl() {
@@ -36,14 +37,13 @@ async function _esFetch(url, opts = {}) {
   const timeout = opts.timeout || 10000;
 
   // 1. Try CF Worker first (fastest and most reliable on Vercel)
-  const cfBase = (process.env.CF_WORKER_URL || '').trim();
-  if (cfBase) {
+  const w = getProxyWorker();
+  if (w) {
     try {
-      const workerUrl = new URL(cfBase.replace(/\/$/, ''));
+      const workerUrl = new URL(w.url);
       workerUrl.searchParams.set('url', url);
       const headers = { 'User-Agent': UA, 'Accept': opts.accept || 'application/json,text/html,*/*' };
-      const cfAuth = (process.env.CF_WORKER_AUTH || '').trim();
-      if (cfAuth) headers['x-worker-auth'] = cfAuth;
+      if (w.auth) headers['x-worker-auth'] = w.auth;
       const resp = await fetch(workerUrl.toString(), { headers, signal: AbortSignal.timeout(timeout) });
       const body = await resp.text();
       if (resp.ok && !body.includes('Just a moment')) {
@@ -533,15 +533,14 @@ async function _searchViaKvIndex(showname) {
 
   // Fallback to KV if no static file
   if (!index) {
-    const cfBase = (process.env.CF_WORKER_URL || '').trim();
-    if (!cfBase) return null;
+    const w = getPrimaryWorker();
+    if (!w) return null;
 
     try {
-      const wUrl = new URL(cfBase.replace(/\/$/, ''));
+      const wUrl = new URL(w.url);
       wUrl.searchParams.set('es_titles', '1');
       const headers = { 'User-Agent': UA };
-      const cfAuth = (process.env.CF_WORKER_AUTH || '').trim();
-      if (cfAuth) headers['x-worker-auth'] = cfAuth;
+      if (w.auth) headers['x-worker-auth'] = w.auth;
 
       const resp = await fetch(wUrl.toString(), { headers, signal: AbortSignal.timeout(5000) });
       if (!resp.ok) return null;
@@ -570,14 +569,13 @@ async function _searchViaKvIndex(showname) {
 
   // If local index produced no results, also try KV index (catches new posts)
   if (results.length === 0 && _cachedTitlesIndex === index) {
-    const cfBase = (process.env.CF_WORKER_URL || '').trim();
-    if (cfBase) {
+    const w = getPrimaryWorker();
+    if (w) {
       try {
-        const wUrl = new URL(cfBase.replace(/\/$/, ''));
+        const wUrl = new URL(w.url);
         wUrl.searchParams.set('es_titles', '1');
         const headers = { 'User-Agent': UA };
-        const cfAuth = (process.env.CF_WORKER_AUTH || '').trim();
-        if (cfAuth) headers['x-worker-auth'] = cfAuth;
+        if (w.auth) headers['x-worker-auth'] = w.auth;
         const resp = await fetch(wUrl.toString(), { headers, signal: AbortSignal.timeout(5000) });
         if (resp.ok) {
           const kvIndex = await resp.json();
@@ -639,16 +637,15 @@ async function _fetchPostFromKv(postId, pageNum) {
   } catch { /* fall through to Worker */ }
 
   // Fallback: try Worker KV
-  const cfBase = (process.env.CF_WORKER_URL || '').trim();
-  if (!cfBase) return null;
+  const w = getPrimaryWorker();
+  if (!w) return null;
 
   try {
-    const wUrl = new URL(cfBase.replace(/\/$/, ''));
+    const wUrl = new URL(w.url);
     wUrl.searchParams.set('es_post_data', String(postId));
     wUrl.searchParams.set('es_page', String(pageNum));
     const headers = { 'User-Agent': UA };
-    const cfAuth = (process.env.CF_WORKER_AUTH || '').trim();
-    if (cfAuth) headers['x-worker-auth'] = cfAuth;
+    if (w.auth) headers['x-worker-auth'] = w.auth;
 
     const resp = await fetch(wUrl.toString(), { headers, signal: AbortSignal.timeout(5000) });
     if (!resp.ok) return null;

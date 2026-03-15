@@ -28,6 +28,7 @@ const path = require('path');
 const manifest = require('./manifest.json');
 const { decodeConfig, isValidConfig, DEFAULT_CONFIG } = require('./src/utils/config');
 const { getProxyAgent, makeProxyAgent, randomUA } = require('./src/utils/fetcher');
+const { getPrimaryWorker } = require('./src/utils/cfWorkerPool');
 const {
   HLS_PROXY_PATH,
   isLikelyHlsPlaylist,
@@ -544,6 +545,8 @@ app.get('/diag/eurostreaming', async (req, res) => {
       TMDB_API_KEY: !!process.env.TMDB_API_KEY,
       CF_WORKER_URL: !!process.env.CF_WORKER_URL,
       CF_WORKER_AUTH: !!process.env.CF_WORKER_AUTH,
+      CF_WORKER_URLS: !!process.env.CF_WORKER_URLS,
+      CF_POOL_SIZE: require('./src/utils/cfWorkerPool').poolSize(),
     });
 
     // Step 4: Call EuroStreaming module
@@ -590,8 +593,9 @@ app.get('/diag/uprot', async (req, res) => {
       diag.steps.push({ step: 'direct_ip', ip: directIp.ip });
     } catch (e) { diag.steps.push({ step: 'direct_ip', error: e.message }); }
     // Step 1: Check KV cookies
-    const CF_WORKER_URL = process.env.CF_WORKER_URL || 'https://kisskh-proxy.vitobsfm.workers.dev';
-    const auth = process.env.CF_WORKER_AUTH || '';
+    const _pw1 = getPrimaryWorker();
+    const CF_WORKER_URL = _pw1 ? _pw1.url : '';
+    const auth = _pw1 ? _pw1.auth : '';
     let cookies = null;
     try {
       const kvResp = await fetch(`${CF_WORKER_URL}/?uprot_kv=1&auth=${encodeURIComponent(auth)}`, { signal: AbortSignal.timeout(8000) });
@@ -729,8 +733,9 @@ app.get('/api/cron/warm-uprot', async (req, res) => {
     if (provided !== cronSecret) return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  const CF_WORKER_URL = 'https://kisskh-proxy.vitobsfm.workers.dev';
-  const auth = (process.env.CF_WORKER_AUTH || '').trim();
+  const _pw2 = getPrimaryWorker();
+  const CF_WORKER_URL = _pw2 ? _pw2.url : '';
+  const auth = _pw2 ? _pw2.auth : '';
 
   try {
     // Check if KV cookies are still valid
@@ -806,8 +811,9 @@ app.get('/debug/providers', requireDebugAuth, async (req, res) => {
 
 // Temporary diagnostic: test CF Worker + WEBSHARE fetch for guardoserie
 app.get('/debug/cf-guardoserie', requireDebugAuth, async (req, res) => {
-  const cfBase = (process.env.CF_WORKER_URL || '').trim();
-  const cfAuth = (process.env.CF_WORKER_AUTH || '').trim();
+  const _pw3 = getPrimaryWorker();
+  const cfBase = _pw3 ? _pw3.url : '';
+  const cfAuth = _pw3 ? _pw3.auth : '';
   const wsRaw = (process.env.WEBSHARE_PROXIES || '').trim();
   const targetUrl = 'https://guardoserie.best/?s=how+i+met+your+mother';
   const result = {
@@ -878,8 +884,9 @@ app.get('/debug/cf-guardoserie', requireDebugAuth, async (req, res) => {
 });
 
 app.get('/debug/gs-test', requireDebugAuth, async (req, res) => {
-  const cfBase = (process.env.CF_WORKER_URL || '').trim().replace(/\/$/, '');
-  const cfAuth = (process.env.CF_WORKER_AUTH || '').trim();
+  const _pw4 = getPrimaryWorker();
+  const cfBase = _pw4 ? _pw4.url : '';
+  const cfAuth = _pw4 ? _pw4.auth : '';
   const gsUrl = req.query.gs_url || 'https://guardoserie.digital/?s=breaking+bad';
   const workerUrl = `${cfBase}/?gs_test=1&gs_url=${encodeURIComponent(gsUrl)}`;
   try {
@@ -1674,8 +1681,9 @@ app.get('/debug/eurostreaming', requireDebugAuth, async (req, res) => {
   };
 
   // CF Worker helper
-  const cfWorkerUrl = (process.env.CF_WORKER_URL || '').trim();
-  const cfWorkerAuth = (process.env.CF_WORKER_AUTH || '').trim();
+  const _pw5 = getPrimaryWorker();
+  const cfWorkerUrl = _pw5 ? _pw5.url : '';
+  const cfWorkerAuth = _pw5 ? _pw5.auth : '';
   const testViaCF = async (label, targetUrl) => {
     if (!cfWorkerUrl) { out[label] = { error: 'CF_WORKER_URL not set' }; return; }
     const t = Date.now();
@@ -1720,8 +1728,9 @@ app.get('/debug/es-fetch-test', requireDebugAuth, async (req, res) => {
   const out = { testUrl };
 
   // 1. CF Worker path
-  const cfBase = (process.env.CF_WORKER_URL || '').trim();
-  const cfAuth = (process.env.CF_WORKER_AUTH || '').trim();
+  const _pw6 = getPrimaryWorker();
+  const cfBase = _pw6 ? _pw6.url : '';
+  const cfAuth = _pw6 ? _pw6.auth : '';
   if (cfBase) {
     const t = Date.now();
     try {

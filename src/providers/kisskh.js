@@ -24,6 +24,7 @@ const { wrapStreamUrl } = require('../utils/mediaflow');
 const { enrichFromTmdb, rpdbPosterUrl, topPosterUrl } = require('../utils/tmdb');
 const { flareSolverrGetJSONWithPrimer, createSession, destroySession, sessionGet, getFlareSolverrUrl } = require('../utils/flaresolverr');
 const { createLogger } = require('../utils/logger');
+const { getProxyWorker, getPrimaryWorker, broadcastKvWrite } = require('../utils/cfWorkerPool');
 
 const log = createLogger('kisskh');
 
@@ -45,14 +46,13 @@ const subCache     = new TTLCache({ ttl: 24 * 60 * 60_000, maxSize: 500 });
 // ─── KV persistence (survives Vercel cold starts) ─────────────────────────────
 
 async function _kvGet(param, key) {
-  const base = (process.env.CF_WORKER_URL || '').trim();
-  if (!base) return null;
+  const w = getPrimaryWorker();
+  if (!w) return null;
   try {
-    const u = new URL(base.replace(/\/$/, ''));
+    const u = new URL(w.url);
     u.searchParams.set(param, key);
     const headers = {};
-    const auth = (process.env.CF_WORKER_AUTH || '').trim();
-    if (auth) headers['x-worker-auth'] = auth;
+    if (w.auth) headers['x-worker-auth'] = w.auth;
     const resp = await axios.get(u.toString(), { headers, timeout: 3000, validateStatus: () => true });
     if (resp.status === 200 && resp.data) return typeof resp.data === 'string' ? JSON.parse(resp.data) : resp.data;
   } catch { /* KV read fail — not critical */ }
@@ -60,15 +60,8 @@ async function _kvGet(param, key) {
 }
 
 function _kvPut(param, key, data) {
-  const base = (process.env.CF_WORKER_URL || '').trim();
-  if (!base) return;
-  const u = new URL(base.replace(/\/$/, ''));
-  u.searchParams.set(param, key);
-  const headers = { 'Content-Type': 'application/json' };
-  const auth = (process.env.CF_WORKER_AUTH || '').trim();
-  if (auth) headers['x-worker-auth'] = auth;
-  // Fire-and-forget — don't block the response
-  axios.post(u.toString(), data, { headers, timeout: 5000 }).catch(() => {});
+  // Broadcast KV write to ALL workers in the pool
+  broadcastKvWrite(param, key, data);
 }
 
 // ─── Shared axios headers ─────────────────────────────────────────────────────
@@ -114,18 +107,18 @@ async function _headers(clientIp) {
  * @returns {Promise<any|null>}
  */
 function getCfWorkerUrl() {
-  return (process.env.CF_WORKER_URL || '').trim() || null;
+  const w = getProxyWorker();
+  return w ? w.url : null;
 }
 
 async function _cfWorkerGet(targetUrl, timeout = 8_000, extraParams = {}) {
-  const base = getCfWorkerUrl();
-  if (!base) return null;
-  const workerUrl = new URL(base.replace(/\/$/, ''));
+  const w = getProxyWorker();
+  if (!w) return null;
+  const workerUrl = new URL(w.url);
   workerUrl.searchParams.set('url', targetUrl);
   for (const [k, v] of Object.entries(extraParams)) workerUrl.searchParams.set(k, v);
   const headers = {};
-  const auth = (process.env.CF_WORKER_AUTH || '').trim();
-  if (auth) headers['x-worker-auth'] = auth;
+  if (w.auth) headers['x-worker-auth'] = w.auth;
   try {
     const resp = await axios.get(workerUrl.toString(), {
       headers,

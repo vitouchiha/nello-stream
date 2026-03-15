@@ -13,6 +13,7 @@
 
 const { createTimeoutSignal } = require("../fetch_helper.js");
 const { getProviderUrl } = require("../provider_urls.js");
+const { getProxyWorker } = require("../utils/cfWorkerPool");
 const cloudscraper = require("cloudscraper");
 const animeList = require("./anime_list.js");
 
@@ -638,28 +639,29 @@ async function searchAnimeUnity(titles, anilistId) {
       // Fallback: CF Worker proxy (handles session+CSRF internally)
       if (!records) {
         try {
-          const cfWorkerUrl = process.env.CF_WORKER_URL || "https://kisskh-proxy.vitobsfm.workers.dev";
-          const cfAuth = process.env.CF_WORKER_AUTH || '';
-          const params = new URLSearchParams({
-            url: `${base}/archivio/get-animes`,
-            au_search: "1",
-            title,
-            auth: cfAuth,
-          });
-          if (anilistId) params.set("anilist_id", String(anilistId));
-          const tc2 = createTimeoutSignal(15000);
-          const workerResp = await fetch(`${cfWorkerUrl}?${params}`, {
-            signal: tc2.signal,
-            headers: { "User-Agent": UA },
-          });
-          if (typeof tc2.cleanup === "function") tc2.cleanup();
-          if (workerResp.ok) {
-            const workerData = await workerResp.json();
-            if (Array.isArray(workerData.paths) && workerData.paths.length > 0) {
-              console.log("[Mapping] AnimeUnity: CF Worker found", workerData.paths.length, "paths for", title);
-              cacheSet(key, workerData.paths);
-              workerData.paths.forEach(p => allPaths.add(p));
-              continue;
+          const w = getProxyWorker();
+          if (w) {
+            const params = new URLSearchParams({
+              url: `${base}/archivio/get-animes`,
+              au_search: "1",
+              title,
+              auth: w.auth,
+            });
+            if (anilistId) params.set("anilist_id", String(anilistId));
+            const tc2 = createTimeoutSignal(15000);
+            const workerResp = await fetch(`${w.url}?${params}`, {
+              signal: tc2.signal,
+              headers: { "User-Agent": UA },
+            });
+            if (typeof tc2.cleanup === "function") tc2.cleanup();
+            if (workerResp.ok) {
+              const workerData = await workerResp.json();
+              if (Array.isArray(workerData.paths) && workerData.paths.length > 0) {
+                console.log("[Mapping] AnimeUnity: CF Worker found", workerData.paths.length, "paths for", title);
+                cacheSet(key, workerData.paths);
+                workerData.paths.forEach(p => allPaths.add(p));
+                continue;
+              }
             }
           }
         } catch (cfErr) {
