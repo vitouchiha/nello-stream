@@ -413,7 +413,11 @@ async function scrapingLinks(atag, language, siteName, providerContext = null) {
     }
   }
 
-  await Promise.allSettled(jobs);
+  // Wait for all jobs but cap at 15s — return whatever streams were collected
+  await Promise.race([
+    Promise.allSettled(jobs),
+    new Promise(resolve => setTimeout(resolve, 15000)),
+  ]);
   return streams;
 }
 
