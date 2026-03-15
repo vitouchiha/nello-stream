@@ -1,9 +1,11 @@
 /**
- * warm-gs-cache.js — Build the GuardoSerie titles index.
+ * warm-gs-cache.js — Build the GuardoSerie titles index + .gz page cache.
  *
  * Scrapes ALL /serie/page/N/ listing pages from guardoserie.website,
  * extracting { title, slug, url } for each series.
- * Saves as gs-titles-index.json (title → slug mapping).
+ * Saves:
+ *   - gs-cache/page-{N}.json.gz  (gzipped series entries per page)
+ *   - gs-titles-index.json       (title → [{slug, url}] mapping)
  *
  * Run from local machine (residential Italian IP) — CF blocks cloud IPs.
  *
@@ -12,6 +14,9 @@
 
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
+
+const CACHE_DIR = path.join(__dirname, 'gs-cache');
 
 const BASE = 'https://guardoserie.website';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -71,8 +76,10 @@ function extractSerieLinks(html) {
 }
 
 async function main() {
-  console.log('🔍 Building GuardoSerie titles index...');
+  console.log('🔍 Building GuardoSerie titles index + .gz cache...');
   console.log(`   Base: ${BASE}`);
+
+  if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
 
   const allSeries = new Map();
   let page = 1;
@@ -93,6 +100,13 @@ async function main() {
         if (!allSeries.has(link.slug)) allSeries.set(link.slug, link);
       }
 
+      // Save page as gzipped JSON
+      if (links.length > 0) {
+        const batchJson = JSON.stringify(links);
+        const batchPath = path.join(CACHE_DIR, `page-${page}.json.gz`);
+        fs.writeFileSync(batchPath, zlib.gzipSync(batchJson));
+      }
+
       console.log(`   Page ${page}: ${links.length} links (${newCount} new) — total: ${allSeries.size}`);
 
       if (newCount === 0) {
@@ -111,6 +125,7 @@ async function main() {
   }
 
   console.log(`\n✅ Scraped ${page - 1} pages, found ${allSeries.size} unique series.`);
+  console.log(`   .gz cache: ${CACHE_DIR}`);
 
   // Build index: lowercase title → { slug, url }
   // Also add slug-as-title for matching  
