@@ -1,4 +1,4 @@
-﻿name = "kisskh-proxy"
+name = "kisskh-proxy"
 main = "cfworker.js"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]

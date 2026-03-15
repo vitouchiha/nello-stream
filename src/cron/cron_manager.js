@@ -175,6 +175,69 @@ registerJob('cache-stats', async () => {
   };
 });
 
+// Warm Uprot Cookies (captcha solve + KV persist)
+registerJob('warm-uprot', async () => {
+  const { getPrimaryWorker } = require('../utils/cfWorkerPool');
+  const w = getPrimaryWorker();
+  if (!w) return { status: 'skip', reason: 'no worker' };
+
+  // Check if KV cookies are still valid
+  try {
+    const headers = {};
+    if (w.auth) headers['x-worker-auth'] = w.auth;
+    const kvResp = await fetch(`${w.url}/?uprot_kv=1&auth=${encodeURIComponent(w.auth || '')}`, {
+      headers, signal: AbortSignal.timeout(8000),
+    });
+    if (kvResp.ok) {
+      const kvData = await kvResp.json();
+      const kvAge = kvData.t ? Math.round((Date.now() - kvData.t) / 60000) : null;
+      if (kvData.cookies?.PHPSESSID && kvAge !== null && kvAge < 18 * 60) {
+        return { status: 'skip', reason: 'cookies still valid', ageMin: kvAge };
+      }
+    }
+  } catch { /* KV check failed, proceed to solve */ }
+
+  // Solve fresh captcha
+  const { extractUprot } = require('../extractors/uprot');
+  const start = Date.now();
+  const result = await extractUprot('https://uprot.net/msf/r4hcq47tarq8');
+  const elapsed = Math.round((Date.now() - start) / 1000);
+
+  if (result && result.url) {
+    return { status: 'ok', elapsed, url: result.url.substring(0, 60) };
+  }
+  throw new Error('captcha solve failed');
+});
+
+// Catalog Warm-up: pre-warm popular catalog pages for all providers
+registerJob('catalog-warm', async () => {
+  const cacheManager = require('../cache/cache_manager');
+  const stats = { providers: 0, cached: 0, errors: 0 };
+
+  // Trigger getCatalog(0) for each provider that has .gz — this loads
+  // the .gz cache into RAM and populates L1/L2 cache layers.
+  const providers = [
+    { name: 'kisskh', mod: () => require('../providers/kisskh') },
+    { name: 'rama', mod: () => require('../providers/rama') },
+  ];
+
+  for (const p of providers) {
+    try {
+      const m = p.mod();
+      if (m.getCatalog) {
+        await m.getCatalog(0, '');
+        stats.providers++;
+        stats.cached++;
+      }
+    } catch (err) {
+      stats.errors++;
+      log.warn(`catalog-warm ${p.name} failed: ${err.message}`);
+    }
+  }
+
+  return { status: 'ok', ...stats };
+});
+
 // ── Express Route Factory ─────────────────────────────────────────────────────
 
 /**
