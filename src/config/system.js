@@ -81,9 +81,9 @@ module.exports = {
     /** Interval between full scans (ms) */
     scanIntervalMs: envInt('MIRROR_SCAN_INTERVAL', 30 * 60_000),
     /** Timeout for each mirror check (ms) */
-    checkTimeoutMs: envInt('MIRROR_CHECK_TIMEOUT', 10_000),
+    checkTimeoutMs: envInt('MIRROR_CHECK_TIMEOUT', 5_000),
     /** Max mirrors to check per provider */
-    maxMirrorsPerProvider: envInt('MIRROR_MAX_PER_PROVIDER', 10),
+    maxMirrorsPerProvider: envInt('MIRROR_MAX_PER_PROVIDER', 3),
   },
 
   // ── Domain Priority Scoring ─────────────────────────────────────────────
