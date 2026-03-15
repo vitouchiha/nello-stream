@@ -810,11 +810,22 @@ async function getStreams(id, type, season, episode, providerContext = null) {
         }
 
         const showInfo = await getShowInfo(tmdbId, type === 'movie' ? 'movie' : 'tv');
-        if (!showInfo) return [];
 
-        const title = showInfo.name || showInfo.original_name || showInfo.title || showInfo.original_title;
-        const originalTitle = showInfo.original_title || showInfo.original_name;
-        const year = (showInfo.first_air_date || showInfo.release_date || '').split('-')[0];
+        // Fallback: if TMDB lookup fails, try using titles from providerContext
+        let title, originalTitle, year;
+        if (showInfo) {
+            title = showInfo.name || showInfo.original_name || showInfo.title || showInfo.original_title;
+            originalTitle = showInfo.original_title || showInfo.original_name;
+            year = (showInfo.first_air_date || showInfo.release_date || '').split('-')[0];
+        } else if (providerContext?.primaryTitle) {
+            title = providerContext.primaryTitle;
+            originalTitle = null;
+            year = '';
+            console.log(`[Guardoserie] TMDB lookup failed, using context title: ${title}`);
+        } else {
+            return [];
+        }
+
         const searchTitles = buildSearchTitleCandidates(providerContext, title, originalTitle);
 
         console.log(`[Guardoserie] Searching for: ${searchTitles.join(' / ')} (${year})`);
@@ -1070,7 +1081,7 @@ async function getStreams(id, type, season, episode, providerContext = null) {
                         }
                     }
 
-                    if (foundYear) {
+                    if (foundYear && year) {
                         const targetYear = parseInt(year);
                         const fYear = parseInt(foundYear);
                         // If exact title match, be very lenient with year (sites often have wrong metadata)
@@ -1080,7 +1091,7 @@ async function getStreams(id, type, season, episode, providerContext = null) {
                             break;
                         }
                     } else {
-                        // If no year found at all, accept if it's an exact title match
+                        // If no year found/available, accept if it's an exact title match
                         if (isExactMatch) {
                             targetUrl = result.url;
                             break;
