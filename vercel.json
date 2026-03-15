@@ -5,18 +5,33 @@
     {
       "src": "api/index.js",
       "use": "@vercel/node",
-      "config": { "maxDuration": 60, "includeFiles": ["es-cache/**", "es-titles-index.json"] }
+      "config": {
+        "maxDuration": 60,
+        "includeFiles": [
+          "es-cache/**",
+          "es-titles-index.json",
+          "gs-cache/**",
+          "gs-titles-index.json",
+          "kk-cache/**",
+          "kk-titles-index.json",
+          "rama-cache/**",
+          "rama-titles-index.json",
+          "loonex-cache/**",
+          "loonex-titles-index.json"
+        ]
+      }
     }
   ],
   "routes": [
     { "src": "/(.*)", "dest": "api/index.js" }
   ],
   "crons": [
-    { "path": "/api/cron/domain-health", "schedule": "*/5 * * * *" },
-    { "path": "/api/cron/mirror-scan",   "schedule": "0 */6 * * *" },
-    { "path": "/api/cron/worker-health",  "schedule": "*/10 * * * *" },
-    { "path": "/api/cron/cache-stats",    "schedule": "0 * * * *" },
-    { "path": "/api/cron/warm-uprot",     "schedule": "0 */4 * * *" }
+    { "path": "/api/cron/domain-health",  "schedule": "*/10 * * * *" },
+    { "path": "/api/cron/mirror-scan",    "schedule": "0 */6 * * *" },
+    { "path": "/api/cron/worker-health",  "schedule": "0 */30 * * *" },
+    { "path": "/api/cron/cache-stats",    "schedule": "0 */3 * * *" },
+    { "path": "/api/cron/warm-uprot",     "schedule": "0 */4 * * *" },
+    { "path": "/api/cron/catalog-warm",   "schedule": "0 */2 * * *" }
   ],
   "env": {
     "NODE_ENV": "production"
