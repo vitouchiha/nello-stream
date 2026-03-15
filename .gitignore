@@ -32,6 +32,7 @@ Thumbs.db
 !proxies.json
 !provider_urls.json
 !es-titles-index.json
+!gs-titles-index.json
 !src/**/*.json
 
 # Test/debug scripts
