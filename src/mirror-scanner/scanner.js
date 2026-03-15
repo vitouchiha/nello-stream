@@ -18,6 +18,7 @@
 const { createLogger } = require('../utils/logger');
 const sysConfig = require('../config/system');
 const failover = require('../domain-failover/failover');
+const { kvWriteAwait, kvRead } = require('../utils/cfWorkerPool');
 
 const log = createLogger('mirror-scan');
 
@@ -225,6 +226,10 @@ async function scanAll(opts = {}) {
   for (const provider of batch) {
     results[provider] = await scanProvider(provider);
   }
+
+  // Persist all scan results + batch index to KV
+  await _persistToKv();
+
   return results;
 }
 
@@ -253,10 +258,70 @@ function getAllScanResults() {
   return out;
 }
 
+// ── KV Persistence ────────────────────────────────────────────────────────────
+
+/** Persist current mirrors + batch index to CF Worker KV (awaitable) */
+async function _persistToKv() {
+  try {
+    const data = {};
+    for (const [provider, entry] of _scanResults) {
+      data[provider] = { mirrors: entry.mirrors, lastScanAt: entry.lastScanAt };
+    }
+    const [ok1, ok2] = await Promise.all([
+      kvWriteAwait('sfm_state', 'mirrors', data),
+      kvWriteAwait('sfm_state', 'scan_index', { index: _scanBatchIndex }),
+    ]);
+    log.info('persisted mirrors to KV', { providers: Object.keys(data).length, writesOk: ok1 + ok2 });
+  } catch (e) {
+    log.warn('KV persist mirrors failed', { error: e.message });
+  }
+}
+
+/**
+ * Load mirrors + batch index from KV on cold start.
+ * Also re-registers mirrors with the failover system.
+ * @returns {Promise<boolean>}
+ */
+async function loadFromKv() {
+  try {
+    const [mirrorsData, indexData] = await Promise.all([
+      kvRead('sfm_state', 'mirrors'),
+      kvRead('sfm_state', 'scan_index'),
+    ]);
+
+    let loaded = 0;
+    if (mirrorsData && typeof mirrorsData === 'object') {
+      for (const [provider, entry] of Object.entries(mirrorsData)) {
+        if (entry && Array.isArray(entry.mirrors)) {
+          _scanResults.set(provider, {
+            mirrors: entry.mirrors,
+            lastScanAt: entry.lastScanAt || 0,
+          });
+          if (entry.mirrors.length > 0) {
+            failover.registerAlternatives(provider, entry.mirrors);
+          }
+          loaded++;
+        }
+      }
+    }
+
+    if (indexData && typeof indexData.index === 'number') {
+      _scanBatchIndex = indexData.index;
+    }
+
+    log.info('loaded mirrors from KV', { providers: loaded, batchIndex: _scanBatchIndex });
+    return loaded > 0;
+  } catch (e) {
+    log.warn('KV load mirrors failed', { error: e.message });
+    return false;
+  }
+}
+
 module.exports = {
   scanProvider,
   scanAll,
   getScanResults,
   getAllScanResults,
+  loadFromKv,
   PROVIDER_TLD_MAP,
 };

@@ -156,6 +156,33 @@ function broadcastKvWrite(param, key, data) {
   }
 }
 
+/**
+ * Awaitable KV write to ALL workers — waits for all to respond.
+ * Use in cron jobs where Vercel may kill background tasks.
+ * @param {string} param  Query param name
+ * @param {string} key    Param value
+ * @param {*} data        JSON-serializable body
+ * @returns {Promise<number>}  Count of successful writes
+ */
+async function kvWriteAwait(param, key, data) {
+  _init();
+  const body = JSON.stringify(data);
+  const promises = _workers.map(w => {
+    try {
+      const u = new URL(w.url);
+      u.searchParams.set(param, key);
+      const headers = { 'Content-Type': 'application/json' };
+      if (w.auth) headers['x-worker-auth'] = w.auth;
+      return fetch(u.toString(), {
+        method: 'POST', headers, body,
+        signal: AbortSignal.timeout(8000),
+      }).then(r => r.ok ? 1 : 0).catch(() => 0);
+    } catch { return Promise.resolve(0); }
+  });
+  const results = await Promise.all(promises);
+  return results.reduce((a, b) => a + b, 0);
+}
+
 /** Number of workers in the pool */
 function poolSize() {
   _init();
@@ -218,11 +245,36 @@ function _resetPool() {
   _workerHealth.clear();
 }
 
+/**
+ * Read a key from CF Worker KV via the primary worker.
+ * @param {string} param  Query param name (e.g. 'sfm_state')
+ * @param {string} key    Param value (e.g. 'mirrors')
+ * @returns {Promise<any|null>}  Parsed JSON or null on failure/404
+ */
+async function kvRead(param, key) {
+  const w = getPrimaryWorker();
+  if (!w) return null;
+  try {
+    const u = new URL(w.url);
+    u.searchParams.set(param, key);
+    const headers = {};
+    if (w.auth) headers['x-worker-auth'] = w.auth;
+    const resp = await fetch(u.toString(), {
+      headers,
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch { return null; }
+}
+
 module.exports = {
   getProxyWorker,
   getPrimaryWorker,
   getAllWorkers,
   broadcastKvWrite,
+  kvWriteAwait,
+  kvRead,
   poolSize,
   recordWorkerSuccess,
   recordWorkerFailure,
