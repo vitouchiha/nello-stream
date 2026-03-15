@@ -250,7 +250,7 @@ async function proxyFetch(url, opts = {}) {
     if (isGuardoserie) {
         // Race ALL strategies in parallel for maximum speed
         const racers = [];
-        const hasCfWorker = !!(process.env.CF_WORKER_URL || '').trim();
+        const hasCfWorker = !!((process.env.CF_WORKER_URL || process.env.CF_WORKER_URLS || '').trim());
         const hasWebshare = !!(process.env.WEBSHARE_PROXIES || '').trim();
         const hasBrowserless = !!(process.env.BROWSERLESS_URL || '').trim();
 
