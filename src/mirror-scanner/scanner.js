@@ -208,7 +208,7 @@ async function scanProvider(provider) {
  * @returns {Promise<Object>}
  */
 async function scanAll(opts = {}) {
-  const batchSize = opts.batchSize || 3;
+  const batchSize = opts.batchSize || 2;
   const providers = Object.keys(PROVIDER_TLD_MAP);
 
   // Rotate: pick next batch based on _scanBatchIndex
