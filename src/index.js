@@ -305,6 +305,7 @@ async function getStreams(id, type, season, episode, config = {}) {
         /^tt\d+$/i.test(String(id || '').trim());
     const selectedProviders = [];
     if (id === 'tt40197357') console.log(`[DEBUG tt40197357] type=${normalizedType}, likelyAnime=${likelyAnime}, isKitsuRequest=${isKitsuRequest}`);
+    if (id === 'tt0157246') console.log(`[DEBUG tt0157246] type=${normalizedType}, isImdbRequest=${isImdbRequest}, isKitsuRequest=${isKitsuRequest}, likelyAnime=${likelyAnime}`);
     if (normalizedType === 'movie') {
         if (likelyAnime || isKitsuRequest) {
             selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'guardoserie', 'streamingcommunity', 'guardahd');
@@ -326,6 +327,8 @@ async function getStreams(id, type, season, episode, config = {}) {
     } else {
         selectedProviders.push('streamingcommunity', 'guardahd', 'guardoserie', 'toonitalia', 'loonex');
     }
+
+    if (id === 'tt0157246') console.log(`[DEBUG tt0157246] selectedProviders:`, selectedProviders);
 
 // Utility to set timeout per provider so one slow provider doesn't block the rest
       const withProviderTimeout = (providerName, promise, timeoutMs = 12000) => {
@@ -368,6 +371,9 @@ async function getStreams(id, type, season, episode, config = {}) {
       for (const providerName of [...new Set(selectedProviders)]) {
           if (requestedProviders && !requestedProviders.has(providerName)) {
               continue;
+          }
+          if (id === 'tt0157246' && providerName === 'cb01') {
+              console.log(`[DEBUG tt0157246] Processing CB01 provider...`);
           }
           if (providerName === 'streamingcommunity') {
               promises.push(withProviderTimeout('StreamingCommunity', streamingcommunity.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, sharedContext), 8000));
