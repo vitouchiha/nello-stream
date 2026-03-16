@@ -46,6 +46,7 @@ const subCache     = new TTLCache({ ttl: 24 * 60 * 60_000, maxSize: 500 });
 
 // ─── Pre-built .gz catalog cache ──────────────────────────────────────────────
 let _cachedKkTitlesIndex = null;
+let _cachedKkEpisodesIndex = null;
 let _kkCachePages = {};
 
 function _loadKkTitlesIndex() {
@@ -60,6 +61,27 @@ function _loadKkTitlesIndex() {
     }
   } catch { /* not available */ }
   return _cachedKkTitlesIndex;
+}
+
+function _loadKkEpisodesIndex() {
+  if (_cachedKkEpisodesIndex) return _cachedKkEpisodesIndex;
+  try {
+    const path = require('path');
+    const fs = require('fs');
+    const indexPath = path.resolve(__dirname, '..', '..', 'kk-episodes-index.json');
+    if (fs.existsSync(indexPath)) {
+      _cachedKkEpisodesIndex = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+      log.info(`Loaded KK episodes index: ${Object.keys(_cachedKkEpisodesIndex).length} series`);
+    }
+  } catch { /* not available */ }
+  return _cachedKkEpisodesIndex;
+}
+
+/** Get episode metadata from static cache: serieId → {title, episodes} */
+function _getEpisodesFromCache(serieId) {
+  const idx = _loadKkEpisodesIndex();
+  if (!idx) return null;
+  return idx[String(serieId)] || null;
 }
 
 function _loadKkCachePage(pageNum) {
@@ -563,6 +585,37 @@ async function getMeta(id, config = {}) {
   }
 
   const serieId = id.replace(/^kisskh_/, '');
+
+  // ── Static episode cache (built by warm-kk-episodes.js) ────────────
+  const episodeCache = _getEpisodesFromCache(serieId);
+  if (episodeCache && episodeCache.episodes?.length) {
+    log.info('meta from episodes cache', { id, title: episodeCache.title });
+    const fakeDramaData = {
+      title: episodeCache.title,
+      episodes: episodeCache.episodes,
+      thumbnail: '',
+      description: '',
+    };
+    const meta = _buildMeta(id, serieId, fakeDramaData, null);
+    metaCache.set(id, meta);
+    // Still enrich with TMDB in background (poster, cast, etc.)
+    if (config.tmdbKey) {
+      const tmdbTitle = meta.name.replace(/\s*\(\d{4}\)\s*$/, '').trim();
+      enrichFromTmdb(tmdbTitle, meta.releaseInfo || null, config.tmdbKey)
+        .then(tmdb => {
+          if (!tmdb) return;
+          if (tmdb.poster) meta.poster = tmdb.poster;
+          if (tmdb.background) meta.background = tmdb.background;
+          if (!meta.description && tmdb.description) meta.description = tmdb.description;
+          if (!meta.genres?.length && tmdb.genres?.length) meta.genres = tmdb.genres;
+          if (!meta.cast?.length && tmdb.cast?.length) meta.cast = tmdb.cast;
+          if (tmdb.imdbId) meta.imdb_id = tmdb.imdbId;
+          metaCache.set(id, meta);
+        })
+        .catch(() => {});
+    }
+    return { meta };
+  }
 
   // ── KV fallback (survives Vercel cold starts) ─────────────────────────
   const kvMeta = await _kvGet('kk_meta', serieId);
