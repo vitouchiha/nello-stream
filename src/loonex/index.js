@@ -94,6 +94,41 @@ function _loadLoonexCatalog() {
   return null;
 }
 
+// ─── Pre-built episode cache (built by warm-loonex-episodes.js) ──────────────
+let _cachedLoonexEpisodesIndex = null;
+
+function _loadLoonexEpisodesIndex() {
+  if (_cachedLoonexEpisodesIndex) return _cachedLoonexEpisodesIndex;
+  try {
+    const pathMod = require("path");
+    const fs = require("fs");
+    const indexPath = pathMod.resolve(__dirname, "..", "..", "loonex-episodes-index.json");
+    if (fs.existsSync(indexPath)) {
+      _cachedLoonexEpisodesIndex = JSON.parse(fs.readFileSync(indexPath, "utf-8"));
+    }
+  } catch { /* not available */ }
+  return _cachedLoonexEpisodesIndex;
+}
+
+/** Extract slug from loonex series URL for cache lookup */
+function _seriesSlugFromUrl(url) {
+  try {
+    const u = new URL(url);
+    const cartone = u.searchParams.get("cartone");
+    if (cartone) return cartone.replace(/-\d{8,}$/, "");
+    const parts = u.pathname.replace(/\/$/, "").split("/");
+    return parts[parts.length - 1] || null;
+  } catch { return null; }
+}
+
+/** Get m3u8 URL from episode cache: slug + season + episode → m3u8 or null */
+function _getM3u8FromEpisodeCache(slug, season, episode) {
+  const idx = _loadLoonexEpisodesIndex();
+  if (!idx || !slug) return null;
+  const key = `${slug}-${season}x${episode}`;
+  return idx[key] || null;
+}
+
 async function searchSeries(searchTitle, imdbId, tmdbId) {
   let targetTitle = searchTitle;
   const mappedTitle = getLoonexTitle(imdbId, tmdbId);
@@ -282,6 +317,27 @@ async function getStreams(id, type, season, episode, providerContext = null) {
     const serie = await searchSeries(titleToSearch, imdbId, tmdbId);
     if (!serie) return [];
 
+    // ── Episode cache fast-path (built by warm-loonex-episodes.js) ───────
+    const serieSlug = _seriesSlugFromUrl(serie.url);
+    const cachedM3u8 = _getM3u8FromEpisodeCache(serieSlug, effectiveSeason, effectiveEpisode);
+    if (cachedM3u8) {
+      const stream = {
+        name: "Loonex",
+        title: `Loonex - S${effectiveSeason} E${effectiveEpisode}`,
+        type: "direct",
+        url: cachedM3u8,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+          'Origin': 'https://loonex.eu',
+          'Referer': 'https://loonex.eu/',
+        },
+        behaviorHints: { notWebReady: true, bingeGroup: `loonex-${serie.normalizedTitle}` },
+        addonBaseUrl: providerContext?.addonBaseUrl,
+      };
+      return [formatStream(stream, "Loonex")].filter(Boolean);
+    }
+
+    // ── Live fallback: fetch series + episode pages ──────────────────────
     const allEpisodes = await getEpisodes(serie.url);
     if (!allEpisodes.length) return [];
 

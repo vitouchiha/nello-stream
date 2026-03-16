@@ -15,10 +15,12 @@
           "gs-episodes-index.json",
           "kk-cache/**",
           "kk-titles-index.json",
+          "kk-episodes-index.json",
           "rama-cache/**",
           "rama-titles-index.json",
           "loonex-cache/**",
-          "loonex-titles-index.json"
+          "loonex-titles-index.json",
+          "loonex-episodes-index.json"
         ]
       }
     }
