@@ -343,28 +343,30 @@ async function _fetchFromImdbId(rawId, type, config) {
     log.warn(`Cinemeta meta fetch failed: ${err.message}`, { imdbId });
   }
 
-  // Fallback #1: TMDB find endpoint (include year extraction)
-  if (!title) {
-    const tmdbKey = config.tmdbKey || process.env.TMDB_API_KEY || TMDB_API_KEY;
-    if (tmdbKey) {
-      try {
-        const url = `https://api.themoviedb.org/3/find/${encodeURIComponent(imdbId)}?api_key=${tmdbKey}&external_source=imdb_id`;
-        const payload = await axios.get(url, { timeout: 6000 });
-        const isMovie = type === 'movie';
-        const result = isMovie
-          ? (payload.data.movie_results || [])[0] || (payload.data.tv_results || [])[0]
-          : (payload.data.tv_results || [])[0] || (payload.data.movie_results || [])[0];
-        
-        if (result) {
+  // Fallback #1: TMDB find endpoint (always extract year, even if title from Cinemeta)
+  const tmdbKey = config.tmdbKey || process.env.TMDB_API_KEY || TMDB_API_KEY;
+  if (tmdbKey) {
+    try {
+      const url = `https://api.themoviedb.org/3/find/${encodeURIComponent(imdbId)}?api_key=${tmdbKey}&external_source=imdb_id`;
+      const payload = await axios.get(url, { timeout: 6000 });
+      const isMovie = type === 'movie';
+      const result = isMovie
+        ? (payload.data.movie_results || [])[0] || (payload.data.tv_results || [])[0]
+        : (payload.data.tv_results || [])[0] || (payload.data.movie_results || [])[0];
+      
+      if (result) {
+        // Use TMDB title only if we don't have one from Cinemeta
+        if (!title) {
           title = result.name || result.original_name || result.title || result.original_title || null;
-          const airDate = result.first_air_date || result.release_date;
-          if (airDate) {
-            year = String(airDate).substring(0, 4).trim();  // Extract YYYY from YYYY-MM-DD
-          }
         }
-      } catch (err) {
-        log.warn(`TMDB fallback failed for ${imdbId}: ${err.message}`);
+        // ALWAYS extract year from TMDB (it's needed for provider matching)
+        const airDate = result.first_air_date || result.release_date;
+        if (airDate) {
+          year = String(airDate).substring(0, 4).trim();  // Extract YYYY from YYYY-MM-DD
+        }
       }
+    } catch (err) {
+      log.warn(`TMDB fallback failed for ${imdbId}: ${err.message}`);
     }
   }
 
