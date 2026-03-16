@@ -557,6 +557,10 @@ async function getStreams(id, type, season, episode, providerContext = null) {
         const streams = await extractMovieStreams(pageUrl, { ...providerContext, _displayTitle: showname });
         if (streams.length) {
           console.log(`[CB01] Found ${streams.length} movie stream(s) for "${title}"`);
+          // DEBUG: Show stream details
+          for (let i = 0; i < streams.length; i++) {
+            console.log(`  [${i+1}] name: "${streams[i].name||'MISSING'}", url: "${(streams[i].url||'').substring(0,60)}..."`);
+          }
           return streams;
         }
       } else {
@@ -565,6 +569,10 @@ async function getStreams(id, type, season, episode, providerContext = null) {
         const streams = await extractSeriesStreams(pageUrl, effectiveSeason, effectiveEpisode, { ...providerContext, _displayTitle: showname });
         if (streams.length) {
           console.log(`[CB01] Found ${streams.length} series stream(s) for "${title}"`);
+          // DEBUG: Show stream details
+          for (let i = 0; i < streams.length; i++) {
+            console.log(`  [${i+1}] name: "${streams[i].name||'MISSING'}", url: "${(streams[i].url||'').substring(0,60)}..."`);
+          }
           return streams;
         }
       }
