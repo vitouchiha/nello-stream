@@ -305,7 +305,7 @@ async function getStreams(id, type, season, episode, config = {}) {
         selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'guardaserie', 'guardoserie', 'cb01', 'eurostreaming');
     } else if (normalizedType === 'tv' || normalizedType === 'series') {
         if (likelyAnime || isKitsuRequest) {
-            selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'guardaserie', 'guardoserie', 'streamingcommunity');
+            selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'guardaserie', 'guardoserie', 'streamingcommunity', 'cb01', 'eurostreaming');
         } else {
             if (isImdbRequest) {
                 selectedProviders.push('streamingcommunity', 'guardaserie', 'guardoserie', 'eurostreaming', 'cb01', 'toonitalia', 'loonex');
