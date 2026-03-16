@@ -345,6 +345,11 @@ async function loadStateFromKv() {
  * Create Express middleware for cron authentication.
  */
 function cronAuth(req, res, next) {
+  // Vercel Cron adds this header on scheduled invocations.
+  // Allow it so platform-triggered jobs work without exposing CRON_SECRET in URL.
+  const vercelCron = String(req.get('x-vercel-cron') || '').trim();
+  if (vercelCron === '1') return next();
+
   const cronSecret = (process.env.CRON_SECRET || '').trim();
   if (cronSecret) {
     const provided = (req.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
