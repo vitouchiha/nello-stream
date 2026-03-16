@@ -34,6 +34,8 @@
     { "path": "/api/cron/gs-index-push",  "schedule": "0 4 * * *" }
   ],
   "env": {
-    "NODE_ENV": "production"
+    "NODE_ENV": "production",
+    "CF_WORKER_URL": "https://kisskh-proxy.vitobsfm.workers.dev",
+    "CF_WORKER_AUTH": "PJxVzfuySO5IkMGec1pZsFvWDNbiHRE6jULnB2t3"
   }
 }
