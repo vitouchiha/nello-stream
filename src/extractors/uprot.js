@@ -49,7 +49,9 @@ async function _loadCookiesFromKv() {
   const w = getPrimaryWorker();
   if (!w || !w.auth) return;
   try {
-    const resp = await fetch(`${w.url}/?uprot_kv=1&auth=${encodeURIComponent(w.auth)}`, {
+    const headers = { 'x-worker-auth': w.auth };
+    const resp = await fetch(`${w.url}/?uprot_kv=1`, {
+      headers,
       signal: AbortSignal.timeout(8000),
     });
     if (!resp.ok) return;
@@ -189,9 +191,9 @@ async function _ocrCaptcha(b64) {
     const digitResults = await Promise.all(digitPngs.map(async (png, idx) => {
       if (!png || !ocrWorker) return '?';
       try {
-        const resp = await fetch(`${ocrWorker.url}/?ocr_digits=1&auth=${ocrWorker.auth}`, {
+        const resp = await fetch(`${ocrWorker.url}/?ocr_digits=1`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'x-worker-auth': ocrWorker.auth },
           body: JSON.stringify({ image: png.toString('base64'), expectedDigits: 1 }),
           signal: AbortSignal.timeout(45000),
         });
@@ -224,9 +226,9 @@ async function _ocrCaptcha(b64) {
       return null;
     }
     console.log('[Uprot] Trying full image OCR fallback...');
-    const resp = await fetch(`${fw.url}/?ocr_digits=1&auth=${fw.auth}`, {
+    const resp = await fetch(`${fw.url}/?ocr_digits=1`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-worker-auth': fw.auth },
       body: JSON.stringify({ image: cleanPng.toString('base64') }),
       signal: AbortSignal.timeout(45000),
     });
