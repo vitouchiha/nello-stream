@@ -704,68 +704,87 @@ async function searchAndExtract(showname, year, season, episode, providerContext
     console.log(`[Eurostreaming] KV index path failed: ${e.message}`);
   }
 
-  // ── Phase 2: Fall back to live WP search API ───────────────────────────
-  try {
-    const searchUrl = `${baseUrl}/wp-json/wp/v2/search?search=${encodeURIComponent(showname)}&_fields=id,subtype&per_page=10`;
-    const searchResp = await _esFetch(searchUrl);
-    if (!searchResp) return allStreams;
-    const results = await searchResp.json();
-    if (!Array.isArray(results) || !results.length) return allStreams;
-    // Use the final URL after redirect as the actual base (domain may redirect)
-    const actualBase = new URL(searchResp.url).origin;
+  // ── Phase 2: Fall back to live WP search API (with multiple title variations) ────────────
+  // Generate title variations to handle both Italian & English names
+  const titleVariations = [
+    showname,
+    showname.replace(/&/g, 'e'),  // "Mercoledì & Friends" → "Mercoledì e Friends"
+    showname.replace(/&/g, ' '),  // "Mercoledì & Friends" → "Mercoledì   Friends"
+    showname.split(' ')[0],       // First word only (for "Wednesday" from "Wednesday Addams")
+  ].filter((v, i, arr) => arr.indexOf(v) === i); // Unique only
 
-    for (const item of results) {
-      // Skip pages/custom types — only standard posts have episode content
-      if (item.subtype && item.subtype !== 'post') continue;
-      try {
-        const postUrl = `${actualBase}/wp-json/wp/v2/posts/${item.id}?_fields=content,title`;
-        const postResp = await _esFetch(postUrl);
-        if (!postResp) continue;
-        const postData = await postResp.json();
-        if (!postData || postData.code === 'rest_post_invalid_id') continue;
+  for (const searchTitle of titleVariations) {
+    if (!searchTitle) continue;
+    
+    try {
+      const searchUrl = `${baseUrl}/wp-json/wp/v2/search?search=${encodeURIComponent(searchTitle)}&_fields=id,subtype&per_page=15`;
+      const searchResp = await _esFetch(searchUrl);
+      if (!searchResp) continue;
+      const results = await searchResp.json();
+      if (!Array.isArray(results) || !results.length) continue;
+      
+      // Use the final URL after redirect as the actual base (domain may redirect)
+      const actualBase = new URL(searchResp.url).origin;
 
-        const rawTitle = postData?.title?.rendered || '';
-        const description = postData?.content?.rendered || '';
-        const postTitle = decodeHtmlEntities(rawTitle);
+      for (const item of results) {
+        // Skip pages/custom types — only standard posts have episode content
+        if (item.subtype && item.subtype !== 'post') continue;
+        try {
+          const postUrl = `${actualBase}/wp-json/wp/v2/posts/${item.id}?_fields=content,title`;
+          const postResp = await _esFetch(postUrl);
+          if (!postResp) continue;
+          const postData = await postResp.json();
+          if (!postData || postData.code === 'rest_post_invalid_id') continue;
 
-        // Title similarity check (>= 0.96 means nearly exact)
-        const ratio = titleRatio(postTitle, showname);
-        let matched = ratio >= 0.96;
+          const rawTitle = postData?.title?.rendered || '';
+          const description = postData?.content?.rendered || '';
+          const postTitle = decodeHtmlEntities(rawTitle);
 
-        if (!matched && year) {
-          // Fallback: year match within ±1
-          const yearMatch = /(?<![\/\-])(19|20)\d{2}(?![\/\-])/.exec(description);
-          if (yearMatch) {
-            const diff = Math.abs(parseInt(yearMatch[0], 10) - parseInt(year, 10));
-            matched = diff <= 1;
+          // Title similarity check (>= 0.96 means nearly exact)
+          const ratio = titleRatio(postTitle, showname);
+          let matched = ratio >= 0.96;
+
+          // FALLBACK: Try looser matching (0.70) if exact match failed
+          if (!matched && ratio >= 0.70) {
+            matched = true;
+            console.log(`[Eurostreaming] Loose match accepted (${(ratio*100).toFixed(0)}%): "${postTitle}"`);
           }
 
-          // If not in excerpt, try full post if "Continua a leggere" link exists
-          if (!matched) {
-            const moreMatch = /<a\s+href="([^"]+)"[^>]*>Continua a leggere<\/a>/i.exec(description);
-            if (moreMatch) {
-              try {
-                const fullResp = await _esFetch(moreMatch[1], { accept: 'text/html,*/*' });
-                const fullHtml = fullResp ? await fullResp.text() : '';
-                const fullYearMatch = /(?<![\/\-])(19|20)\d{2}(?![\/\-])/.exec(fullHtml);
-                if (fullYearMatch) {
-                  const diff = Math.abs(parseInt(fullYearMatch[0], 10) - parseInt(year, 10));
-                  matched = diff <= 1;
-                }
-              } catch { /* skip */ }
+          if (!matched && year) {
+            // Fallback: year match within ±1
+            const yearMatch = /(?<![\/\-])(19|20)\d{2}(?![\/\-])/.exec(description);
+            if (yearMatch) {
+              const diff = Math.abs(parseInt(yearMatch[0], 10) - parseInt(year, 10));
+              matched = diff <= 1;
+            }
+
+            // If not in excerpt, try full post if "Continua a leggere" link exists
+            if (!matched) {
+              const moreMatch = /<a\s+href="([^"]+)"[^>]*>Continua a leggere<\/a>/i.exec(description);
+              if (moreMatch) {
+                try {
+                  const fullResp = await _esFetch(moreMatch[1], { accept: 'text/html,*/*' });
+                  const fullHtml = fullResp ? await fullResp.text() : '';
+                  const fullYearMatch = /(?<![\/\-])(19|20)\d{2}(?![\/\-])/.exec(fullHtml);
+                  if (fullYearMatch) {
+                    const diff = Math.abs(parseInt(fullYearMatch[0], 10) - parseInt(year, 10));
+                    matched = diff <= 1;
+                  }
+                } catch { /* skip */ }
+              }
             }
           }
-        }
 
-        if (!matched) continue;
+          if (!matched) continue;
 
-        const streams = await findEpisodeStreams(description, season, episode, providerContext);
-        allStreams.push(...streams);
+          const streams = await findEpisodeStreams(description, season, episode, providerContext);
+          allStreams.push(...streams);
 
-        if (allStreams.length > 0) break; // Found a match — stop searching
-      } catch { /* skip this result */ }
-    }
-  } catch { /* search failed */ }
+          if (allStreams.length > 0) return allStreams; // Found match — return immediately
+        } catch { /* skip this result */ }
+      }
+    } catch { /* search failed for this variation */ }
+  }
 
   return allStreams;
 }
