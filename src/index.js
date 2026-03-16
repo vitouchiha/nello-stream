@@ -266,6 +266,15 @@ async function getStreams(id, type, season, episode, config = {}) {
             : null;
     const normalizedEpisode = Number.isInteger(episode) ? episode : (Number.parseInt(episode, 10) || 1);
 
+    // DEBUG: Log config for tt40197357
+    if (id === 'tt40197357' || (typeof id === 'string' && id.includes('tt40197357'))) {
+      console.log(`[DEBUG getStreams] tt40197357 received:`, { 
+        type: normalizedType, 
+        primaryTitle: config.primaryTitle, 
+        titleCandidates: config.titleCandidates 
+      });
+    }
+
     // Easystreams result cache (L1 + L2 KV)
     const esCacheKey = `es:${id}:${normalizedType}:${normalizedSeason}:${normalizedEpisode}`;
     const cachedStreams = await cache.get(esCacheKey, {
