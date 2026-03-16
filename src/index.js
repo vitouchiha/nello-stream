@@ -450,6 +450,13 @@ async function getStreams(id, type, season, episode, config = {}) {
               if (url && !seenUrls.has(url)) {
                 seenUrls.add(url);
                 allStreams.push(s);
+              } else if (!url && result.provider === 'CB01') {
+                // DEBUG: CB01 stream with no URL
+                console.warn('[Aggregator] CB01 stream filtered: NO URL',
+                  { name: (s.name||'').substring(0,50), url: s.url, externalUrl: s.externalUrl });
+              } else if (url && seenUrls.has(url) && result.provider === 'CB01') {
+                // DEBUG: CB01 stream filtered as duplicate  
+                console.warn('[Aggregator] CB01 stream filtered: DUPLICATE URL', { url: url.substring(0,60) });
               }
             }
             // Start grace timer on first successful result
