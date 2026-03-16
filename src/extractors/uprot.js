@@ -193,7 +193,7 @@ async function _ocrCaptcha(b64) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ image: png.toString('base64'), expectedDigits: 1 }),
-          signal: AbortSignal.timeout(30000),
+          signal: AbortSignal.timeout(45000),
         });
         const data = await resp.json();
         const ans = data?.answer || '?';
@@ -228,7 +228,7 @@ async function _ocrCaptcha(b64) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ image: cleanPng.toString('base64') }),
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(45000),
     });
     console.log('[Uprot] Fallback response status:', resp.status);
     const data = await resp.json();
