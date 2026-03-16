@@ -27,6 +27,7 @@ deploy-workers.js
 *.log
 *.txt
 *.json
+kk-subs-warm-state.json
 
 # Exceptions - tracked JSON files
 !manifest.json

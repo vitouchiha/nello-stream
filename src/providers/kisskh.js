@@ -1671,6 +1671,48 @@ async function _getSubtitlesFromApiUrl(subApiUrl, serieId, episodeId) {
   return decoded;
 }
 
+/**
+ * Pre-warm decrypted Italian subtitles for a given episode.
+ * Used by offline warm scripts to populate KV before user traffic.
+ */
+async function warmSubtitleCacheForEpisode(serieId, episodeId, config = {}) {
+  const sid = String(serieId || '').trim();
+  const eid = extractEpisodeNumericId(String(episodeId || ''));
+  if (!sid || !eid) {
+    return { ok: false, count: 0, reason: 'invalid-input' };
+  }
+
+  try {
+    // 1) Fast path: API-discovered or static subtitle endpoint.
+    const apiResult = await _fetchStreamViaApi(sid, eid, config.proxyUrl);
+    const directSubApiUrl = apiResult?.subApiUrl || `${API_BASE}/Sub/${eid}?kkey=${SUB_KKEY}`;
+    let subtitles = await _getSubtitlesFromApiUrl(directSubApiUrl, sid, eid);
+    if (subtitles.length > 0) {
+      return { ok: true, count: subtitles.length, reason: 'warmed' };
+    }
+
+    // 2) Robust fallback: browser interception to discover real subtitle endpoint.
+    const browserResult = await withTimeout(
+      _extractStreamAndSubs(sid, eid),
+      45_000,
+      'kisskh.warmSubtitleBrowser'
+    ).catch(() => ({ streamUrl: null, subApiUrl: null }));
+
+    if (!browserResult?.subApiUrl) {
+      return { ok: false, count: 0, reason: 'browser-no-subapi' };
+    }
+
+    subtitles = await _getSubtitlesFromApiUrl(browserResult.subApiUrl, sid, eid);
+    if (subtitles.length > 0) {
+      return { ok: true, count: subtitles.length, reason: 'warmed' };
+    }
+
+    return { ok: false, count: 0, reason: 'no-ita-sub' };
+  } catch (err) {
+    return { ok: false, count: 0, reason: err?.message || 'warm-failed' };
+  }
+}
+
 function _resolveSubUrl(s) {
   if (s.src) return s.src;
   if (s.GET && s.GET.host && s.GET.filename) {
@@ -1685,4 +1727,4 @@ function _sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-module.exports = { getCatalog, getMeta, getStreams };
+module.exports = { getCatalog, getMeta, getStreams, warmSubtitleCacheForEpisode };
