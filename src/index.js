@@ -388,7 +388,7 @@ async function getStreams(id, type, season, episode, config = {}) {
                 continue;
             }
             if (providerName === 'cb01') {
-              promises.push(withProviderTimeout('CB01', withMfp('cb01', cb01.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, ctxFor('cb01'))), 30000));
+              promises.push(withProviderTimeout('CB01', withMfp('cb01', cb01.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, ctxFor('cb01'))), 45000));
                 continue;
             }
             if (providerName === 'eurostreaming') {
@@ -417,7 +417,7 @@ async function getStreams(id, type, season, episode, config = {}) {
     const settled = new Map();
     const seenUrls = new Set();
 
-    const ABSOLUTE_CAP_MS = 35000; // never wait more than 35s total (CB01 proxy chain can take 25s+)
+    const ABSOLUTE_CAP_MS = 50000; // never wait more than 50s total (CB01 proxy chain needs 45s)
     const GRACE_AFTER_FIRST_MS = 8000; // 8s grace after first streams arrive
     const MIN_WAIT_MS = 5000; // always wait at least 5s for slower providers
 
