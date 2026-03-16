@@ -21,6 +21,15 @@
 
 require('dotenv').config();
 
+// ─── Set default CF Worker configuration if not provided ─────────────────────
+// Primary CF Worker endpoint for KV cache, Uprot cookies, OCR, etc.
+if (!process.env.CF_WORKER_URL) {
+  process.env.CF_WORKER_URL = 'https://kisskh-proxy.vitobsfm.workers.dev';
+}
+if (!process.env.CF_WORKER_AUTH) {
+  process.env.CF_WORKER_AUTH = 'PJxVzfuySO5IkMGec1pZsFvWDNbiHRE6jULnB2t3';
+}
+
 const axios = require('axios');
 const crypto = require('crypto');
 const express  = require('express');
