@@ -493,6 +493,9 @@ async function getStreams(id, type, season, episode, providerContext = null) {
   try {
     const normalizedType = String(type || '').toLowerCase();
     const isMovie = normalizedType === 'movie';
+    console.log(`\n[CB01] ========== getStreams CALLED ==========`);
+    console.log(`[CB01] id=${id}, type=${normalizedType}, S${season}E${episode}`);
+    console.log(`[CB01] providerContext: tmdbId=${providerContext?.tmdbId}, primaryTitle="${providerContext?.primaryTitle}"`);
 
     const effectiveSeason = !isMovie && Number.isInteger(season) && season > 0 ? season : null;
     const effectiveEpisode = !isMovie && Number.isInteger(episode) && episode > 0 ? episode : null;
