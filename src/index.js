@@ -295,7 +295,6 @@ async function getStreams(id, type, season, episode, config = {}) {
         String(providerContext?.idType || '').toLowerCase() === 'imdb' ||
         /^tt\d+$/i.test(String(id || '').trim());
     const selectedProviders = [];
-    console.log(`[DEBUG] id=${id}, type=${normalizedType}, likelyAnime=${likelyAnime}, isKitsuRequest=${isKitsuRequest}, isImdbRequest=${isImdbRequest}`);
     if (normalizedType === 'movie') {
         if (likelyAnime || isKitsuRequest) {
             selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'guardoserie', 'streamingcommunity', 'guardahd');
@@ -303,13 +302,11 @@ async function getStreams(id, type, season, episode, config = {}) {
             selectedProviders.push('streamingcommunity', 'guardahd', 'guardaflix', 'guardoserie', 'toonitalia', 'loonex', 'cb01');
         }
     } else if (normalizedType === 'anime') {
-        selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'guardaserie', 'guardoserie', 'cb01', 'eurostreaming');
+        selectedProviders.push('cb01', 'eurostreaming', 'animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'guardaserie', 'guardoserie');
     } else if (normalizedType === 'tv' || normalizedType === 'series') {
         if (likelyAnime || isKitsuRequest) {
-            console.log(`[DEBUG TV+Anime] Selected providers for TV+anime (kitsu)`);
-            selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'guardaserie', 'guardoserie', 'streamingcommunity', 'cb01', 'eurostreaming');
+            selectedProviders.push('cb01', 'eurostreaming', 'animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'guardaserie', 'guardoserie', 'streamingcommunity');
         } else {
-            console.log(`[DEBUG TV+NonAnime] Selected providers for TV+non-anime`);
             if (isImdbRequest) {
                 selectedProviders.push('streamingcommunity', 'guardaserie', 'guardoserie', 'eurostreaming', 'cb01', 'toonitalia', 'loonex');
             } else {
@@ -319,7 +316,6 @@ async function getStreams(id, type, season, episode, config = {}) {
     } else {
         selectedProviders.push('streamingcommunity', 'guardahd', 'guardoserie', 'toonitalia', 'loonex');
     }
-    console.log(`[DEBUG] selectedProviders: ${selectedProviders.join(', ')}`);
 
 // Utility to set timeout per provider so one slow provider doesn't block the rest
       const withProviderTimeout = (providerName, promise, timeoutMs = 12000) => {
