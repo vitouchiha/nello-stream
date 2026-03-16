@@ -331,6 +331,7 @@ async function _fetchFromImdbId(rawId, type, config) {
   //    v3-cinemeta.strem.io returns {} for Korean/Asian dramas when called from
   //    Vercel datacenter IPs — TMDB's /find endpoint covers all IMDB-indexed shows.
   let title = null;
+  let year = '';
   try {
     const metaType = type === 'movie' ? 'movie' : 'series';
     const resp = await axios.get(
@@ -342,10 +343,29 @@ async function _fetchFromImdbId(rawId, type, config) {
     log.warn(`Cinemeta meta fetch failed: ${err.message}`, { imdbId });
   }
 
-  // Fallback #1: TMDB find endpoint
+  // Fallback #1: TMDB find endpoint (include year extraction)
   if (!title) {
     const tmdbKey = config.tmdbKey || process.env.TMDB_API_KEY || TMDB_API_KEY;
-    title = await findTitleByImdbId(imdbId, tmdbKey).catch(() => null);
+    if (tmdbKey) {
+      try {
+        const url = `https://api.themoviedb.org/3/find/${encodeURIComponent(imdbId)}?api_key=${tmdbKey}&external_source=imdb_id`;
+        const payload = await axios.get(url, { timeout: 6000 });
+        const isMovie = type === 'movie';
+        const result = isMovie
+          ? (payload.data.movie_results || [])[0] || (payload.data.tv_results || [])[0]
+          : (payload.data.tv_results || [])[0] || (payload.data.movie_results || [])[0];
+        
+        if (result) {
+          title = result.name || result.original_name || result.title || result.original_title || null;
+          const airDate = result.first_air_date || result.release_date;
+          if (airDate) {
+            year = String(airDate).substring(0, 4).trim();  // Extract YYYY from YYYY-MM-DD
+          }
+        }
+      } catch (err) {
+        log.warn(`TMDB fallback failed for ${imdbId}: ${err.message}`);
+      }
+    }
   }
 
   // Fallback #2: IMDb public page (no API key needed)
@@ -357,7 +377,7 @@ async function _fetchFromImdbId(rawId, type, config) {
     log.warn('no title from Cinemeta or TMDB', { imdbId });
     return [];
   }
-  log.info(`title resolved: "${title}"`, { imdbId });
+  log.info(`title resolved: "${title}" (${year})`, { imdbId });
   const titleCandidates = await _buildTitleCandidates(imdbId, type, config, title);
   log.info('title candidates', { imdbId, count: titleCandidates.length, titles: titleCandidates.slice(0, 5) });
 
@@ -426,6 +446,12 @@ async function _fetchFromImdbId(rawId, type, config) {
   
   // Lookup integrale tramite orchestratore easystreams originale.
   if (useEasystreams) {
+    // Construct primaryTitle with year for better matching (e.g., "Scrubs (2026)")
+    const primaryTitleWithYear = titleCandidates[0] || title;
+    const finalPrimaryTitle = (year && !primaryTitleWithYear.includes('(')) 
+      ? `${primaryTitleWithYear} (${year})`
+      : primaryTitleWithYear;
+    
     jobs.push(runImdbJob('easystreams.imdb', () => easystreams.getStreams(
       imdbId,
       type === 'movie' ? 'movie' : 'series',
@@ -433,7 +459,7 @@ async function _fetchFromImdbId(rawId, type, config) {
       episodeNum,
       {
         ...config,
-        primaryTitle: titleCandidates[0] || title,
+        primaryTitle: finalPrimaryTitle,
         titleCandidates,
       }
     ), 52_000)); // Must exceed easystreams ABSOLUTE_CAP_MS (50s)
