@@ -266,6 +266,15 @@ async function getStreams(id, type, season, episode, config = {}) {
             : null;
     const normalizedEpisode = Number.isInteger(episode) ? episode : (Number.parseInt(episode, 10) || 1);
 
+    // DEBUG: Log config for tt40197357
+    if (id === 'tt40197357' || (typeof id === 'string' && id.includes('tt40197357'))) {
+      console.log(`[DEBUG getStreams] tt40197357 received:`, { 
+        type: normalizedType, 
+        primaryTitle: config.primaryTitle, 
+        titleCandidates: config.titleCandidates 
+      });
+    }
+
     // Easystreams result cache (L1 + L2 KV)
     const esCacheKey = `es:${id}:${normalizedType}:${normalizedSeason}:${normalizedEpisode}`;
     const cachedStreams = await cache.get(esCacheKey, {
@@ -295,6 +304,7 @@ async function getStreams(id, type, season, episode, config = {}) {
         String(providerContext?.idType || '').toLowerCase() === 'imdb' ||
         /^tt\d+$/i.test(String(id || '').trim());
     const selectedProviders = [];
+    if (id === 'tt40197357') console.log(`[DEBUG tt40197357] type=${normalizedType}, likelyAnime=${likelyAnime}, isKitsuRequest=${isKitsuRequest}`);
     if (normalizedType === 'movie') {
         if (likelyAnime || isKitsuRequest) {
             selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'guardoserie', 'streamingcommunity', 'guardahd');
@@ -302,10 +312,10 @@ async function getStreams(id, type, season, episode, config = {}) {
             selectedProviders.push('streamingcommunity', 'guardahd', 'guardaflix', 'guardoserie', 'toonitalia', 'loonex', 'cb01');
         }
     } else if (normalizedType === 'anime') {
-        selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'guardaserie', 'guardoserie', 'cb01', 'eurostreaming');
+        selectedProviders.push('cb01', 'eurostreaming', 'animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'guardaserie', 'guardoserie');
     } else if (normalizedType === 'tv' || normalizedType === 'series') {
         if (likelyAnime || isKitsuRequest) {
-            selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'guardaserie', 'guardoserie', 'streamingcommunity');
+            selectedProviders.push('cb01', 'eurostreaming', 'animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'guardaserie', 'guardoserie', 'streamingcommunity');
         } else {
             if (isImdbRequest) {
                 selectedProviders.push('streamingcommunity', 'guardaserie', 'guardoserie', 'eurostreaming', 'cb01', 'toonitalia', 'loonex');
