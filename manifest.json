@@ -51,7 +51,8 @@
       ],
       "idPrefixes": [
         "kisskh_",
-        "rama_"
+        "rama_",
+        "eurostreaming_"
       ]
     },
     {
@@ -61,7 +62,8 @@
       ],
       "idPrefixes": [
         "kisskh_",
-        "rama_"
+        "rama_",
+        "eurostreaming_"
       ]
     }
   ],
@@ -71,7 +73,8 @@
   ],
   "idPrefixes": [
     "kisskh_",
-    "rama_"
+    "rama_",
+    "eurostreaming_"
   ],
   "behaviorHints": {
     "configurable": true
