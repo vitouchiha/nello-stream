@@ -10,11 +10,11 @@ mode = "smart"
 binding = "AI"
 
 [vars]
-AUTH_TOKEN = "nJ0yrMcclqkcYEMTMF5C-jGq9RseMk6FAcJQow"
+AUTH_TOKEN = "PJxVzfuySO5IkMGec1pZsFvWDNbiHRE6jULnB2t3"
 
 [[kv_namespaces]]
 binding = "ES_CACHE"
-id = "644f1a6446574fcf91f6663f124a7b46"
+id = "77d345738f28442c8a19fadc030eb92e"
 
 [triggers]
 crons = ["*/15 * * * *"]
