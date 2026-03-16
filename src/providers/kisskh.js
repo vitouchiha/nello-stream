@@ -749,7 +749,7 @@ async function getStreams(stremioId, config = {}) {
     return _vToken;
   };
 
-  const cacheKey = `stream:${serieId}:${episodeId}`;
+  const cacheKey = `stream_v2:${serieId}:${episodeId}`;
   const cached = streamCache.get(cacheKey);
 
   // L2: cache_manager fallback
@@ -857,8 +857,39 @@ async function getStreams(stremioId, config = {}) {
       log.warn('final stream URL probe failed, returning no streams', { serieId, episodeId, url: rawUrl.slice(0, 100) });
       return [{ name: '[DEBUG]\\nKissKH', title: 'Stream trovato ma inattivo.\\nRiprova.', url: 'http://localhost/error.mp4' }];
     }
+
+    // If we already have a playable stream but no Italian subtitles, try one
+    // browser-only subtitle recovery pass before returning the stream.
+    if (!Array.isArray(subtitles) || subtitles.length === 0) {
+      log.info('no subtitles from API path, trying browser subtitle fallback', { serieId, episodeId });
+      const browserSubResult = await withTimeout(
+        _extractStreamAndSubs(serieId, episodeId),
+        35_000,
+        'kisskh.browserSubtitleFallback'
+      ).catch(() => ({ subApiUrl: null }));
+
+      if (browserSubResult?.subApiUrl) {
+        const recovered = await _getSubtitlesFromApiUrl(browserSubResult.subApiUrl, serieId, episodeId);
+        if (Array.isArray(recovered) && recovered.length > 0) {
+          subtitles = recovered;
+          log.info('subtitle fallback recovered Italian subtitles', { serieId, episodeId, count: recovered.length });
+        }
+      }
+    }
+
     streamCache.set(cacheKey, { url: rawUrl, subtitles });
     cache.set(`kk:${cacheKey}`, { url: rawUrl, subtitles }, cache.TTL.STREAM);
+  }
+
+  // Recover subtitles from KV when stream URL is cached but subtitles are missing.
+  if (rawUrl && (!Array.isArray(subtitles) || subtitles.length === 0)) {
+    const kvSubs = await _kvGet('kk_sub', `${serieId}:${episodeId}`);
+    if (Array.isArray(kvSubs) && kvSubs.length > 0) {
+      subtitles = kvSubs;
+      streamCache.set(cacheKey, { url: rawUrl, subtitles });
+      cache.set(`kk:${cacheKey}`, { url: rawUrl, subtitles }, cache.TTL.STREAM);
+      log.info('recovered subtitles from KV for cached stream', { serieId, episodeId, count: kvSubs.length });
+    }
   }
 
   // Validate URL before wrapping
@@ -875,16 +906,18 @@ async function getStreams(stremioId, config = {}) {
 
   const metaForTitle = _metaLoaded ? _meta : null;
   const seriesTitle = metaForTitle?.name || null;
-  const displayTitle = seriesTitle ? seriesTitle.replace(/\s*\(\d{4}\)\s*$/, '').trim() : null;
-  const titleLine = displayTitle
-    ? `${displayTitle} - Episode ${episodeId}`
-    : `Episode ${episodeId}`;
-
+  const displayTitle = seriesTitle ? seriesTitle.replace(/\s*\(\d{4}\)\s*$/, '').trim() : `Episode ${episodeId}`;
+  const epTitle = `Ep${episodeId}`;
   const hasProxy = !!(process.env.PROXY_URL || process.env.PROXY);
+  
+  const subInfo = (Array.isArray(subtitles) && subtitles.length > 0) ? '🇰🇷 SUB ITA' : '🇺🇸 SUB ENG';
+  const proxyInfo = hasProxy ? '⚡ Proxy' : '';
+  const infoLine = [subInfo, 'HD', proxyInfo].filter(Boolean).join(' | ');
+
   return [
     {
       name: 'KissKH',
-      title: `🎬 ${titleLine}\n🗣 🇰🇷 SUB ITA\n🌐 Proxy (${hasProxy ? 'ON' : 'OFF'})\n🤌 KissKH 💋`,
+      title: `${displayTitle} - ${epTitle}\n◇ KissKH\n${infoLine}`,
       url: finalUrl,
       subtitles,
       behaviorHints: {
@@ -1598,7 +1631,7 @@ async function _extractStream(serieId, episodeId) {
  * No browser is launched here.
  */
 async function _getSubtitlesFromApiUrl(subApiUrl, serieId, episodeId) {
-  const cacheKey = `sub:${serieId}:${episodeId}`;
+  const cacheKey = `sub_v2:${serieId}:${episodeId}`;
   const cached = subCache.get(cacheKey);
   if (cached) return cached;
 
@@ -1625,12 +1658,13 @@ async function _getSubtitlesFromApiUrl(subApiUrl, serieId, episodeId) {
     return [];
   }
 
-  // Filter Italian
-  const ITALIAN_PATTERN = /^https?:\/\/.*\.it\.(srt|txt1|txt)$/i;
+  // Filter Italian (KissKH can return language labels like ITA / Italiano / it-IT)
+  const ITALIAN_PATTERN = /^https?:\/\/.*\.it\.(srt|vtt|txt1|txt)$/i;
   const itSubs = subtitleList.filter(s => {
-    const lang = (s.land || s.label || '').toLowerCase();
+    const lang = _normalizeSubtitleLang(s.land || s.label || s.lang || s.language || s.name || '');
     const src = _resolveSubUrl(s);
-    return lang === 'it' || lang === 'italian' || (src && ITALIAN_PATTERN.test(src));
+    const hasItLang = lang === 'it' || lang === 'ita' || lang === 'italian' || lang === 'italiano' || lang === 'itit';
+    return hasItLang || (src && ITALIAN_PATTERN.test(src));
   });
 
   const decoded = [];
@@ -1656,8 +1690,13 @@ async function _getSubtitlesFromApiUrl(subApiUrl, serieId, episodeId) {
         content = buf.toString('utf8');
       }
 
-      if (content && /^\d+\r?\n\d{2}:\d{2}:\d{2},\d{3}/.test(content)) {
-        decoded.push({ lang: 'it', content });
+      if (_isSupportedSubtitleContent(content)) {
+        // Encode content as data URI (UTF-8, text/vtt or text/srt)
+        let ext = content.trim().startsWith('WEBVTT') ? 'vtt' : 'srt';
+        let mime = ext === 'vtt' ? 'text/vtt' : 'application/x-subrip';
+        let base64 = Buffer.from(content, 'utf8').toString('base64');
+        let dataUrl = `data:${mime};base64,${base64}`;
+        decoded.push({ lang: 'it', label: 'Italiano', url: dataUrl });
         log.info('Italian subtitle decoded', { subUrl: subUrl.slice(0, 60) });
         break; // First valid subtitle is enough
       }
@@ -1721,6 +1760,20 @@ function _resolveSubUrl(s) {
     return u;
   }
   return null;
+}
+
+function _normalizeSubtitleLang(raw) {
+  return String(raw || '').toLowerCase().replace(/[^a-z]/g, '');
+}
+
+function _isSupportedSubtitleContent(content) {
+  if (!content) return false;
+  const body = String(content).trim();
+  if (!body) return false;
+  // Accept both common subtitle formats returned by KissKH endpoints.
+  return /^\d+\r?\n\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[,.]\d{3}/.test(body)
+    || /^WEBVTT/i.test(body)
+    || /\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[,.]\d{3}/.test(body);
 }
 
 function _sleep(ms) {

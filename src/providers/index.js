@@ -228,7 +228,8 @@ async function handleStream(type, id, config = {}) {
   log.info('stream request', { type, id });
 
   // ─── Stream response cache: L1 (memory LRU) + L2 (CF Worker KV) ─────────
-  const cacheKey = `stream:${type}:${id}`;
+  // Versioned key to invalidate stale cached streams (e.g. entries with missing subtitles).
+  const cacheKey = `stream:v2:${type}:${id}`;
   const cachedResult = await cache.get(cacheKey, {
     kvParam: 'stream_cache',
     kvKey: `${type}:${id}`,
@@ -269,7 +270,7 @@ async function _handleStreamImpl(type, id, config = {}) {
     streams = await _fetchFromImdbId(id, type, config);
   } else if (id.startsWith('tmdb:') || id.startsWith('kitsu:')) {
     const useEasystreams = _isAnyProviderEnabled(config, [
-      'all', 'easystreams', 'streamingcommunity', 'guardahd', 'guardaflix', 'guardaserie', 'guardoserie', 'animeunity', 'animeworld', 'animesaturn', 'cb01', 'eurostreaming'
+      'all', 'easystreams', 'streamingcommunity', 'guardahd', 'guardaflix', 'guardaserie', 'guardoserie', 'animeunity', 'animeworld', 'animesaturn', 'cb01', 'eurostreaming', 'deltabit', 'maxstream'
     ]);
     
     if (useEasystreams) {
@@ -380,6 +381,8 @@ async function _fetchFromImdbId(rawId, type, config) {
     'animesaturn',
     'cb01',
     'eurostreaming',
+    'deltabit',
+    'maxstream',
   ]);
 
   const useKisskh = _isProviderEnabled(config, 'kisskh');
@@ -393,7 +396,8 @@ async function _fetchFromImdbId(rawId, type, config) {
   });
 
   const providerTimeout = (name) => {
-    if (name === 'kisskh.imdb') return Math.max(imdbJobTimeout, 20_000);
+    // KissKH may need browser fallback extraction on cloud runs; 20s is often too short.
+    if (name === 'kisskh.imdb') return Math.max(imdbJobTimeout, 45_000);
     if (name === 'guardaserie.imdb') return Math.max(imdbJobTimeout, 18_000);
     return imdbJobTimeout;
   };
