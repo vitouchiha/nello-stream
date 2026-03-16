@@ -295,6 +295,7 @@ async function getStreams(id, type, season, episode, config = {}) {
         String(providerContext?.idType || '').toLowerCase() === 'imdb' ||
         /^tt\d+$/i.test(String(id || '').trim());
     const selectedProviders = [];
+    if (id === 'tt40197357') console.log(`[DEBUG tt40197357] type=${normalizedType}, likelyAnime=${likelyAnime}, isKitsuRequest=${isKitsuRequest}`);
     if (normalizedType === 'movie') {
         if (likelyAnime || isKitsuRequest) {
             selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'guardoserie', 'streamingcommunity', 'guardahd');
