@@ -402,7 +402,10 @@ async function _fetchFromImdbId(rawId, type, config) {
     return imdbJobTimeout;
   };
 
-  if (useKisskh) {
+  // KissKH is Korean dramas only — skip unless title matches well (0.80+ threshold)
+  // to avoid false positives like Will & Grace matching random Korean dramas
+  const shouldUseKisskh = useKisskh && _shouldUseKiskhForTitle(titleCandidates[0] || title, type);
+  if (shouldUseKisskh) {
     jobs.push(runImdbJob('kisskh.imdb', () => _legacyProviderStreamsForImdb({
       provider: 'kisskh', imdbId, titleCandidates, seasonNum, episodeNum, config,
       searchTimeout: 20_000,
@@ -410,6 +413,7 @@ async function _fetchFromImdbId(rawId, type, config) {
       metaFn: kisskh.getMeta,
       streamsFn: kisskh.getStreams,
       forceSeasonOne: false,
+      minTitleSimilarity: 0.80,  // Strict matching to avoid wrong titles
     }), providerTimeout('kisskh.imdb')));
   }
   if (useRama) {
@@ -481,6 +485,7 @@ async function _legacyProviderStreamsForImdb(opts) {
     metaFn,
     streamsFn,
     forceSeasonOne,
+    minTitleSimilarity,
   } = opts;
 
   const normalizedSeason = Number.isInteger(seasonNum) && seasonNum > 0 ? seasonNum : 1;
@@ -523,7 +528,7 @@ async function _legacyProviderStreamsForImdb(opts) {
     }
     if (!Array.isArray(metas) || metas.length === 0) continue;
 
-    const best = _bestMatch(metas, title);
+    const best = _bestMatch(metas, title, minTitleSimilarity);
     if (!best?.id) continue;
 
     const { meta } = await withTimeout(
@@ -738,7 +743,32 @@ function _normaliseTitle(t) {
  * Pick the best-matching meta item from a catalog result by title similarity.
  * Tries exact normalised match first, then similarity score.
  */
-function _bestMatch(metas, queryTitle) {
+/**
+ * Determine if this title should try KissKH provider.
+ * KissKH is Korean dramas only — for non-series content or non-Asian titles,
+ * skip KissKH to avoid false positives (e.g. Will & Grace matching random Korean shows).
+ */
+function _shouldUseKiskhForTitle(title, type) {
+  // Only series on KissKH (movies are not K-dramas)
+  if (type !== 'series') return false;
+  
+  // Title length heuristic: K-dramas tend to have shorter titles
+  // Long English titles like "How I Met Your Mother" are less likely K-drama matches
+  // Allow some flexibility but be conservative
+  if (!title) return true;
+  const normalized = _normaliseTitle(title);
+  
+  // Very short titles are usually safe (less chance of collision)
+  if (normalized.length <= 15) return true;
+  
+  // Long titles (>30 chars) in English are risky — could be random match
+  // K-dramas tend to be shorter titles
+  if (normalized.length > 35) return false;
+  
+  return true;
+}
+
+function _bestMatch(metas, queryTitle, minSimilarity = 0.72) {
   const normQuery = _normaliseTitle(queryTitle);
 
   // 1. Exact normalised match
@@ -761,7 +791,9 @@ function _bestMatch(metas, queryTitle) {
     }
   }
 
-  const accepted = bestScore >= 0.72 || (bestScore >= 0.58 && bestOverlap >= 0.5);
+  // Lower threshold allows higher tolerance for fuzzy matching
+  // Higher threshold (e.g. 0.80) forces strict matching for KissKH
+  const accepted = bestScore >= minSimilarity || (bestScore >= Math.max(0.50, minSimilarity - 0.14) && bestOverlap >= 0.5);
   return accepted ? bestItem : null;
 }
 
