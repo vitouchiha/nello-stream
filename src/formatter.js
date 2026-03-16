@@ -164,9 +164,10 @@ function formatStream(stream, providerName) {
     }
 
     // ─── Build NAME (left badge in Stremio) ─────────────────────────────
-    //  Line 1: Branded identity
+    //  Line 1: Provider name (or NelloStream if not specified)
     //  Line 2: Visual quality meter (unique dot indicator)
-    const nameLines = ['NelloStream'];
+    const providerLabel = pInfo.label || 'NelloStream';
+    const nameLines = [providerLabel];
     if (tier) nameLines.push(`${tier.dots} ${tier.tag}`);
     const finalName = nameLines.join('\n');
 

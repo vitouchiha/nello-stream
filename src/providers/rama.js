@@ -436,10 +436,16 @@ async function getStreams(id, config = {}) {
       log.warn('invalid stream URL format', { epId: ep.id, url: streamUrl.slice(0, 80) });
       continue;
     }
+    
+    // NelloStream style formatting
     const hasProxy = !!(process.env.PROXY_URL || process.env.PROXY);
+    const subInfo = (ep.subtitles && ep.subtitles.some(s => s.lang === 'it' || s.lang === 'ita')) ? '🇰🇷 SUB ITA' : '🇺🇸 SUB ENG';
+    const proxyInfo = hasProxy ? '⚡ Proxy' : '';
+    const infoLine = [subInfo, 'HD', proxyInfo].filter(Boolean).join(' | ');
+
     rawStreams.push({
-      name: `${_qualityLabel(streamUrl)}\nRama`,
-      title: `🎬 ${displayName} - ${ep.title}\n🗣 🇰🇷 SUB ITA\n🌐 Proxy (${hasProxy ? 'ON' : 'OFF'})\n🤌 Rama 🌺`,
+      name: 'Rama',
+      title: `${displayName} - ${ep.title}\n◇ Rama\n${infoLine}`,
       url: streamUrl,
       behaviorHints: { bingeGroup: `streamfusion-rama-${seriesId}` },
     });

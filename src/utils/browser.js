@@ -136,7 +136,7 @@ async function launchBrowser(options = {}) {
   }
 
   const launchOpts = {
-    headless: true,
+    headless: options.headless !== undefined ? options.headless : true,
     args,
     ...(executablePath ? { executablePath } : {}),
     defaultViewport: { width: 1280, height: 720 },
