@@ -155,6 +155,11 @@ async function _ocrCaptcha(b64) {
 
     // OCR each digit individually (sequential to avoid CF Worker AI timeout)
     const ocrWorker = getPrimaryWorker();
+    if (!ocrWorker) {
+      console.log('[Uprot] No CF Worker available (getPrimaryWorker returned null)');
+    } else {
+      console.log('[Uprot] Using CF Worker:', ocrWorker.url);
+    }
     // Build digit images first, then OCR in parallel for speed
     const digitPngs = [];
     for (const [s, e] of digitSegs) {
@@ -181,7 +186,7 @@ async function _ocrCaptcha(b64) {
     }
 
     // OCR all digits in parallel (faster than sequential)
-    const digitResults = await Promise.all(digitPngs.map(async (png) => {
+    const digitResults = await Promise.all(digitPngs.map(async (png, idx) => {
       if (!png || !ocrWorker) return '?';
       try {
         const resp = await fetch(`${ocrWorker.url}/?ocr_digits=1&auth=${ocrWorker.auth}`, {
@@ -191,12 +196,18 @@ async function _ocrCaptcha(b64) {
           signal: AbortSignal.timeout(30000),
         });
         const data = await resp.json();
-        return data?.answer || '?';
-      } catch { return '?'; }
+        const ans = data?.answer || '?';
+        console.log(`[Uprot] Digit ${idx}: ${ans} (status ${resp.status}, method: ${data?.method})`);
+        return ans;
+      } catch (e) {
+        console.warn(`[Uprot] Digit ${idx} CF error:`, e.message);
+        return '?';
+      }
     }));
 
     const answer = digitResults.join('');
     if (answer && !answer.includes('?') && answer.length >= 2) {
+      console.log('[Uprot] Successfully recognized:', answer);
       return { answer, method: 'ai-perdigit' };
     }
   } catch (e) {
@@ -208,16 +219,26 @@ async function _ocrCaptcha(b64) {
     const cleanPixels = preprocessCaptcha(width, height, pixels, threshold);
     const cleanPng = encodePngGrayscale(width, height, cleanPixels);
     const fw = getPrimaryWorker();
-    if (!fw) return null;
+    if (!fw) {
+      console.log('[Uprot] Fallback: no CF Worker for full image OCR');
+      return null;
+    }
+    console.log('[Uprot] Trying full image OCR fallback...');
     const resp = await fetch(`${fw.url}/?ocr_digits=1&auth=${fw.auth}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ image: cleanPng.toString('base64') }),
       signal: AbortSignal.timeout(30000),
     });
+    console.log('[Uprot] Fallback response status:', resp.status);
     const data = await resp.json();
-    if (data?.answer) return { answer: data.answer, method: data.method || 'ai-clean' };
-  } catch { /* fallback failed */ }
+    if (data?.answer) {
+      console.log('[Uprot] Fallback succeeded:', data.answer);
+      return { answer: data.answer, method: data.method || 'ai-clean' };
+    }
+  } catch (e) {
+    console.warn('[Uprot] Fallback error:', e.message);
+  }
 
   return null;
 }
