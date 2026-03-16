@@ -331,9 +331,14 @@ async function extractEpisodeStreams(link, providerContext = null) {
 async function extractSeriesStreams(pageUrl, season, episode, providerContext = null) {
   const streams = [];
   try {
+    console.log('[CB01] extractSeriesStreams called with:', { pageUrl: pageUrl.substring(0, 80), season, episode });
     const html = await fetchWithCloudscraper(pageUrl, { referer: getCb01BaseUrl() + '/' });
-    if (!html) return streams;
+    if (!html) { 
+      console.log('[CB01] extractSeriesStreams: failed to fetch page HTML');
+      return streams;
+    }
 
+    console.log('[CB01] extractSeriesStreams: page HTML fetched, length:', html.length);
     const seasonStr = String(season);
     const episodePadded = String(episode).padStart(2, '0');
 
