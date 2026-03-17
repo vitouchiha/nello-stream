@@ -1743,12 +1743,12 @@ async function warmSubtitleCacheForEpisode(serieId, episodeId, config = {}) {
 
     subtitles = await _getSubtitlesFromApiUrl(browserResult.subApiUrl, sid, eid);
     if (subtitles.length > 0) {
-      return { ok: true, count: subtitles.length, reason: 'warmed' };
+      return { ok: true, count: subtitles.length, reason: 'warmed', subtitles };
     }
 
-    return { ok: false, count: 0, reason: 'no-ita-sub' };
+    return { ok: false, count: 0, reason: 'no-ita-sub', subtitles: [] };
   } catch (err) {
-    return { ok: false, count: 0, reason: err?.message || 'warm-failed' };
+    return { ok: false, count: 0, reason: err?.message || 'warm-failed', subtitles: [] };
   }
 }
 

@@ -154,7 +154,7 @@ export default {
 
     // ── KissKH subtitle KV cache ─────────────────────────────────────────
     // GET  ?kk_sub={serieId}:{episodeId}         → read subs from KV
-    // POST ?kk_sub={serieId}:{episodeId} + body  → store subs in KV (30 days TTL)
+    // POST ?kk_sub={serieId}:{episodeId} + body  → store subs in KV (90 days TTL - subtitles are immutable)
     if (url.searchParams.get('kk_sub')) {
       if (!env?.ES_CACHE) return _json({ error: 'KV not available' }, 500);
       const subKey = url.searchParams.get('kk_sub');
@@ -162,7 +162,7 @@ export default {
       if (request.method === 'POST') {
         try {
           const body = await request.json();
-          await env.ES_CACHE.put(kvKey, JSON.stringify(body), { expirationTtl: 2592000 });
+          await env.ES_CACHE.put(kvKey, JSON.stringify(body), { expirationTtl: 7776000 });
           return _json({ ok: true });
         } catch (e) { return _json({ error: e.message }, 500); }
       }

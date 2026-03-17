@@ -20,6 +20,7 @@ const kisskh = require('./src/providers/kisskh');
 
 const INDEX_PATH = path.resolve(__dirname, 'kk-episodes-index.json');
 const STATE_PATH = path.resolve(__dirname, 'kk-subs-warm-state.json');
+const LOCAL_CACHE_DIR = path.resolve(__dirname, 'kk-subs-cache');
 
 const args = process.argv.slice(2);
 function getArg(name) {
@@ -39,6 +40,28 @@ const ONLY_SERIES = getArg('series')
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function ensureCacheDir() {
+  if (!fs.existsSync(LOCAL_CACHE_DIR)) {
+    fs.mkdirSync(LOCAL_CACHE_DIR, { recursive: true });
+  }
+}
+
+function saveSubtitleLocally(serieId, episodeId, subtitlesData) {
+  try {
+    ensureCacheDir();
+    const serieDir = path.join(LOCAL_CACHE_DIR, String(serieId));
+    if (!fs.existsSync(serieDir)) {
+      fs.mkdirSync(serieDir, { recursive: true });
+    }
+    const filePath = path.join(serieDir, `${episodeId}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(subtitlesData, null, 2));
+    return true;
+  } catch (err) {
+    console.warn(`[LOCAL] Failed to save subtitle for ${serieId}:${episodeId}: ${err.message}`);
+    return false;
+  }
 }
 
 function loadState() {
@@ -103,6 +126,10 @@ async function main() {
       if (res.ok) {
         warmed++;
         state.done[key] = 1;
+        // Save subtitles locally
+        if (Array.isArray(res.subtitles) && res.subtitles.length > 0) {
+          saveSubtitleLocally(serieId, episodeId, res.subtitles);
+        }
       } else if (res.reason === 'no-ita-sub') {
         noIta++;
         state.done[key] = 1;
