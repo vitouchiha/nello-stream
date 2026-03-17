@@ -126,9 +126,11 @@ async function main() {
       if (res.ok) {
         warmed++;
         state.done[key] = 1;
-        // Save subtitles locally
+        // Save subtitles locally (no KV anymore, just GitHub)
         if (Array.isArray(res.subtitles) && res.subtitles.length > 0) {
-          saveSubtitleLocally(serieId, episodeId, res.subtitles);
+          if (!saveSubtitleLocally(serieId, episodeId, res.subtitles)) {
+            console.warn(`  [SKIP] Local save failed for ${key}`);
+          }
         }
       } else if (res.reason === 'no-ita-sub') {
         noIta++;

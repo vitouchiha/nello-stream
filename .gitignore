@@ -45,6 +45,7 @@ kk-subs-warm-state.json
 !loonex-titles-index.json
 !loonex-episodes-index.json
 !src/**/*.json
+!kk-subs-cache/**/*.json
 
 # Test/debug scripts
 _test_*.js
