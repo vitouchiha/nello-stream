@@ -33,7 +33,7 @@ function hasFlag(name) {
 
 const CONTINUE = hasFlag('continue');
 const LIMIT = Number(getArg('limit')) || Infinity;
-const DELAY = Number(getArg('delay')) || 250;
+const DELAY = Number(getArg('delay')) || 500;  // 500ms default (browser is slower)
 const ONLY_SERIES = getArg('series')
   ? getArg('series').split(',').map(s => s.trim()).filter(Boolean)
   : null;
@@ -122,22 +122,27 @@ async function main() {
         continue;
       }
 
-      const res = await kisskh.warmSubtitleCacheForEpisode(serieId, episodeId);
-      if (res.ok) {
-        warmed++;
-        state.done[key] = 1;
-        // Save subtitles locally (no KV anymore, just GitHub)
-        if (Array.isArray(res.subtitles) && res.subtitles.length > 0) {
-          if (!saveSubtitleLocally(serieId, episodeId, res.subtitles)) {
-            console.warn(`  [SKIP] Local save failed for ${key}`);
+      try {
+        const res = await kisskh.warmSubtitleCacheForEpisode(serieId, episodeId);
+        if (res.ok) {
+          warmed++;
+          state.done[key] = 1;
+          // Save subtitles locally (no KV anymore, just GitHub)
+          if (Array.isArray(res.subtitles) && res.subtitles.length > 0) {
+            if (!saveSubtitleLocally(serieId, episodeId, res.subtitles)) {
+              console.warn(`  [SKIP] Local save failed for ${key}`);
+            }
           }
+        } else if (res.reason === 'no-ita-sub') {
+          noIta++;
+          state.done[key] = 1;
+        } else if (res.reason === 'browser-no-subapi') {
+          transient++;
+        } else {
+          failed++;
         }
-      } else if (res.reason === 'no-ita-sub') {
-        noIta++;
-        state.done[key] = 1;
-      } else if (res.reason === 'browser-no-subapi') {
-        transient++;
-      } else {
+      } catch (err) {
+        console.error(`  ❌ Error warming ${key}: ${err.message}`);
         failed++;
       }
 
