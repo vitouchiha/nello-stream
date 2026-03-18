@@ -1,3 +1,17 @@
+## [3.2.41] - 2026-03-18
+
+### Fixed
+- **Anime speciali/OVA/ONA non trovati dal mapping** (`src/mapping/index.js`)
+  - Il problema: gli anime con subtype SPECIAL, OVA o ONA su Kitsu (es. `kitsu:50575` Evangelion 30th Anniversary Special) restituivano 0 stream anche se i contenuti esistono su AnimeWorld, AnimeSaturn e AnimeUnity.
+  - **3 cause bloccanti** risolte:
+    1. **Titoli di ricerca mancanti**: Kitsu ha spesso solo il titolo romaji (`en_jp`) per gli speciali, senza titolo inglese. I siti usano nomi inglesi abbreviati. Fix: `buildSearchTitles` ora estrae il nome base prima del `:` come fallback (es. "Evangelion: Housou 30 Shuunen..." → "Evangelion").
+    2. **Slug matching troppo restrittivo**: Le parole extra nello slug dovevano essere solo numeriche (per bloccare naruto-shippuden da "Naruto"). Fix: per SPECIAL/OVA/ONA, il matching è relaxed — accetta qualsiasi parola trailing (es. `evangelion-30th-anniversary-special`). La selezione corretta è delegata a `filterSpinoffPaths`.
+    3. **filterSpinoffPaths invertito**: Prima rimuoveva SEMPRE i path con "special/ova/ona" nello slug. Ora per subtype SPECIAL/OVA/ONA, la logica è invertita: PREFERISCE i path con keyword spinoff (che sono il contenuto cercato).
+  - Verificato: `kitsu:50575` → trovati path su tutti e 3 i provider ✓
+  - Nessuna regressione su anime TV regolari (Naruto, One Piece) ✓
+
+---
+
 ## [3.2.40] - 2026-03-18
 
 ### Fixed

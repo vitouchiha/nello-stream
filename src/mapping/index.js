@@ -516,7 +516,7 @@ function getProviderBase(providerKey) {
   catch { return ""; }
 }
 
-async function searchAnimeWorld(titles) {
+async function searchAnimeWorld(titles, opts) {
   const base = getProviderBase("animeworld");
   if (!base) return [];
 
@@ -559,6 +559,8 @@ async function searchAnimeWorld(titles) {
       for (let i = 0; i < titleWords.length; i++) {
         if (slugWords[i] !== titleWords[i]) return false;
       }
+      // For SPECIAL/OVA/ONA: accept all trailing words (filterSpinoffPaths handles selection)
+      if (opts?.relaxSlugMatch) return true;
       // Any extra slug words beyond title words must be purely numeric (season markers)
       return slugWords.slice(titleWords.length).every(w => /^\d+$/.test(w));
     });
@@ -570,7 +572,7 @@ async function searchAnimeWorld(titles) {
   return [...allPaths].slice(0, 20);
 }
 
-async function searchAnimeSaturn(titles) {
+async function searchAnimeSaturn(titles, opts) {
   const base = getProviderBase("animesaturn");
   if (!base) return [];
 
@@ -603,6 +605,8 @@ async function searchAnimeSaturn(titles) {
       for (let i = 0; i < asTitleWordsBlocks.length; i++) {
         if (sw[i] !== asTitleWordsBlocks[i]) return false;
       }
+      // For SPECIAL/OVA/ONA: accept all trailing words (filterSpinoffPaths handles selection)
+      if (opts?.relaxSlugMatch) return true;
       return sw.slice(asTitleWordsBlocks.length).every(w => /^\d+$/.test(w));
     };
 
@@ -652,7 +656,7 @@ async function searchAnimeSaturn(titles) {
         const slug = m[1];
         if (slug.includes("${") || slug.includes("{{")) continue;
         // Strict word-prefix match: slug must start with all title words, in order.
-        // Extra trailing words must be purely numeric (season markers).
+        // Extra trailing words must be purely numeric (season markers), or all accepted if relaxed.
         const slugNorm = slug
           .toLowerCase()
           .replace(/-(subita|ita-sub|sub-ita|ita|sub|eng|raw|jp|dub)(-[a-z0-9]+)?$/i, "")
@@ -665,7 +669,7 @@ async function searchAnimeSaturn(titles) {
           if (slugWordsAs[i] !== asTitleWords[i]) { asOk = false; break; }
         }
         if (!asOk) continue;
-        if (!slugWordsAs.slice(asTitleWords.length).every(w => /^\d+$/.test(w))) continue;
+        if (!opts?.relaxSlugMatch && !slugWordsAs.slice(asTitleWords.length).every(w => /^\d+$/.test(w))) continue;
         const path = `/anime/${slug}`;
         if (!paths.includes(path)) paths.push(path);
       }
@@ -916,10 +920,15 @@ function cleanSlug(p) {
 const SPINOFF_PATTERNS = /\b(mini[- ]?anime|specials?|ova|oav|ona|movie|film|recap|picture[- ]?drama|prologue|epilogue)\b/i;
 
 // Filter out spinoff/special paths when requesting a regular TV season.
-// Only applied when there are at least 2 paths — if only 1 path exists,
-// we keep it even if it looks like a spinoff (better than nothing).
-function filterSpinoffPaths(paths) {
+// When kitsuSubtype is SPECIAL/OVA/ONA, INVERT the logic: prefer matching paths.
+function filterSpinoffPaths(paths, kitsuSubtype) {
   if (!Array.isArray(paths) || paths.length <= 1) return paths;
+  const isSpecialType = /^(SPECIAL|OVA|ONA)$/i.test(kitsuSubtype || "");
+  if (isSpecialType) {
+    // PREFER paths that match spinoff patterns (they ARE the content we want)
+    const specialPaths = paths.filter(p => SPINOFF_PATTERNS.test(cleanSlug(p)));
+    return specialPaths.length > 0 ? specialPaths : paths;
+  }
   const mainPaths = paths.filter(p => !SPINOFF_PATTERNS.test(cleanSlug(p)));
   return mainPaths.length > 0 ? mainPaths : paths;
 }
@@ -1045,9 +1054,11 @@ async function resolveByKitsu(kitsuId, options = {}) {
 
   // Provider path search (parallel)
   const searchTitles = buildSearchTitles(kitsuAnime);
+  const isSpecialType = /^(SPECIAL|OVA|ONA)$/i.test(kitsuAnime.subtype || "");
+  const searchOpts = isSpecialType ? { relaxSlugMatch: true } : undefined;
   let [animeWorldPaths, animeSaturnPaths, animeUnityPaths] = await Promise.all([
-    searchAnimeWorld(searchTitles),
-    searchAnimeSaturn(searchTitles),
+    searchAnimeWorld(searchTitles, searchOpts),
+    searchAnimeSaturn(searchTitles, searchOpts),
     searchAnimeUnity(searchTitles, externalIds.anilist),
   ]);
 
@@ -1058,10 +1069,11 @@ async function resolveByKitsu(kitsuId, options = {}) {
     animeUnityPaths = filterPathsBySeason(animeUnityPaths, requestedSeason);
   }
 
-  // Filter out spinoff/special paths (mini-anime, OVA, specials, etc.)
-  animeWorldPaths = filterSpinoffPaths(animeWorldPaths);
-  animeSaturnPaths = filterSpinoffPaths(animeSaturnPaths);
-  animeUnityPaths = filterSpinoffPaths(animeUnityPaths);
+  // Filter spinoff/special paths: exclude for regular TV, prefer for SPECIAL/OVA/ONA
+  const kitsuSubtype = kitsuAnime.subtype || "TV";
+  animeWorldPaths = filterSpinoffPaths(animeWorldPaths, kitsuSubtype);
+  animeSaturnPaths = filterSpinoffPaths(animeSaturnPaths, kitsuSubtype);
+  animeUnityPaths = filterSpinoffPaths(animeUnityPaths, kitsuSubtype);
 
   const payload = {
     ok: true,
@@ -1149,6 +1161,22 @@ function buildSearchTitles(kitsuAnime) {
     ]) {
       const stripped = t.replace(pat, "").trim();
       if (stripped && stripped !== t && stripped.length > 3) titles.add(stripped);
+    }
+  }
+
+  // For specials/OVA/ONA: if no English title exists, extract base name before
+  // the first colon as a fallback search term.  E.g. "Evangelion: Housou 30…" → "Evangelion".
+  // This helps because anime sites often list specials under abbreviated English names.
+  const isSpecialType = /^(SPECIAL|OVA|ONA)$/i.test(kitsuAnime.subtype || "");
+  if (isSpecialType && !kitsuAnime.titles?.en && !kitsuAnime.titles?.en_us) {
+    for (const t of originals) {
+      const colonIdx = t.indexOf(":");
+      if (colonIdx > 2) {
+        const baseName = t.substring(0, colonIdx).trim();
+        if (baseName && baseName.length > 2 && /[a-zA-Z]/.test(baseName)) {
+          titles.add(baseName);
+        }
+      }
     }
   }
 
