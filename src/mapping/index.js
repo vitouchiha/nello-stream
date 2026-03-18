@@ -1170,8 +1170,12 @@ async function resolveByImdb(imdbId, options = {}) {
       if (!kitsuId && extIds?.imdb_id && extIds.imdb_id !== id) {
         kitsuId = await findKitsuIdByExternalId("imdb", extIds.imdb_id);
       }
-      // Last resort: title-based Kitsu search (only for anime to avoid false positives)
-      if (!kitsuId && options.isAnime) {
+      // Last resort: title-based Kitsu search via TMDB title.
+      // Safe for all types because searchKitsuByTmdbTitle uses strict exact-match comparison —
+      // non-anime titles (e.g. "Severance") won't accidentally match any Kitsu anime entry.
+      // This is essential for recent anime (post-2024) not yet in Fribb's offline database
+      // (e.g. Rooster Fighter tt33086804 airing 2026).
+      if (!kitsuId) {
         kitsuId = await searchKitsuByTmdbTitle(resolvedTmdbId);
       }
     }
