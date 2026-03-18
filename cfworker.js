@@ -395,6 +395,16 @@ export default {
       return _handleUprotSolve(env);
     }
 
+    // ── KissKH subtitle warming: full flow fetch+decrypt via CF Worker ──
+    // Usage: POST ?kk_subs_warm=1 with JSON body: {episodeId}  (or {episodeId, subUrl})
+    // Worker does: Sub API → filter ITA → fetch .txt1 → decrypt → return JSON
+    if (url.searchParams.get('kk_subs_warm') === '1') {
+      if (request.method !== 'POST') {
+        return _json({ error: 'POST required' }, 405);
+      }
+      return _handleKkSubsWarm(request, env);
+    }
+
     // ── OCR digits: accept base64 image, return recognized digits ──
     if (url.searchParams.get('ocr_digits') === '1' && request.method === 'POST') {
       return _handleOcrDigits(request, env);
@@ -2356,4 +2366,217 @@ async function _handleScheduledUprotRefresh(env) {
       await _putUprotState({ lastComplete: Date.now(), answer: solved.answer, method: solved.method });
     }
   } catch { /* try next cron run */ }
+}
+
+/**
+ * ─── KissKH Subtitle Warming via CF Worker ─────────────────────────────────
+ * Full flow: Sub API → filter Italian → fetch .txt1 → AES decrypt → return
+ */
+
+const _KK_API_BASE = 'https://kisskh.do/api';
+const _KK_SUB_KKEY = '43B832ED7618A14320177D239448E8189AAC2F524A0CE644F80C476A5A3F43BB031BAD3AFA35E58F9507DE22A4FB2CC4FC069410DF0AD1AF514B2FC3C95F256916A05B8620570ECAE389037A88887266F4E6CA6A305C33E45B2F62D488DB3E72E6578BAEB2CD39ED30F2E29E13A3590E5872E3EAA36C73EB5438871F3AB8A700';
+const _KK_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+// base64-encoded key/IV pairs
+const _KK_CRYPTO_KEYS = [
+  { key: 'ODA1NjQ4MzY0NjMyODc2Mw==', iv: 'Njg1MjYxMjM3MDE4NTI3Mw==' },       // 8056483646328763 / 6852612370185273
+  { key: 'QW1TbVpWY0g5M1VRVWV6aQ==', iv: 'UmVCS1dXOGNxZGpQRW5GNg==' },       // AmSmZVcH93UQUezi / ReBKWW8cqdjPEnF6
+  { key: 'c1dPRFhYMDRRUlRrSGRsWg==', iv: 'OHB3aGFwSmVDNGhyUzloTw==' },       // sWODXX04QRTkHdlZ / 8pwhapJeC4hrS9hO
+];
+
+function _b64ToUint8(str) {
+  const binary = atob(str);
+  const arr = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
+  return arr;
+}
+
+function _textToUint8(str) {
+  return new TextEncoder().encode(str);
+}
+
+async function _kkDecryptLineAsync(line) {
+  let buf;
+  try { buf = _b64ToUint8(line); } catch { return line; }
+  if (buf.length < 8) return line;
+
+  for (const { key: keyB64, iv: ivB64 } of _KK_CRYPTO_KEYS) {
+    try {
+      const keyRaw = _b64ToUint8(keyB64);
+      const ivRaw = _b64ToUint8(ivB64);
+      const key = await crypto.subtle.importKey('raw', keyRaw, { name: 'AES-CBC' }, false, ['decrypt']);
+      const decBuf = await crypto.subtle.decrypt({ name: 'AES-CBC', iv: ivRaw }, key, buf);
+      const text = new TextDecoder().decode(decBuf).trim();
+      if (/[a-zA-Zà-ÿÀ-Ÿ\s]/.test(text)) return text;
+    } catch {}
+  }
+  return line;
+}
+
+async function _kkDecryptFullAsync(srtText) {
+  const lines = srtText.split('\n');
+  const results = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^[A-Za-z0-9+\/=]{16,}$/.test(trimmed)) {
+      results.push(await _kkDecryptLineAsync(trimmed));
+    } else {
+      results.push(line);
+    }
+  }
+  let result = results.join('\n');
+  result = result
+    .replace(/&#(\d+);/g, (m, code) => String.fromCharCode(parseInt(code)))
+    .replace(/&quot;/g, '"').replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+  result = result.replace(/\r?\n/g, '\r\n');
+  return result;
+}
+
+async function _kkDecryptBufferAsync(arrayBuf, keyB64, ivB64) {
+  try {
+    const keyRaw = _b64ToUint8(keyB64);
+    const ivRaw = _b64ToUint8(ivB64);
+    const key = await crypto.subtle.importKey('raw', keyRaw, { name: 'AES-CBC' }, false, ['decrypt']);
+    const decBuf = await crypto.subtle.decrypt({ name: 'AES-CBC', iv: ivRaw }, key, arrayBuf);
+    return new TextDecoder().decode(decBuf).trim();
+  } catch { return null; }
+}
+
+function _resolveKkSubUrl(sub) {
+  if (sub.src) return sub.src;
+  if (sub.GET && sub.GET.host && sub.GET.filename) {
+    let u = `${sub.GET.scheme || 'https'}://${sub.GET.host}${sub.GET.filename}`;
+    if (sub.GET.query && sub.GET.query.v) u += `?v=${sub.GET.query.v}`;
+    return u;
+  }
+  return null;
+}
+
+/**
+ * Full KissKH subtitle extraction via CF Worker.
+ * POST body: { episodeId, [serieId] }
+ *
+ * Steps:
+ *  1. GET /api/Sub/{episodeId}?kkey=... → subtitle list
+ *  2. Filter Italian subtitles (language + .it. URL pattern)
+ *  3. Fetch encrypted .txt1 file
+ *  4. Decrypt AES-128-CBC (3 key/IV pairs)
+ *  5. Return decrypted SRT/WEBVTT
+ */
+async function _handleKkSubsWarm(request, env) {
+  const t0 = Date.now();
+  try {
+    const body = await request.json();
+    const episodeId = body.episodeId;
+    const serieId = body.serieId || '';
+
+    if (!episodeId) {
+      return _json({ error: 'episodeId required' }, 400);
+    }
+
+    // ── Step 1: Fetch subtitle list from KissKH API ──
+    const subApiUrl = `${_KK_API_BASE}/Sub/${episodeId}?kkey=${_KK_SUB_KKEY}`;
+    let subtitleList;
+    try {
+      const resp = await fetch(subApiUrl, {
+        headers: {
+          'User-Agent': _KK_UA,
+          'Accept': 'application/json, text/plain, */*',
+          'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
+          'Referer': 'https://kisskh.do/',
+          'Origin': 'https://kisskh.do',
+        },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!resp.ok) {
+        return _json({ ok: false, error: `Sub API HTTP ${resp.status}`, episodeId, ms: Date.now() - t0 });
+      }
+      const data = await resp.json();
+      subtitleList = Array.isArray(data) ? data : [data];
+    } catch (err) {
+      return _json({ ok: false, error: `Sub API failed: ${err.message}`, episodeId, ms: Date.now() - t0 });
+    }
+
+    // ── Step 2: Filter Italian subtitles ──
+    const ITA_URL = /^https?:\/\/.*\.it\.(srt|vtt|txt1|txt)$/i;
+    const itSubs = subtitleList.filter(s => {
+      const lang = (s.land || s.label || s.lang || s.language || s.name || '').toLowerCase().trim();
+      const isItaLang = ['it', 'ita', 'italian', 'italiano', 'it-it', 'itit'].includes(lang);
+      const src = _resolveKkSubUrl(s);
+      return isItaLang || (src && ITA_URL.test(src));
+    });
+
+    if (itSubs.length === 0) {
+      return _json({ ok: false, reason: 'no-ita-sub', totalSubs: subtitleList.length, episodeId, serieId, ms: Date.now() - t0 });
+    }
+
+    // ── Step 3 + 4: Fetch + Decrypt each Italian subtitle ──
+    for (const sub of itSubs) {
+      const subUrl = _resolveKkSubUrl(sub);
+      if (!subUrl) continue;
+
+      try {
+        const sresp = await fetch(subUrl, {
+          headers: { 'User-Agent': _KK_UA, 'Accept': '*/*', 'Referer': 'https://kisskh.do/' },
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!sresp.ok) continue;
+
+        const arrayBuf = await sresp.arrayBuffer();
+        const asText = new TextDecoder().decode(arrayBuf).trim();
+
+        const isEncrypted = /\.(txt1|txt)$/i.test(subUrl);
+        let decrypted = null;
+
+        if (isEncrypted) {
+          if (asText.startsWith('1') || asText.startsWith('WEBVTT') || /^[A-Za-z0-9+\/=]{16,}/.test(asText.split('\n')[0])) {
+            decrypted = await _kkDecryptFullAsync(asText);
+          } else {
+            for (const { key: kb, iv: ib } of _KK_CRYPTO_KEYS) {
+              const attempt = await _kkDecryptBufferAsync(arrayBuf, kb, ib);
+              if (attempt && /[a-zA-Zà-ÿÀ-Ÿ\s]/.test(attempt)) {
+                decrypted = attempt;
+                break;
+              }
+            }
+          }
+        } else {
+          decrypted = asText;
+        }
+
+        if (!decrypted) continue;
+
+        // Validate SRT/WEBVTT
+        const isValid = decrypted.match(/^\d+\r?\n\d{2}:\d{2}:\d{2}/) || decrypted.startsWith('WEBVTT');
+        if (!isValid) continue;
+
+        // ── Step 5: Store in KV if available ──
+        if (env?.ES_CACHE && serieId) {
+          const kvKey = `kk:sub:${serieId}:${episodeId}`;
+          const format = decrypted.startsWith('WEBVTT') ? 'vtt' : 'srt';
+          const mime = format === 'vtt' ? 'text/vtt' : 'application/x-subrip';
+          const b64 = btoa(unescape(encodeURIComponent(decrypted)));
+          const subData = [{ lang: 'it', label: 'Italiano', url: `data:${mime};base64,${b64}` }];
+          await env.ES_CACHE.put(kvKey, JSON.stringify(subData), { expirationTtl: 7776000 }).catch(() => {});
+        }
+
+        return _json({
+          ok: true,
+          decrypted,
+          lang: 'it',
+          episodeId,
+          serieId,
+          subUrl: subUrl.substring(0, 80),
+          format: decrypted.startsWith('WEBVTT') ? 'webvtt' : 'srt',
+          size: decrypted.length,
+          ms: Date.now() - t0,
+        });
+      } catch {}
+    }
+
+    return _json({ ok: false, reason: 'decrypt-failed', itSubCount: itSubs.length, episodeId, serieId, ms: Date.now() - t0 });
+  } catch (err) {
+    return _json({ ok: false, error: err.message, ms: Date.now() - t0 }, 500);
+  }
 }

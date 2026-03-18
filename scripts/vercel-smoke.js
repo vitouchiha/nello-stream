@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const DEFAULT_VERCEL_BASE_URL = 'https://streamfusion-mail.vercel.app';
+const DEFAULT_VERCEL_BASE_URL = 'https://nellostream.vercel.app';
 const DEFAULT_WAIT_TIMEOUT_MS = 180_000;
 const DEFAULT_WAIT_INTERVAL_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 10_000;

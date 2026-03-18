@@ -48,8 +48,9 @@ const hasFlag = (name) => args.includes(`--${name}`);
 const LIMIT = Number(getArg('limit')) || Infinity;
 const CONTINUE = hasFlag('continue');
 const ONLY_SLUGS = getArg('slug')?.split(',').map(s => s.trim()).filter(Boolean) || null;
-const DELAY = Number(getArg('delay')) || 200;
+const DELAY = Number(getArg('delay')) || 100; // Reduced from 200 for faster processing
 const DEPLOY = hasFlag('deploy');
+const EPISODE_TIMEOUT = 30000; // Reduced from 60s to 30s per episode max
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -199,6 +200,61 @@ async function main() {
     }
   }
 
+  // Helper: process a single series with timeout
+  const processSeries = async (slug) => {
+    const serieUrl = `${BASE}/serie/${slug}/`;
+    let serieNewEps = 0;
+
+    const serieHtml = await fetchHtml(serieUrl);
+    if (!serieHtml) {
+      console.log(`  ⚠ ${slug}: HTTP error`);
+      return { serieNewEps, episodesProcessed: 0 };
+    }
+
+    const episodes = extractEpisodeLinks(serieHtml, slug);
+    if (episodes.length === 0) {
+      console.log(`  ⚠ ${slug}: no episodes found`);
+      return { serieNewEps, episodesProcessed: 0 };
+    }
+
+    let episodesProcessed = 0;
+    for (const ep of episodes) {
+      if (episodesIndex[ep.slug]) {
+        episodesProcessed++;
+        continue; // already cached
+      }
+
+      await delay(DELAY);
+      try {
+        // Fetch episode with timeout (60 seconds)
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), EPISODE_TIMEOUT)
+        );
+
+        const epHtmlPromise = fetchHtml(ep.url);
+        const epHtml = await Promise.race([epHtmlPromise, timeoutPromise]);
+
+        if (!epHtml) {
+          episodesProcessed++;
+          continue;
+        }
+
+        const players = extractPlayersFromHtml(epHtml);
+        if (players.length > 0) {
+          episodesIndex[ep.slug] = players;
+          serieNewEps++;
+          newEpisodes++;
+        }
+        episodesProcessed++;
+      } catch (e) {
+        // Silently skip on timeout or error
+        episodesProcessed++;
+      }
+    }
+
+    return { serieNewEps, episodes: episodes.length, episodesProcessed };
+  };
+
   console.log(`🔍 Processing ${targetSlugs.length} series...`);
   let processedSeries = 0;
   let processedEpisodes = 0;
@@ -210,55 +266,14 @@ async function main() {
       continue;
     }
 
-    const serieUrl = `${BASE}/serie/${slug}/`;
-
     try {
-      const serieHtml = await fetchHtml(serieUrl);
-      if (!serieHtml) {
-        console.log(`  ⚠ ${slug}: HTTP error`);
-        processedSeries++;
-        await delay(DELAY);
-        continue;
-      }
-
-      const episodes = extractEpisodeLinks(serieHtml, slug);
-      if (episodes.length === 0) {
-        console.log(`  ⚠ ${slug}: no episodes found`);
-        processedSeries++;
-        await delay(DELAY);
-        continue;
-      }
-
-      let serieNewEps = 0;
-      for (const ep of episodes) {
-        if (episodesIndex[ep.slug]) {
-          processedEpisodes++;
-          continue; // already cached
-        }
-
-        await delay(DELAY);
-        try {
-          const epHtml = await fetchHtml(ep.url);
-          if (!epHtml) {
-            processedEpisodes++;
-            continue;
-          }
-
-          const players = extractPlayersFromHtml(epHtml);
-          if (players.length > 0) {
-            episodesIndex[ep.slug] = players;
-            serieNewEps++;
-            newEpisodes++;
-          }
-          processedEpisodes++;
-        } catch {
-          processedEpisodes++;
-        }
-      }
+      const result = await processSeries(slug);
 
       processedSeries++;
+      processedEpisodes += result.episodesProcessed;
+
       console.log(
-        `  ✓ ${slug}: ${episodes.length} eps, ${serieNewEps} new` +
+        `  ✓ ${slug}: ${result.episodes} eps, ${result.serieNewEps} new` +
         ` | total: ${processedSeries}/${targetSlugs.length} series, ${newEpisodes} new eps`
       );
 

@@ -4,7 +4,7 @@
  * User configuration — encode/decode from URL path
  *
  * Config is stored as AES-256-GCM encrypted JSON in the addon URL:
- *   https://streamfusion-mail.vercel.app/ENCRYPTED_CONFIG/manifest.json
+ *   https://nellostream.vercel.app/ENCRYPTED_CONFIG/manifest.json
  *
  * Encryption prevents proxy credentials and MediaFlow API keys from being
  * exposed in URL logs, analytics tools, or browser history.

@@ -3,7 +3,7 @@
 <!-- release:meta:start -->
 - Release: `v3.0.60`
 - Date: `2026-03-14`
-- Remote smoke target: `https://streamfusion-mail.vercel.app`
+- Remote smoke target: `https://nellostream.vercel.app`
 <!-- release:meta:end -->
 
 > Il motore di aggregazione definitivo ispirato a Nello 🐶 per lo streaming italiano su Stremio.  

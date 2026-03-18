@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = __dirname;
-const DEFAULT_VERCEL_BASE_URL = 'https://streamfusion-mail.vercel.app';
+const DEFAULT_VERCEL_BASE_URL = 'https://nellostream.vercel.app';
 
 const manifestPath = path.join(ROOT, 'manifest.json');
 const readmePath = path.join(ROOT, 'README.md');

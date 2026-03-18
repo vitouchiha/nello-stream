@@ -10,6 +10,9 @@
  *
  * Usage:
  *   node warm-kk-subs.js [--continue] [--limit N] [--series ID1,ID2] [--delay MS]
+ *                        [--proxy http://user:pass@host:port]
+ *
+ * Strategy: Use residential proxy + small batches to avoid rate limiting
  */
 
 'use strict';
@@ -34,9 +37,15 @@ function hasFlag(name) {
 const CONTINUE = hasFlag('continue');
 const LIMIT = Number(getArg('limit')) || Infinity;
 const DELAY = Number(getArg('delay')) || 500;  // 500ms default (browser is slower)
+const PROXY_URL = getArg('proxy') || null;
+
 const ONLY_SERIES = getArg('series')
   ? getArg('series').split(',').map(s => s.trim()).filter(Boolean)
   : null;
+
+if (PROXY_URL) {
+  console.log(`[INFO] Using residential proxy: enabled`);
+}
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -123,7 +132,8 @@ async function main() {
       }
 
       try {
-        const res = await kisskh.warmSubtitleCacheForEpisode(serieId, episodeId);
+        const config = PROXY_URL ? { proxyUrl: PROXY_URL } : {};
+        const res = await kisskh.warmSubtitleCacheForEpisode(serieId, episodeId, config);
         if (res.ok) {
           warmed++;
           state.done[key] = 1;
