@@ -1,3 +1,25 @@
+## [3.2.40] - 2026-03-18
+
+### Fixed
+- **Episodio assoluto sbagliato per Naruto e altri anime multi-fonte** (`src/mapping/index.js` → `computeAbsoluteEpisode`)
+  - Il problema: cinemeta-live e v3-cinemeta (TMDB) usano strutture stagioni **incompatibili** E numeri episodio **diversi** (assoluti vs relativi).
+    - cinemeta-live: Naruto S3 = ep 105-158 (numeri assoluti), One Piece S2 = ep 62-77
+    - v3-cinemeta: Naruto S3 = ep 1-48 (numeri relativi), One Piece S2 = ep 1-22
+  - v3.2.39 usava cinemeta-live per tutti → Naruto S3E2 = 52+52+2 = **106** (errato, doveva essere **85**)
+  - Fix: rilevamento automatico della fonte del video ID:
+    1. Se cinemeta-live usa numeri assoluti per la stagione (primo ep > 1) E l'episodio richiesto è nel range → episodio GIÀ assoluto, ritornalo direttamente
+    2. Altrimenti → è un numero relativo da v3-cinemeta → usa i conteggi v3-cinemeta per l'offset
+  - Verificato su tutti i casi:
+    | Test | Prima | Dopo | Corretto? |
+    |------|-------|------|-----------|
+    | Naruto S3E2 (v3-cinemeta) | 106 | **85** | ✓ |
+    | Naruto S3E106 (cinemeta-live) | — | **106** | ✓ |
+    | One Piece S2E63 (cinemeta-live) | — | **63** | ✓ |
+    | One Piece S2E2 (v3-cinemeta) | — | **10** | ✓ |
+    | Bleach S2E2 (v3-cinemeta) | 2 | **22** | ✓ |
+
+---
+
 ## [3.2.39] - 2026-03-18
 
 ### Fixed

@@ -69,32 +69,72 @@ async function fetchHtml(url, timeoutMs = 8000) {
 async function computeAbsoluteEpisode(imdbId, season, episode) {
   if (!imdbId || !Number.isInteger(season) || season < 2 || !Number.isInteger(episode)) return null;
 
-  const key = `cinemeta:seasons:live:${imdbId}`;
-  let seasonCounts = cacheGet(key);
+  // ── Step 1: Fetch cinemeta-live episode-level data ──────────────────────────
+  // cinemeta-live uses ABSOLUTE episode numbers inside each season
+  // (e.g. Naruto S3 has episodes 105,106,…158, One Piece S2 has 62,63,…77).
+  // v3-cinemeta (TMDB) uses RELATIVE numbers (1,2,3,… inside each season).
+  // We need to detect which source the video ID came from.
+  const liveKey = `cinemeta:eps:live:${imdbId}`;
+  let liveSeasonEps = cacheGet(liveKey);
 
-  if (seasonCounts === undefined) {
-    // Use cinemeta-live first: it mirrors what Stremio actually shows users (IMDB arc-based seasons).
-    // e.g. One Piece S1=61 (East Blue arc) vs v3-cinemeta S1=8 (TMDB micro-arc).
-    // Falls back to v3-cinemeta if cinemeta-live is unreachable from the datacenter.
-    let meta = await fetchJson(`https://cinemeta-live.strem.io/meta/series/${imdbId}.json`, 10000);
-    if (!meta?.meta?.videos?.length) {
-      meta = await fetchJson(`https://v3-cinemeta.strem.io/meta/series/${imdbId}.json`, 10000);
+  if (liveSeasonEps === undefined) {
+    const liveMeta = await fetchJson(`https://cinemeta-live.strem.io/meta/series/${imdbId}.json`, 10000);
+    const liveVideos = liveMeta?.meta?.videos;
+    liveSeasonEps = {};
+    if (Array.isArray(liveVideos)) {
+      for (const v of liveVideos) {
+        if (Number.isInteger(v.season) && v.season >= 1 && Number.isInteger(v.episode)) {
+          if (!liveSeasonEps[v.season]) liveSeasonEps[v.season] = [];
+          liveSeasonEps[v.season].push(v.episode);
+        }
+      }
+      for (const s in liveSeasonEps) liveSeasonEps[s].sort((a, b) => a - b);
     }
-    const videos = meta?.meta?.videos;
-    if (!Array.isArray(videos) || videos.length === 0) return null;
+    cacheSet(liveKey, liveSeasonEps, 60 * 60 * 1000);
+  }
 
-    seasonCounts = {};
-    for (const v of videos) {
-      if (Number.isInteger(v.season) && v.season >= 1) {
-        seasonCounts[v.season] = (seasonCounts[v.season] || 0) + 1;
+  // ── Step 2: Check if episode is an absolute number from cinemeta-live ───────
+  // cinemeta-live uses absolute numbering when the first episode of a season > 1
+  // (e.g. Naruto S3: 105,106,…; One Piece S2: 62,63,…).
+  // Some anime restart numbering at 1 for later seasons (e.g. Bleach S2 = TYBW: 1,2,3,…).
+  // Only detect as absolute if the season's first episode > 1.
+  const liveEps = liveSeasonEps[season] || [];
+  const liveMin = liveEps.length > 0 ? liveEps[0] : 0;
+  if (liveMin > 1 && liveEps.includes(episode)) {
+    // Video ID from cinemeta-live — episode IS already the absolute number.
+    // e.g. One Piece S2 episode=63 → absolute 63 ✓
+    return episode;
+  }
+
+  // ── Step 3: Episode is relative (from v3-cinemeta / TMDB) ──────────────────
+  // Fetch v3-cinemeta season counts to compute the absolute offset, since the
+  // relative episode number belongs to v3-cinemeta's season structure.
+  // e.g. Naruto v3-cinemeta S1=35, S2=48 → S3E2 = 35+48+2 = 85
+  const v3Key = `cinemeta:seasons:v3:${imdbId}`;
+  let v3Counts = cacheGet(v3Key);
+
+  if (v3Counts === undefined) {
+    const v3Meta = await fetchJson(`https://v3-cinemeta.strem.io/meta/series/${imdbId}.json`, 10000);
+    const v3Videos = v3Meta?.meta?.videos;
+    v3Counts = {};
+    if (Array.isArray(v3Videos) && v3Videos.length > 0) {
+      for (const v of v3Videos) {
+        if (Number.isInteger(v.season) && v.season >= 1) {
+          v3Counts[v.season] = (v3Counts[v.season] || 0) + 1;
+        }
+      }
+    } else {
+      // v3-cinemeta unavailable — fall back to cinemeta-live season counts
+      for (const s in liveSeasonEps) {
+        v3Counts[s] = (liveSeasonEps[s] || []).length;
       }
     }
-    cacheSet(key, seasonCounts, 60 * 60 * 1000); // cache 1h
+    cacheSet(v3Key, v3Counts, 60 * 60 * 1000);
   }
 
   let offset = 0;
   for (let s = 1; s < season; s++) {
-    offset += seasonCounts[s] || 0;
+    offset += v3Counts[s] || 0;
   }
   return offset + episode;
 }
