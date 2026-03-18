@@ -690,6 +690,20 @@ async function searchAndExtract(showname, year, season, episode, providerContext
           const ratio = titleRatio(postTitle, showname);
           let matched = ratio >= 0.96;
 
+          // Loose match (0.70+)
+          if (!matched && ratio >= 0.70) {
+            matched = true;
+          }
+
+          // Parenthesized alternate name, e.g. "Mercoledì (Wednesday)"
+          if (!matched) {
+            const parenMatch = postTitle.match(/\(([^)]+)\)/);
+            if (parenMatch) {
+              const innerRatio = titleRatio(parenMatch[1].trim(), showname);
+              if (innerRatio >= 0.85) matched = true;
+            }
+          }
+
           if (!matched && year) {
             const yearMatch = /(?<![\/\-])(19|20)\d{2}(?![\/\-])/.exec(description);
             if (yearMatch) {
