@@ -1,5 +1,8 @@
 # Exclude from Vercel deployment bundle
 
+# KK subtitles cache (too large for Vercel, ~491MB)
+kk-subs-cache/
+
 # Dev / local artifacts
 .env
 stack.env
