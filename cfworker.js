@@ -797,17 +797,37 @@ const _WARM_PAGES_PER_RUN = 10;
 const _WARM_COOLDOWN_MS = 24 * 3600 * 1000; // 24h between full refreshes
 const _WARM_STATE_CACHE_KEY = 'https://internal.worker/es-warm-state'; // Cache API key (fake URL)
 
-// Use Cache API for state (no daily write limits, unlike KV)
-async function _getWarmState() {
+// KV for cooldown state (globally consistent across PoPs — Cache API is PoP-local and lost with smart placement)
+// Progress (nextPage, titles) stays in Cache API — losing it just means restart from page 1, not a bandwidth problem
+async function _getWarmState(env) {
+  // Read cooldown from KV (globally consistent)
+  let lastComplete = 0;
+  if (env?.ES_CACHE) {
+    try {
+      const kv = await env.ES_CACHE.get('sfm:es:cooldown', 'json');
+      lastComplete = kv?.lastComplete || 0;
+    } catch {}
+  }
+  // Read progress from Cache API (PoP-local — loss means restart from page 1, acceptable)
   try {
     const cache = caches.default;
     const resp = await cache.match(_WARM_STATE_CACHE_KEY);
-    if (resp) return await resp.json();
+    if (resp) {
+      const s = await resp.json();
+      return { ...s, lastComplete }; // override lastComplete with KV value
+    }
   } catch { /* cache miss */ }
-  return { nextPage: 1, titles: {}, lastComplete: 0 };
+  return { nextPage: 1, titles: {}, lastComplete };
 }
 
-async function _putWarmState(state) {
+async function _putWarmState(state, env) {
+  // Persist cooldown in KV when completing a full cycle (globally consistent)
+  if (state.lastComplete && env?.ES_CACHE) {
+    try {
+      await env.ES_CACHE.put('sfm:es:cooldown', JSON.stringify({ lastComplete: state.lastComplete }), { expirationTtl: 172800 });
+    } catch {}
+  }
+  // Also persist progress in Cache API
   try {
     const cache = caches.default;
     const resp = new Response(JSON.stringify(state), {
@@ -820,7 +840,7 @@ async function _putWarmState(state) {
 async function _handleScheduledWarm(env) {
   if (!env?.ES_CACHE) return;
 
-  const state = await _getWarmState();
+  const state = await _getWarmState(env);
 
   // Don't refresh more often than every 24h
   if (state.lastComplete && Date.now() - state.lastComplete < _WARM_COOLDOWN_MS) return;
@@ -840,7 +860,7 @@ async function _handleScheduledWarm(env) {
       const listUrl = `${baseUrl}/wp-json/wp/v2/posts?per_page=100&page=${nextPage}&_fields=id,title,content`;
       const body = await _esWarmFetch(listUrl);
       if (!body) { /* blocked — save progress and retry next cron */
-        await _putWarmState({ nextPage, titles, lastComplete: 0 });
+        await _putWarmState({ nextPage, titles, lastComplete: 0 }, env);
         return;
       }
       posts = JSON.parse(body);
@@ -877,14 +897,14 @@ async function _handleScheduledWarm(env) {
     // Last page reached
     if (posts.length < 100) {
       try { await env.ES_CACHE.put('es:titles', JSON.stringify(titles), { expirationTtl: _ES_KV_TTL }); } catch {}
-      await _putWarmState({ nextPage: 1, titles: {}, lastComplete: Date.now() });
+      await _putWarmState({ nextPage: 1, titles: {}, lastComplete: Date.now() }, env);
       return;
     }
     nextPage++;
   }
 
   // More pages remain — save progress (in Cache API, not KV)
-  await _putWarmState({ nextPage, titles, lastComplete: 0 });
+  await _putWarmState({ nextPage, titles, lastComplete: 0 }, env);
 }
 
 // ─── GuardoSerie index warm: scrape /serie/ listing pages ────────────────────
@@ -895,14 +915,18 @@ const _GS_COOLDOWN_MS = 24 * 3600_000;
 async function _handleScheduledGsWarm(env) {
   if (!env?.ES_CACHE) return;
 
+  // Check cooldown from KV (globally consistent across PoPs)
+  try {
+    const kv = await env.ES_CACHE.get('sfm:gs:cooldown', 'json');
+    if (kv?.lastComplete && Date.now() - kv.lastComplete < _GS_COOLDOWN_MS) return;
+  } catch {}
+
   const cache = caches.default;
   let state = { nextPage: 1, titles: {}, lastComplete: 0 };
   try {
     const cached = await cache.match(_GS_WARM_STATE_KEY);
     if (cached) state = await cached.json();
   } catch { /* start fresh */ }
-
-  if (state.lastComplete && Date.now() - state.lastComplete < _GS_COOLDOWN_MS) return;
 
   // Read active domain from KV (auto-updated by _handleScheduledDomainUpdate)
   let BASE = 'https://guardoserie.website';
@@ -955,6 +979,8 @@ async function _handleScheduledGsWarm(env) {
     if (count === 0 && Object.keys(titles).length > 0) {
       // Likely past last page — store and finish
       try { await env.ES_CACHE.put('gs:titles', JSON.stringify(titles), { expirationTtl: 172800 }); } catch {}
+      // Write cooldown to KV (globally consistent)
+      try { await env.ES_CACHE.put('sfm:gs:cooldown', JSON.stringify({ lastComplete: Date.now() }), { expirationTtl: 172800 }); } catch {}
       const resp = new Response(JSON.stringify({ nextPage: 1, titles: {}, lastComplete: Date.now() }), {
         headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=172800' },
       });
@@ -1845,16 +1871,23 @@ async function _resolveDomains(env) {
 }
 
 // ── Scheduled domain update (24h cooldown) ───────────────────────────────────
-async function _getDomainState() {
-  try {
-    const cache = caches.default;
-    const resp = await cache.match(_DOMAIN_STATE_CACHE_KEY);
-    if (resp) return await resp.json();
-  } catch {}
+async function _getDomainState(env) {
+  // Read cooldown from KV (globally consistent across PoPs)
+  if (env?.ES_CACHE) {
+    try {
+      const kv = await env.ES_CACHE.get('sfm:domain:cooldown', 'json');
+      if (kv) return kv;
+    } catch {}
+  }
   return { lastComplete: 0 };
 }
 
-async function _putDomainState(state) {
+async function _putDomainState(state, env) {
+  if (env?.ES_CACHE) {
+    try {
+      await env.ES_CACHE.put('sfm:domain:cooldown', JSON.stringify(state), { expirationTtl: 172800 });
+    } catch {}
+  }
   try {
     const cache = caches.default;
     const resp = new Response(JSON.stringify(state), {
@@ -1867,12 +1900,12 @@ async function _putDomainState(state) {
 async function _handleScheduledDomainUpdate(env) {
   if (!env?.ES_CACHE) return;
 
-  const state = await _getDomainState();
+  const state = await _getDomainState(env);
   if (state.lastComplete && Date.now() - state.lastComplete < _DOMAIN_COOLDOWN_MS) return;
 
   try {
     await _resolveDomains(env);
-    await _putDomainState({ lastComplete: Date.now() });
+    await _putDomainState({ lastComplete: Date.now() }, env);
   } catch { /* resolve failed — try next cron run */ }
 }
 
@@ -2335,16 +2368,23 @@ async function _handleOcrDigits(request, env) {
 }
 
 // ── Uprot cron (auto-solve captcha every 20h) ─────────────────────────────────
-async function _getUprotState() {
-  try {
-    const cache = caches.default;
-    const resp = await cache.match(_UPROT_STATE_CACHE_KEY);
-    if (resp) return await resp.json();
-  } catch {}
+async function _getUprotState(env) {
+  // Read cooldown from KV (globally consistent across PoPs)
+  if (env?.ES_CACHE) {
+    try {
+      const kv = await env.ES_CACHE.get('sfm:uprot:cooldown', 'json');
+      if (kv) return kv;
+    } catch {}
+  }
   return { lastComplete: 0 };
 }
 
-async function _putUprotState(state) {
+async function _putUprotState(state, env) {
+  if (env?.ES_CACHE) {
+    try {
+      await env.ES_CACHE.put('sfm:uprot:cooldown', JSON.stringify(state), { expirationTtl: 172800 });
+    } catch {}
+  }
   try {
     const cache = caches.default;
     const resp = new Response(JSON.stringify(state), {
@@ -2357,13 +2397,13 @@ async function _putUprotState(state) {
 async function _handleScheduledUprotRefresh(env) {
   if (!env?.ES_CACHE) return;
 
-  const state = await _getUprotState();
+  const state = await _getUprotState(env);
   if (state.lastComplete && Date.now() - state.lastComplete < _UPROT_COOLDOWN_MS) return;
 
   try {
     const solved = await _uprotSolveFresh(env);
     if (solved && !solved.failed) {
-      await _putUprotState({ lastComplete: Date.now(), answer: solved.answer, method: solved.method });
+      await _putUprotState({ lastComplete: Date.now(), answer: solved.answer, method: solved.method }, env);
     }
   } catch { /* try next cron run */ }
 }
