@@ -61,6 +61,38 @@ async function fetchHtml(url, timeoutMs = 8000) {
   finally { if (typeof tc.cleanup === "function") tc.cleanup(); }
 }
 
+// ─── Cinemeta absolute episode ─────────────────────────────────────────────────
+// For long-running anime (One Piece, Naruto, Bleach) where Stremio/Cinemeta
+// splits episodes into seasons but anime sites use a single absolute numbering,
+// compute the absolute episode by fetching Cinemeta's season structure.
+
+async function computeAbsoluteEpisode(imdbId, season, episode) {
+  if (!imdbId || !Number.isInteger(season) || season < 2 || !Number.isInteger(episode)) return null;
+
+  const key = `cinemeta:seasons:${imdbId}`;
+  let seasonCounts = cacheGet(key);
+
+  if (seasonCounts === undefined) {
+    const meta = await fetchJson(`https://v3-cinemeta.strem.io/meta/series/${imdbId}.json`, 10000);
+    const videos = meta?.meta?.videos;
+    if (!Array.isArray(videos) || videos.length === 0) return null;
+
+    seasonCounts = {};
+    for (const v of videos) {
+      if (Number.isInteger(v.season) && v.season >= 1) {
+        seasonCounts[v.season] = (seasonCounts[v.season] || 0) + 1;
+      }
+    }
+    cacheSet(key, seasonCounts, 60 * 60 * 1000); // cache 1h
+  }
+
+  let offset = 0;
+  for (let s = 1; s < season; s++) {
+    offset += seasonCounts[s] || 0;
+  }
+  return offset + episode;
+}
+
 // ─── Kitsu API ────────────────────────────────────────────────────────────────
 
 async function fetchKitsuAnime(kitsuId) {
@@ -308,12 +340,29 @@ async function resolveTmdbEpisode(tmdbId, requestedEpisode, requestedSeason) {
   );
 
   if (epData && epData.episode_number) {
+    // For season >= 2, compute absolute episode by summing previous seasons' episode counts.
+    // This is needed for long-running anime (One Piece, Naruto, Bleach) where anime sites
+    // use absolute numbering but Cinemeta/TMDB splits episodes into seasons.
+    let absoluteEpisode = null;
+    if (season >= 2) {
+      const showData = await fetchJson(
+        `https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${TMDB_API_KEY}`
+      );
+      if (showData?.seasons) {
+        const prevSeasons = showData.seasons
+          .filter(s => s.season_number > 0 && s.season_number < season)
+          .sort((a, b) => a.season_number - b.season_number);
+        const offset = prevSeasons.reduce((sum, s) => sum + (s.episode_count || 0), 0);
+        absoluteEpisode = offset + epData.episode_number;
+      }
+    }
+
     const result = {
       id: String(tmdbId),
       season: epData.season_number ?? season,
       episode: epData.episode_number,
       rawEpisodeNumber: requestedEpisode,
-      absoluteEpisode: null,
+      absoluteEpisode,
       matchedBy: "season_episode",
       episodeUrl: `https://www.themoviedb.org/tv/${tmdbId}/season/${epData.season_number ?? season}/episode/${epData.episode_number}`,
     };
@@ -844,6 +893,12 @@ async function resolveByKitsu(kitsuId, options = {}) {
   // Build episode data
   const requestedEpisode = parseInt(String(options.episode || ""), 10) || null;
 
+  // Detect long-running anime: season >= 2 requested but no season-specific Kitsu
+  // entry was found (i.e. this Kitsu entry covers ALL seasons/episodes).
+  // Examples: One Piece, Naruto, Bleach — Cinemeta splits into seasons but
+  // Kitsu and anime sites use a single season with absolute episode numbering.
+  const isLongRunning = requestedSeason >= 2 && !options._seasonResolved;
+
   // Episode airdate
   let episodeAirdate = null;
   if (requestedEpisode) {
@@ -854,6 +909,15 @@ async function resolveByKitsu(kitsuId, options = {}) {
   let tmdbEpisode = null;
   if (tmdbId && requestedEpisode) {
     tmdbEpisode = await resolveTmdbEpisode(tmdbId, requestedEpisode, requestedSeason);
+  }
+
+  // For long-running anime, use the absolute episode number so anime providers
+  // (which list all episodes on a single page) find the correct episode.
+  // Uses Cinemeta's season structure (the source of truth for Stremio requests).
+  let effectiveEpisode = requestedEpisode;
+  if (isLongRunning && requestedEpisode && imdbId) {
+    const absoluteEp = await computeAbsoluteEpisode(imdbId, requestedSeason, requestedEpisode);
+    if (absoluteEp) effectiveEpisode = absoluteEp;
   }
 
   // Provider path search (parallel)
@@ -887,7 +951,7 @@ async function resolveByKitsu(kitsuId, options = {}) {
     kitsu: {
       ...kitsuAnime,
       episode_airdate: episodeAirdate,
-      ...(requestedEpisode ? { episode: requestedEpisode } : {}),
+      ...(effectiveEpisode ? { episode: effectiveEpisode } : {}),
     },
     mappings: {
       ids,
