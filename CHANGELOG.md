@@ -1,3 +1,60 @@
+## [3.2.39] - 2026-03-18
+
+### Fixed
+- **Episodio assoluto errato per anime multi-stagione** (`src/mapping/index.js` → `computeAbsoluteEpisode`)
+  - `v3-cinemeta.strem.io` usa stagioni TMDB micro-arco (One Piece S1 = 8 ep), mentre Stremio usa `cinemeta-live.strem.io` a stagioni per arco (S1 = 61 ep).
+  - S2E2 di One Piece mostrava "Ep 10" invece di "Ep 63" perché il conteggio era basato sul DB sbagliato.
+  - Fix: `computeAbsoluteEpisode` ora usa `cinemeta-live` come primary, fallback a `v3-cinemeta` se unavailable.
+  - Cache key aggiornata a `cinemeta:seasons:live:{imdbId}` per evitare dati stale dalla chiave vecchia.
+  - Verifica: One Piece S2E2→63 ✓, Naruto S2E1→53 ✓, Bleach S2E2→368 ✓
+
+---
+
+## [3.2.38] - 2026-03-18
+
+### Fixed
+- **Anime recenti (2026) non trovati dai provider anime** (`src/mapping/index.js` → `resolveByImdb`)
+  - `searchKitsuByTmdbTitle` (fallback title-search su Kitsu) era gated da `options.isAnime === true`, che non viene mai settato per `type = 'series'`.
+  - Conseguenza: anime come Rooster Fighter (tt33086804, 2026, non in Fribb offline DB) non raggiungevano AnimeSaturn/AnimeWorld/AnimeUnity.
+  - Fix: rimossa la guard `options.isAnime` — sicuro perché `searchKitsuByTmdbTitle` usa exact-match stretto.
+
+---
+
+## [3.2.37] - 2026-03-18
+
+### Fixed
+- **AnimeSaturn block extractor — spinoff/correlati inclusi nei risultati** (`src/providers/animesaturn.js`)
+  - I due block extractor (`item-archivio` e `list-group-item`) non avevano filtro slug, includendo One Piece Fan Letter, One Piece in Love, ecc.
+  - Fix: helper `slugMatchesTitle()` applicato a entrambi i block extractor con la stessa logica strict word-prefix già usata nell'URL extractor.
+
+---
+
+## [3.2.36] - 2026-03-18
+
+### Fixed
+- **Cross-series contamination — Naruto Shippuden nei risultati di Naruto** (`src/providers/animeworld.js`, `src/providers/animesaturn.js`)
+  - Lo slug matching era troppo permissivo: `naruto-shippuden` passava come match di `naruto`.
+  - Fix: strict word-prefix — lo slug deve iniziare con tutte le parole del titolo; le parole finali extra devono essere puramente numeriche (numeri stagione).
+
+---
+
+## [cfworker] - 2026-03-18
+
+### Fixed
+- **Cloudflare bandwidth spike — cron tasks ignoravano il cooldown** (`cfworker.js`, `wrangler.toml`)
+  - `caches.default` è locale al PoP Cloudflare. Con `[placement] mode = "smart"` le invocazioni cron girano su PoP diversi → il `lastComplete` veniva perso → ogni cron eseguiva tutte le warm tasks come se fosse la prima volta.
+  - Impatto stimato: 5 worker × 96 run/giorno × ~6MB = ~3GB/giorno di traffico proxy non necessario.
+  - Fix: spostato il flag `lastComplete` da `caches.default` a KV (globalmente consistente) per tutti e 4 i task schedulati:
+    - `_handleScheduledWarm` → KV key `sfm:es:cooldown`
+    - `_handleScheduledGsWarm` → KV key `sfm:gs:cooldown`
+    - `_handleScheduledDomainUpdate` → KV key `sfm:domain:cooldown`
+    - `_handleScheduledUprotRefresh` → KV key `sfm:uprot:cooldown`
+  - Il progress state (`nextPage`, `titles`) rimane in Cache API — la perdita causa solo un restart da pagina 1, non un flood.
+  - Cron ridotto da `*/15 * * * *` a `0 * * * *` (−75% invocazioni): con cooldown 24h il polling ogni 15 min è inutile.
+  - Tutti e 5 i worker ridistribuiti con la nuova schedule.
+
+---
+
 ## [3.0.62] - 2026-03-15
 
 ### Added
