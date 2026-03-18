@@ -1,3 +1,20 @@
+## [3.2.43] - 2026-03-18
+
+### Changed
+- **Episodio singolo corretto in base al catalogo utente** (`src/mapping/index.js`, `src/utils/config.js`, providers)
+  - Problema: v3.2.42 mostrava ENTRAMBI gli episodi possibili (TMDB + TVDB) per anime lunghi. L'utente vedeva stream duplicati per 2 episodi diversi.
+  - Fix: nuova opzione di configurazione `catalogType` (Auto / TMDB / TVDB) nella pagina di installazione.
+    - **Auto** (default): usa TMDB come prioritario. Se l'episodio supera il conteggio TMDB della stagione, rileva automaticamente TVDB.
+    - **TMDB**: forza offset v3-cinemeta (per chi usa cinemeta default di Stremio).
+    - **TVDB**: forza offset cinemeta-live (per chi usa cinemeta tradotto o simili).
+  - `computeAbsoluteEpisode` ora ritorna SEMPRE un singolo numero (non più `{primary, alt}`).
+  - Rimosso il codice `episode_alt` da AnimeWorld, AnimeSaturn e AnimeUnity (niente più stream duplicati).
+  - Il `catalogType` è memorizzato nell'URL crittografato dell'addon (short key `ct`: `t`=tmdb, `v`=tvdb).
+  - Esempio: One Piece S4E1 con config TVDB → episodio 92 (corretto). Con config TMDB → episodio 48 (corretto).
+  - Cache keys aggiornate per includere `catalogType` (no conflitti tra utenti con config diverse).
+
+---
+
 ## [3.2.42] - 2026-03-18
 
 ### Fixed

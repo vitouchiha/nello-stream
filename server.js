@@ -1978,6 +1978,15 @@ function buildPage(host, config) {
             Nascondi cloni delle sezioni (Mostra solo le principali Cinemeta)
           </label>
         </div>
+        <div class="input-grp" style="margin-top:12px">
+          <label>🎌 Catalogo Anime (Numerazione Episodi)</label>
+          <select id="cat_type" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.08);color:var(--text);font-size:0.95rem;">
+            <option value="auto" ${(!f.catalogType || f.catalogType === 'auto') ? 'selected' : ''}>Auto (TMDB preferito)</option>
+            <option value="tmdb" ${f.catalogType === 'tmdb' ? 'selected' : ''}>TMDB (v3-cinemeta)</option>
+            <option value="tvdb" ${f.catalogType === 'tvdb' ? 'selected' : ''}>TVDB (cinemeta tradotto)</option>
+          </select>
+          <div class="hint">Per anime lunghi (One Piece, Naruto…): scegli il tipo di catalogo che usi in Stremio. Auto rileva automaticamente nella maggior parte dei casi; seleziona TVDB se usi <b>cinemeta tradotto</b>.</div>
+        </div>
         <div class="hint">La compatibilità con IMDb/Cinemeta è sempre attiva di default. Il link generato usa un path di release versionato (${installReleaseTag}) per forzare il refresh del manifest in Stremio.</div>
       </div>
 
@@ -2012,6 +2021,7 @@ document.addEventListener('DOMContentLoaded', function() {
         var pUrl = document.getElementById('p_url') ? document.getElementById('p_url').value.trim() : '';
         var mUrl = document.getElementById('m_url') ? document.getElementById('m_url').value.trim() : '';
         var hCat = document.getElementById('h_cat') ? document.getElementById('h_cat').checked : false;
+        var catType = document.getElementById('cat_type') ? document.getElementById('cat_type').value : 'auto';
 
         var c = {
             px: pUrl,
@@ -2020,6 +2030,8 @@ document.addEventListener('DOMContentLoaded', function() {
             hc: hCat ? 1 : 0,
             cm: 1
         };
+        if (catType === 'tmdb') c.ct = 't';
+        else if (catType === 'tvdb') c.ct = 'v';
 
         // Base64 configuration string
         var enc = b64e(JSON.stringify(c));

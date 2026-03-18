@@ -969,7 +969,7 @@ async function fetchMappingPayload(lookup) {
   if (!["kitsu", "imdb", "tmdb"].includes(provider)) return null;
   if (!externalId) return null;
 
-  const cacheKey = `${provider}:${externalId}:s=${requestedSeason ?? "na"}:ep=${requestedEpisode}`;
+  const cacheKey = `${provider}:${externalId}:s=${requestedSeason ?? "na"}:ep=${requestedEpisode}:ct=${lookup.catalogType || 'auto'}`;
   const cached = getCached(caches.mapping, cacheKey);
   if (cached !== undefined) return cached;
 
@@ -978,6 +978,7 @@ async function fetchMappingPayload(lookup) {
     if (Number.isInteger(requestedSeason) && requestedSeason >= 0) {
       options.season = requestedSeason;
     }
+    if (lookup.catalogType) options.catalogType = lookup.catalogType;
     const payload = await mapping.resolve(provider, externalId, options);
     setCached(caches.mapping, cacheKey, payload, TTL.mapping);
     return payload;
@@ -1040,6 +1041,7 @@ async function getStreams(id, type, season, episode, providerContext = null) {
   try {
     const lookup = resolveLookupRequest(id, season, episode, providerContext);
     if (!lookup) return [];
+    lookup.catalogType = providerContext?.catalogType || 'auto';
 
     let mappingPayload = await fetchMappingPayload(lookup);
     let animePaths = extractAnimeSaturnPaths(mappingPayload);
@@ -1075,15 +1077,6 @@ async function getStreams(id, type, season, episode, providerContext = null) {
     const perPathStreams = await mapLimit(animePaths, 3, (path) =>
       extractStreamsFromAnimePath(path, requestedEpisode, mediaType, lookup.season)
     );
-
-    // Try alternative episode (TVDB-based cinemeta users may expect a different absolute ep)
-    const altEpisode = parsePositiveInt(mappingPayload?.kitsu?.episode_alt);
-    if (altEpisode && altEpisode !== requestedEpisode) {
-      const altStreams = await mapLimit(animePaths, 3, (path) =>
-        extractStreamsFromAnimePath(path, altEpisode, mediaType, lookup.season)
-      );
-      perPathStreams.push(...altStreams);
-    }
 
     const streams = perPathStreams.flat().filter((stream) => stream && stream.url);
     const deduped = [];

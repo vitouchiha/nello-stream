@@ -66,8 +66,9 @@ async function fetchHtml(url, timeoutMs = 8000) {
 // splits episodes into seasons but anime sites use a single absolute numbering,
 // compute the absolute episode by fetching Cinemeta's season structure.
 
-async function computeAbsoluteEpisode(imdbId, season, episode) {
+async function computeAbsoluteEpisode(imdbId, season, episode, catalogType) {
   if (!imdbId || !Number.isInteger(season) || season < 2 || !Number.isInteger(episode)) return null;
+  const ct = catalogType || 'auto';
 
   // ── Step 1: Fetch cinemeta-live episode-level data ──────────────────────────
   // cinemeta-live uses ABSOLUTE episode numbers inside each season
@@ -155,21 +156,27 @@ async function computeAbsoluteEpisode(imdbId, season, episode) {
     }
   }
 
-  // ── Step 4: Determine which result to return ───────────────────────────────
+  // ── Step 4: Return single episode based on catalogType ─────────────────────
   const v3Count = v3Counts[season] || 0;
 
+  // Force TVDB: always use TVDB offsets
+  if (ct === 'tvdb') {
+    return tvdbAbsolute || v3Absolute;
+  }
+
+  // Force TMDB: always use TMDB offsets
+  if (ct === 'tmdb') {
+    return v3Absolute;
+  }
+
+  // Auto: detect which catalog the request likely came from.
   // If episode exceeds v3-cinemeta season count, it CAN'T be from TMDB →
-  // must be from a TVDB-relative cinemeta → use TVDB absolute exclusively.
+  // must be from a TVDB-relative cinemeta → use TVDB absolute.
   if (v3Count > 0 && episode > v3Count && tvdbAbsolute) {
     return tvdbAbsolute;
   }
 
-  // If both are valid and different, return both so providers can try each.
-  // The primary is TMDB-based (most common), the alt is TVDB-based.
-  if (tvdbAbsolute && tvdbAbsolute !== v3Absolute) {
-    return { primary: v3Absolute, alt: tvdbAbsolute };
-  }
-
+  // For ambiguous cases (episode fits both catalogs), prefer TMDB (most common).
   return v3Absolute;
 }
 
@@ -995,7 +1002,7 @@ async function resolveByKitsu(kitsuId, options = {}) {
   const id = String(kitsuId).replace(/^kitsu:/i, "").trim();
   if (!id || !/^\d+$/.test(id)) return { ok: false, error: "invalid_kitsu_id" };
 
-  const cacheKey = `resolve:kitsu:${id}:ep${options.episode || ""}:s${options.season ?? ""}`;
+  const cacheKey = `resolve:kitsu:${id}:ep${options.episode || ""}:s${options.season ?? ""}:ct${options.catalogType || "auto"}`;
   const cached = cacheGet(cacheKey);
   if (cached !== undefined) return cached;
 
@@ -1080,20 +1087,12 @@ async function resolveByKitsu(kitsuId, options = {}) {
   // For long-running anime, use the absolute episode number so anime providers
   // (which list all episodes on a single page) find the correct episode.
   // Uses Cinemeta's season structure (the source of truth for Stremio requests).
+  // catalogType determines which cinemeta source to use for offset calculation.
   let effectiveEpisode = requestedEpisode;
-  let effectiveEpisodeAlt = null; // alternative from different cinemeta source
   if (isLongRunning && requestedEpisode && imdbId) {
-    const absoluteEp = await computeAbsoluteEpisode(imdbId, requestedSeason, requestedEpisode);
+    const absoluteEp = await computeAbsoluteEpisode(imdbId, requestedSeason, requestedEpisode, options.catalogType);
     if (absoluteEp) {
-      if (typeof absoluteEp === "object" && absoluteEp.primary) {
-        // Dual result: TMDB-based primary + TVDB-based alternative
-        effectiveEpisode = absoluteEp.primary;
-        if (absoluteEp.alt && absoluteEp.alt !== absoluteEp.primary) {
-          effectiveEpisodeAlt = absoluteEp.alt;
-        }
-      } else {
-        effectiveEpisode = absoluteEp;
-      }
+      effectiveEpisode = absoluteEp;
     }
   }
 
@@ -1132,7 +1131,6 @@ async function resolveByKitsu(kitsuId, options = {}) {
       ...kitsuAnime,
       episode_airdate: episodeAirdate,
       ...(effectiveEpisode ? { episode: effectiveEpisode } : {}),
-      ...(effectiveEpisodeAlt ? { episode_alt: effectiveEpisodeAlt } : {}),
     },
     mappings: {
       ids,

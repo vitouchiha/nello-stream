@@ -18,6 +18,7 @@
  *   hc    → hideCatalogs (1 = yes, omit = no)
  *   pv    → providers: 'a'=all (default), 'k'=kisskh, 'r'=rama, 'd'=drammatica, 'g'=guardaserie
  *   cm    → cinemeta (1 = enable IMDB stream support, omit = no)
+ *   ct    → catalogType: 't'=tmdb, 'v'=tvdb (omit = auto, TMDB preferred)
  *   tm    → TMDB API key (for meta enrichment: poster, background, cast, genres)
  *   rp    → RPDB API key (for rated poster overlays)
  *   tp    → TopPoster API key (for TopPoster poster overlays)
@@ -32,6 +33,7 @@ const DEFAULT_CONFIG = {
   hideCatalogs: false,
   providers:    'all',
   cinemeta:     true,
+  catalogType:  'auto',     // 'auto' = TMDB preferred, 'tmdb' = force TMDB, 'tvdb' = force TVDB
   // Default TMDB key — active for all users unless they supply their own.
   // Provides poster HD, cast, genres, IMDB title lookup for Cinemeta streams.
   tmdbKey:        '6e0a84ca7b324763793422a6656d34ff',
@@ -88,6 +90,9 @@ function encodeConfig(config) {
   const pvMap = { kisskh: 'k', rama: 'r', drammatica: 'd', guardaserie: 'g' };
   if (config.providers && config.providers !== 'all') obj.pv = pvMap[config.providers] || config.providers;
   if (config.cinemeta)                  obj.cm   = 1;
+  if (config.catalogType && config.catalogType !== 'auto') {
+    obj.ct = config.catalogType === 'tmdb' ? 't' : config.catalogType === 'tvdb' ? 'v' : undefined;
+  }
   if (config.tmdbKey)                   obj.tm   = config.tmdbKey.trim();
   if (config.rpdbKey)                   obj.rp   = config.rpdbKey.trim();
   if (config.topPosterKey)               obj.tp   = config.topPosterKey.trim();
@@ -114,6 +119,7 @@ function decodeConfig(encoded) {
       hideCatalogs: !!obj.hc,
       providers:    decodedProviders,
       cinemeta:     !!obj.cm,
+      catalogType:  obj.ct === 't' ? 'tmdb' : obj.ct === 'v' ? 'tvdb' : 'auto',
       tmdbKey:        (obj.tm   || DEFAULT_CONFIG.tmdbKey).trim(),
       rpdbKey:        (obj.rp   || '').trim(),
       topPosterKey:   (obj.tp   || '').trim(),
@@ -130,8 +136,7 @@ function decodeConfig(encoded) {
         proxyUrl:     (obj.px   || '').trim(),
         hideCatalogs: !!obj.hc,
         providers:    decodedProviders,
-        cinemeta:     !!obj.cm,
-        tmdbKey:        (obj.tm   || DEFAULT_CONFIG.tmdbKey).trim(),
+        cinemeta:     !!obj.cm,      catalogType:  obj.ct === 't' ? 'tmdb' : obj.ct === 'v' ? 'tvdb' : 'auto',        tmdbKey:        (obj.tm   || DEFAULT_CONFIG.tmdbKey).trim(),
         rpdbKey:        (obj.rp   || '').trim(),
         topPosterKey:   (obj.tp   || '').trim(),
       };

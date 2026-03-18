@@ -216,6 +216,7 @@ function buildProviderRequestContext(context, config = {}) {
         mfpKey: String(config.mfpKey || '').trim(),
         proxyUrl: String(config.proxyUrl || '').trim(),
         providers: config.providers,
+        catalogType: config.catalogType || 'auto',
         primaryTitle: String(config.primaryTitle || '').trim(),
         titleCandidates
     };
