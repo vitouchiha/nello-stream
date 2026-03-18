@@ -1,3 +1,22 @@
+## [3.2.44] - 2026-03-19
+
+### Fixed
+- **warm-gs: normalizzazione dominio mancante in gs_warm** (`cfworker.js`)
+  - L'endpoint `gs_warm` salvava chiavi KV senza normalizzazione (`p:${url}` raw). Se chiamato con URL `.digital`, la chiave non matchava il lookup proxy (`.website`) → cache miss.
+  - Fix: aggiunto `_normalizeGsUrl(u)` prima di creare la chiave KV.
+- **warm-gs: dominio canonico errato in warm-gs-content.js**
+  - `_normalizeGsUrl()` normalizzava a `guardoserie.digital` invece di `guardoserie.website` (dominio canonico in cfworker.js).
+  - Fix: cambiato a `.website`.
+- **Task Scheduler: privilegi insufficienti** (`setup-scheduler.bat`)
+  - Task creato senza `/rl HIGHEST` → eseguito solo in modalità interattiva → mai eseguito (last run: 30/11/1999).
+  - Fix: aggiunto `/rl HIGHEST` al comando `schtasks /create`.
+
+### Docs
+- Creato `docs/warm_gs_status.md` — documentazione completa architettura warm-gs a 3 livelli
+- Aggiornato `docs/repo_streamfusion-mail-notes.md` — riferimenti dominio corretti
+
+---
+
 ## [3.2.43] - 2026-03-18
 
 ### Changed

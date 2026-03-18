@@ -224,7 +224,8 @@ export default {
       if (!urls.length) return _json({ error: 'Pass ?u=URL1&u=URL2 to warm' }, 400);
       const results = [];
       for (const u of urls.slice(0, 20)) { // max 20 URLs per call
-        const kvKey = `p:${u}`;
+        const normU = _normalizeGsUrl(u);
+        const kvKey = `p:${normU}`;
         try {
           // Check if already cached and fresh
           const existing = await env.ES_CACHE.get(kvKey, 'json');
