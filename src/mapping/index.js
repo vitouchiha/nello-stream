@@ -69,11 +69,17 @@ async function fetchHtml(url, timeoutMs = 8000) {
 async function computeAbsoluteEpisode(imdbId, season, episode) {
   if (!imdbId || !Number.isInteger(season) || season < 2 || !Number.isInteger(episode)) return null;
 
-  const key = `cinemeta:seasons:${imdbId}`;
+  const key = `cinemeta:seasons:live:${imdbId}`;
   let seasonCounts = cacheGet(key);
 
   if (seasonCounts === undefined) {
-    const meta = await fetchJson(`https://v3-cinemeta.strem.io/meta/series/${imdbId}.json`, 10000);
+    // Use cinemeta-live first: it mirrors what Stremio actually shows users (IMDB arc-based seasons).
+    // e.g. One Piece S1=61 (East Blue arc) vs v3-cinemeta S1=8 (TMDB micro-arc).
+    // Falls back to v3-cinemeta if cinemeta-live is unreachable from the datacenter.
+    let meta = await fetchJson(`https://cinemeta-live.strem.io/meta/series/${imdbId}.json`, 10000);
+    if (!meta?.meta?.videos?.length) {
+      meta = await fetchJson(`https://v3-cinemeta.strem.io/meta/series/${imdbId}.json`, 10000);
+    }
     const videos = meta?.meta?.videos;
     if (!Array.isArray(videos) || videos.length === 0) return null;
 
