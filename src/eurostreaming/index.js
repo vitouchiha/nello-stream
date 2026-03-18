@@ -560,7 +560,15 @@ async function _searchViaKvIndex(showname) {
   const results = [];
   const searchLower = String(showname || '').toLowerCase().trim();
   for (const [title, entries] of Object.entries(index)) {
-    const ratio = titleRatio(title, searchLower);
+    let ratio = titleRatio(title, searchLower);
+    // Also check parenthesized alternate name, e.g. "Mercoledì (Wednesday)"
+    if (ratio < 0.6) {
+      const paren = title.match(/\(([^)]+)\)/);
+      if (paren) {
+        const innerRatio = titleRatio(paren[1].trim(), searchLower);
+        if (innerRatio > ratio) ratio = innerRatio;
+      }
+    }
     if (ratio >= 0.6) { // Lower threshold for initial candidate selection
       for (const entry of entries) {
         // entries can be {id, page} objects (new format) or plain numbers (old format)
