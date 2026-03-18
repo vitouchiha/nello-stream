@@ -490,20 +490,31 @@ async function searchAnimeWorld(titles) {
       if (p && !allLinks.includes(p)) allLinks.push(p);
     }
 
-    // Filter by title similarity: /play/slug.ID → extract slug part
-    const normalizedTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    // Strict word-prefix match: slug must start with ALL title words in order.
+    // Extra trailing slug words (after the title) must be purely numeric (season markers).
+    // This prevents e.g. "naruto-shippuden" or "boruto-naruto-next-generations"
+    // from matching a search for "Naruto".
+    const titleNormalized = title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
     // Skip non-Latin titles that normalize to empty
-    if (!normalizedTitle) { cacheSet(key, []); continue; }
+    if (!titleNormalized) { cacheSet(key, []); continue; }
+    const titleWords = titleNormalized.split(/\s+/).filter(Boolean);
     const paths = allLinks.filter(p => {
       // Extract slug from /play/SLUG.ID or /play/SLUG-subita.ID etc.
       const slug = p.replace(/^\/play\//, "").replace(/\.[^.]+$/, ""); // remove .ID suffix
-      const normalizedSlug = slug.toLowerCase().replace(/[-_]+/g, "").replace(/[^a-z0-9]/g, "");
-      if (normalizedSlug.includes(normalizedTitle) || normalizedTitle.includes(normalizedSlug)) return true;
-      // Word-based matching
-      const slugWords = slug.toLowerCase().split(/[-_]+/).filter(w => w.length > 2);
-      const titleWords = title.toLowerCase().split(/[\s:,.-]+/).filter(w => w.length > 2);
-      const matchingWords = titleWords.filter(tw => slugWords.some(sw => sw.includes(tw) || tw.includes(sw)));
-      return matchingWords.length >= Math.max(1, Math.ceil(titleWords.length * 0.5));
+      // Normalize slug: strip language/format tags, replace separators with spaces
+      const slugNorm = slug
+        .toLowerCase()
+        .replace(/-(subita|ita-sub|sub-ita|ita|sub|eng|raw|jp|dub)$/i, "")
+        .replace(/[-_]+/g, " ")
+        .trim();
+      const slugWords = slugNorm.split(/\s+/).filter(Boolean);
+      // Slug must start with all title words, in exact order
+      if (slugWords.length < titleWords.length) return false;
+      for (let i = 0; i < titleWords.length; i++) {
+        if (slugWords[i] !== titleWords[i]) return false;
+      }
+      // Any extra slug words beyond title words must be purely numeric (season markers)
+      return slugWords.slice(titleWords.length).every(w => /^\d+$/.test(w));
     });
 
     cacheSet(key, paths);
@@ -562,25 +573,33 @@ async function searchAnimeSaturn(titles) {
       }
     }
 
-    // Last fallback: regex with title filtering
+    // Last fallback: regex with strict word-prefix filtering
     if (paths.length === 0) {
       const regex = /href="(?:https?:\/\/[^"]*)?\/anime\/([^"?#]+)"/gi;
       let m;
-      const normalizedTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, "");
-      if (!normalizedTitle) { cacheSet(key, []); continue; } // Skip non-Latin titles
+      const asTitleNorm = title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      if (!asTitleNorm) { cacheSet(key, []); continue; } // Skip non-Latin titles
+      const asTitleWords = asTitleNorm.split(/\s+/).filter(Boolean);
       while ((m = regex.exec(html)) !== null) {
         const slug = m[1];
         if (slug.includes("${") || slug.includes("{{")) continue;
-        // Check if slug matches the searched title (slug uses hyphens as separators)
-        const normalizedSlug = slug.toLowerCase().replace(/[-_]+/g, "").replace(/[^a-z0-9]/g, "");
-        // Accept if slug contains the normalized title or title contains the slug's main part
-        const slugWords = slug.toLowerCase().replace(/[-_]+/g, " ").split(/\s+/).filter(w => w.length > 2);
-        const titleWords = title.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-        const matchingWords = titleWords.filter(tw => slugWords.some(sw => sw.includes(tw) || tw.includes(sw)));
-        if (normalizedSlug.includes(normalizedTitle) || normalizedTitle.includes(normalizedSlug) || matchingWords.length >= Math.max(1, Math.ceil(titleWords.length * 0.5))) {
-          const path = `/anime/${slug}`;
-          if (!paths.includes(path)) paths.push(path);
+        // Strict word-prefix match: slug must start with all title words, in order.
+        // Extra trailing words must be purely numeric (season markers).
+        const slugNorm = slug
+          .toLowerCase()
+          .replace(/-(subita|ita-sub|sub-ita|ita|sub|eng|raw|jp|dub)(-[a-z0-9]+)?$/i, "")
+          .replace(/[-_]+/g, " ")
+          .trim();
+        const slugWordsAs = slugNorm.split(/\s+/).filter(Boolean);
+        if (slugWordsAs.length < asTitleWords.length) continue;
+        let asOk = true;
+        for (let i = 0; i < asTitleWords.length; i++) {
+          if (slugWordsAs[i] !== asTitleWords[i]) { asOk = false; break; }
         }
+        if (!asOk) continue;
+        if (!slugWordsAs.slice(asTitleWords.length).every(w => /^\d+$/.test(w))) continue;
+        const path = `/anime/${slug}`;
+        if (!paths.includes(path)) paths.push(path);
       }
     }
 
