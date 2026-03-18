@@ -1076,6 +1076,15 @@ async function getStreams(id, type, season, episode, providerContext = null) {
       extractStreamsFromAnimePath(path, requestedEpisode, mediaType, lookup.season)
     );
 
+    // Try alternative episode (TVDB-based cinemeta users may expect a different absolute ep)
+    const altEpisode = parsePositiveInt(mappingPayload?.kitsu?.episode_alt);
+    if (altEpisode && altEpisode !== requestedEpisode) {
+      const altStreams = await mapLimit(animePaths, 3, (path) =>
+        extractStreamsFromAnimePath(path, altEpisode, mediaType, lookup.season)
+      );
+      perPathStreams.push(...altStreams);
+    }
+
     const streams = perPathStreams.flat().filter((stream) => stream && stream.url);
     const deduped = [];
     const seen = new Set();

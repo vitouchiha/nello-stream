@@ -132,11 +132,45 @@ async function computeAbsoluteEpisode(imdbId, season, episode) {
     cacheSet(v3Key, v3Counts, 60 * 60 * 1000);
   }
 
-  let offset = 0;
+  // ── Step 3a: Compute TMDB-based absolute (v3-cinemeta) ─────────────────────
+  let v3Offset = 0;
   for (let s = 1; s < season; s++) {
-    offset += v3Counts[s] || 0;
+    v3Offset += v3Counts[s] || 0;
   }
-  return offset + episode;
+  const v3Absolute = v3Offset + episode;
+
+  // ── Step 3b: Compute TVDB-based absolute (cinemeta-live season counts) ─────
+  // Some cinemeta addons (e.g. translated/localized cinemeta) use TVDB season
+  // boundaries but with relative episode numbering (1,2,3… per season).
+  // e.g. One Piece TVDB S4 = 39 eps (abs 92-130), but S4E1 = relative ep 1 → abs 92.
+  const liveSeasonCount = liveEps.length;
+  let tvdbAbsolute = null;
+  if (liveSeasonCount > 0) {
+    let tvdbOffset = 0;
+    for (let s = 1; s < season; s++) {
+      tvdbOffset += (liveSeasonEps[s] || []).length;
+    }
+    if (episode <= liveSeasonCount) {
+      tvdbAbsolute = tvdbOffset + episode;
+    }
+  }
+
+  // ── Step 4: Determine which result to return ───────────────────────────────
+  const v3Count = v3Counts[season] || 0;
+
+  // If episode exceeds v3-cinemeta season count, it CAN'T be from TMDB →
+  // must be from a TVDB-relative cinemeta → use TVDB absolute exclusively.
+  if (v3Count > 0 && episode > v3Count && tvdbAbsolute) {
+    return tvdbAbsolute;
+  }
+
+  // If both are valid and different, return both so providers can try each.
+  // The primary is TMDB-based (most common), the alt is TVDB-based.
+  if (tvdbAbsolute && tvdbAbsolute !== v3Absolute) {
+    return { primary: v3Absolute, alt: tvdbAbsolute };
+  }
+
+  return v3Absolute;
 }
 
 // ─── Kitsu API ────────────────────────────────────────────────────────────────
@@ -1047,9 +1081,20 @@ async function resolveByKitsu(kitsuId, options = {}) {
   // (which list all episodes on a single page) find the correct episode.
   // Uses Cinemeta's season structure (the source of truth for Stremio requests).
   let effectiveEpisode = requestedEpisode;
+  let effectiveEpisodeAlt = null; // alternative from different cinemeta source
   if (isLongRunning && requestedEpisode && imdbId) {
     const absoluteEp = await computeAbsoluteEpisode(imdbId, requestedSeason, requestedEpisode);
-    if (absoluteEp) effectiveEpisode = absoluteEp;
+    if (absoluteEp) {
+      if (typeof absoluteEp === "object" && absoluteEp.primary) {
+        // Dual result: TMDB-based primary + TVDB-based alternative
+        effectiveEpisode = absoluteEp.primary;
+        if (absoluteEp.alt && absoluteEp.alt !== absoluteEp.primary) {
+          effectiveEpisodeAlt = absoluteEp.alt;
+        }
+      } else {
+        effectiveEpisode = absoluteEp;
+      }
+    }
   }
 
   // Provider path search (parallel)
@@ -1087,6 +1132,7 @@ async function resolveByKitsu(kitsuId, options = {}) {
       ...kitsuAnime,
       episode_airdate: episodeAirdate,
       ...(effectiveEpisode ? { episode: effectiveEpisode } : {}),
+      ...(effectiveEpisodeAlt ? { episode_alt: effectiveEpisodeAlt } : {}),
     },
     mappings: {
       ids,

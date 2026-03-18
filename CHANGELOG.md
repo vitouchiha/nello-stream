@@ -1,3 +1,27 @@
+## [3.2.42] - 2026-03-18
+
+### Fixed
+- **Episodio sbagliato per utenti con cinemeta TVDB-based** (`src/mapping/index.js`, providers)
+  - Il problema: `computeAbsoluteEpisode` calcolava l'episodio assoluto solo con offset v3-cinemeta (TMDB). Ma utenti con cinemeta che usa stagioni TVDB (con numerazione relativa 1,2,3...) ricevevano l'episodio errato.
+  - Esempio: One Piece S4E1 → TMDB offset = 8+22+17 = **48**, TVDB offset = 61+16+14 = **92**. L'addon dava sempre 48.
+  - Fix: `computeAbsoluteEpisode` ora calcola ENTRAMBI gli episodi assoluti:
+    - Se l'episodio supera il conteggio TMDB della stagione (es. S4E20 con TMDB S4=13 eps) → usa offset TVDB direttamente
+    - Se l'episodio rientra in entrambi → ritorna `{ primary: TMDB, alt: TVDB }` → salvati come `kitsu.episode` e `kitsu.episode_alt` nel payload
+  - Providers (AnimeWorld, AnimeSaturn, AnimeUnity) aggiornati: se `episode_alt` esiste e diverso, estraggono stream anche per l'episodio alternativo
+  - Risultato: gli utenti vedono stream per ENTRAMBI gli episodi possibili, etichettati con il numero episodio nel titolo
+  - Verificato:
+    | Test | episode | episode_alt | Corretto? |
+    |------|---------|-------------|-----------|
+    | One Piece S4E1 | 48 (TMDB) | 92 (TVDB) | ✓ |
+    | One Piece S4E92 (cinemeta-live) | 92 | — | ✓ |
+    | One Piece S4E20 (>TMDB count) | 111 (TVDB) | — | ✓ |
+    | Naruto S3E2 | 85 (TMDB) | 106 (TVDB) | ✓ |
+    | Bleach S2E2 | 22 (TMDB) | 368 (TVDB) | ✓ |
+    | One Piece S1E1 | 1 | — | ✓ (no change) |
+    | Eva Special | 1 | — | ✓ (no change) |
+
+---
+
 ## [3.2.41] - 2026-03-18
 
 ### Fixed
