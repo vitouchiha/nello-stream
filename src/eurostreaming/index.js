@@ -750,6 +750,19 @@ async function searchAndExtract(showname, year, season, episode, providerContext
             console.log(`[Eurostreaming] Loose match accepted (${(ratio*100).toFixed(0)}%): "${postTitle}"`);
           }
 
+          // FALLBACK: Italian title with original in parentheses, e.g. "Mercoledì (Wednesday)"
+          if (!matched) {
+            const parenMatch = postTitle.match(/\(([^)]+)\)/);
+            if (parenMatch) {
+              const inner = parenMatch[1].trim();
+              const innerRatio = titleRatio(inner, showname);
+              if (innerRatio >= 0.85) {
+                matched = true;
+                console.log(`[Eurostreaming] Parenthesized match (${(innerRatio*100).toFixed(0)}%): "${postTitle}" → "${inner}"`);
+              }
+            }
+          }
+
           if (!matched && year) {
             // Fallback: year match within ±1
             const yearMatch = /(?<![\/\-])(19|20)\d{2}(?![\/\-])/.exec(description);
@@ -820,6 +833,7 @@ async function getStreams(id, type, season, episode, providerContext = null) {
       if (!showname && Array.isArray(providerContext.titleCandidates)) {
         showname = String(providerContext.titleCandidates[0] || '').trim();
       }
+      if (providerContext.year) year = String(providerContext.year);
     }
 
     // 2. Fallback to TMDB only if no context title available
