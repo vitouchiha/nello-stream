@@ -37,12 +37,14 @@ async function fetchJsonWithTimeout(url, timeoutMs = CONTEXT_TIMEOUT) {
 }
 
 // Internal Mapping API (replaces external animemapping.stremio.dpdns.org)
-async function fetchMappingByRoute(route, value, season, episode) {
+async function fetchMappingByRoute(route, value, season, episode, type, primaryTitle) {
     if (!route || !value) return null;
     try {
         const options = {};
         if (Number.isInteger(season) && season >= 0) options.season = season;
         if (Number.isInteger(episode) && episode > 0) options.episode = episode;
+        if (String(type || '').toLowerCase() === 'anime') options.isAnime = true;
+        if (primaryTitle) options.primaryTitle = primaryTitle;
         return await mapping.resolve(route, value, options);
     } catch { return null; }
 }
@@ -109,7 +111,7 @@ async function fetchTmdbIdFromImdb(imdbId, normalizedType) {
     return null;
 }
 
-async function resolveProviderRequestContext(id, type, season, episode, seasonProvided = false) {
+async function resolveProviderRequestContext(id, type, season, episode, seasonProvided = false, opts = {}) {
     const parsedSeason = Number.parseInt(season, 10);
     const normalizedRequestedSeason =
         Number.isInteger(parsedSeason) && parsedSeason >= 0
@@ -161,7 +163,7 @@ async function resolveProviderRequestContext(id, type, season, episode, seasonPr
             const rawImdbId = idStr.split(':')[0];
             context.idType = 'imdb';
             context.imdbId = rawImdbId;
-            const byImdb = await fetchMappingByRoute('imdb', rawImdbId, context.requestedSeason, normalizedEp);
+            const byImdb = await fetchMappingByRoute('imdb', rawImdbId, context.requestedSeason, normalizedEp, type, opts.primaryTitle);
             if (byImdb) {
                 applyMappingHintsToContext(context, byImdb);
             }
@@ -285,7 +287,7 @@ async function getStreams(id, type, season, episode, config = {}) {
       return cachedStreams;
     }
 
-    const providerContext = await resolveProviderRequestContext(id, normalizedType, normalizedSeason, normalizedEpisode, false);
+    const providerContext = await resolveProviderRequestContext(id, normalizedType, normalizedSeason, normalizedEpisode, false, { primaryTitle: config.primaryTitle });
     const parsedCanonicalSeason = Number.parseInt(providerContext?.canonicalSeason, 10);
     const effectiveSeason =
         Number.isInteger(parsedCanonicalSeason) && parsedCanonicalSeason >= 0

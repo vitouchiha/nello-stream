@@ -259,8 +259,8 @@ async function resolveKitsuIdFromTmdb(tmdbId) {
 
 // ─── Kitsu title search (fallback when external ID mappings don't exist) ──────
 
-async function searchKitsuByTmdbTitle(tmdbId) {
-  const key = `kitsu:title_search:tmdb:${tmdbId}`;
+async function searchKitsuByTmdbTitle(tmdbId, preferTv = false) {
+  const key = `kitsu:title_search:tmdb:${tmdbId}:${preferTv ? 'tv' : 'any'}`;
   const cached = cacheGet(key);
   if (cached !== undefined) return cached;
 
@@ -279,6 +279,8 @@ async function searchKitsuByTmdbTitle(tmdbId) {
   if (movieData?.original_title) titles.add(movieData.original_title);
   if (titles.size === 0) return cacheSet(key, null);
 
+  const TV_SUBTYPES = new Set(["TV", "tv"]);
+
   for (const title of titles) {
     const searchUrl = `https://kitsu.io/api/edge/anime?filter[text]=${encodeURIComponent(title)}&fields[anime]=id,canonicalTitle,titles,slug,subtype&page[limit]=5`;
     const result = await fetchJson(searchUrl, 8000);
@@ -286,21 +288,31 @@ async function searchKitsuByTmdbTitle(tmdbId) {
 
     // Match by title similarity
     const normalizedSearch = title.toLowerCase().replace(/[^a-z0-9]+/g, "");
-    for (const anime of result.data) {
-      const attrs = anime.attributes || {};
-      const candidateTitles = [
-        attrs.canonicalTitle,
-        attrs.titles?.en, attrs.titles?.en_jp, attrs.titles?.ja_jp,
-        attrs.slug?.replace(/-/g, " ")
-      ].filter(Boolean).map(t => t.toLowerCase().replace(/[^a-z0-9]+/g, ""));
 
-      for (const cand of candidateTitles) {
-        // Strict: exact match only — substring matching causes false positives
-        // (e.g. "Mare Fuori" matching "Shimajirou to Sora Tobu Fune")
-        if (cand === normalizedSearch) {
-          return cacheSet(key, String(anime.id));
+    // When preferTv=true, do two passes: first TV-only, then any type
+    const passes = preferTv
+      ? [result.data.filter(a => TV_SUBTYPES.has(a.attributes?.subtype)), result.data]
+      : [result.data];
+
+    for (const candidates of passes) {
+      for (const anime of candidates) {
+        const attrs = anime.attributes || {};
+        const candidateTitles = [
+          attrs.canonicalTitle,
+          attrs.titles?.en, attrs.titles?.en_jp, attrs.titles?.ja_jp,
+          attrs.slug?.replace(/-/g, " ")
+        ].filter(Boolean).map(t => t.toLowerCase().replace(/[^a-z0-9]+/g, ""));
+
+        for (const cand of candidateTitles) {
+          // Strict: exact match only — substring matching causes false positives
+          // (e.g. "Mare Fuori" matching "Shimajirou to Sora Tobu Fune")
+          if (cand === normalizedSearch) {
+            return cacheSet(key, String(anime.id));
+          }
         }
       }
+      // If TV pass found a match, don't continue to "any" pass
+      if (passes.length > 1 && passes[0].length > 0) break;
     }
   }
   return cacheSet(key, null);
@@ -321,6 +333,30 @@ async function findTmdbIdFromExternal(externalId, source) {
   const movieResult = data.movie_results?.[0];
   const result = tvResult?.id || movieResult?.id || null;
   return cacheSet(key, result ? String(result) : null);
+}
+
+// Search TMDB TV by title (used when IMDB→TMDB find fails — e.g. Cinemeta anime IMDB IDs).
+// Returns TMDB TV series ID or null. Exact-match only to avoid false positives.
+async function searchTmdbTvByTitle(title) {
+  if (!title || !TMDB_API_KEY) return null;
+  const key = `tmdb:tv_search:${title.toLowerCase()}`;
+  const cached = cacheGet(key);
+  if (cached !== undefined) return cached;
+
+  const url = `https://api.themoviedb.org/3/search/tv?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(title)}&page=1`;
+  const data = await fetchJson(url, 8000);
+  if (!data?.results?.length) return cacheSet(key, null);
+
+  const normalized = title.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  for (const show of data.results) {
+    const names = [show.name, show.original_name].filter(Boolean);
+    for (const n of names) {
+      if (n.toLowerCase().replace(/[^a-z0-9]+/g, "") === normalized) {
+        return cacheSet(key, String(show.id));
+      }
+    }
+  }
+  return cacheSet(key, null);
 }
 
 async function resolveTmdbEpisode(tmdbId, requestedEpisode, requestedSeason) {
@@ -1084,9 +1120,46 @@ async function resolveByImdb(imdbId, options = {}) {
           kitsuId = await findKitsuIdByExternalId("tvdb", String(movieExt.tvdb_id));
         }
       }
-      // NOTE: searchKitsuByTmdbTitle removed here — too many false positives
-      // for non-anime titles (e.g. "Mare Fuori" → Kitsu 42652 Shimajirou).
-      // The Fribb offline list is the authoritative anime identifier.
+      // Fallback: try Fribb offline list by TMDB ID directly
+      if (!kitsuId) {
+        kitsuId = await findKitsuIdByExternalId("tmdb", resolvedTmdbId);
+      }
+      // Fallback: TMDB may store a different IMDB than Cinemeta (e.g. Dragon Ball Z:
+      // Cinemeta sends tt0214341 but Fribb has tt0872308). Try TMDB's own IMDB.
+      if (!kitsuId && extIds?.imdb_id && extIds.imdb_id !== id) {
+        kitsuId = await findKitsuIdByExternalId("imdb", extIds.imdb_id);
+      }
+      // Last resort: title-based Kitsu search (only for anime to avoid false positives)
+      if (!kitsuId && options.isAnime) {
+        kitsuId = await searchKitsuByTmdbTitle(resolvedTmdbId);
+      }
+    }
+  }
+
+  // If IMDB→TMDB chain failed AND this is an anime request, try title-based TMDB search.
+  // This handles cases where Cinemeta uses a different IMDB than TMDB/Fribb knows
+  // (e.g. Dragon Ball Z: Cinemeta tt0214341 doesn't exist in TMDB, but title search
+  // finds TMDB 12971 → Kitsu title search → Kitsu 720).
+  // NOTE: Fribb TMDB lookup is intentionally skipped here because some Fribb TMDB entries
+  // are wrong (e.g. TMDB 12971 → Kitsu 806 movie instead of Kitsu 720 TV series).
+  if (!kitsuId && options.isAnime && options.primaryTitle) {
+    const titleTmdbId = await searchTmdbTvByTitle(options.primaryTitle);
+    if (titleTmdbId) {
+      resolvedTmdbId = resolvedTmdbId || titleTmdbId;
+      // Use Kitsu title search with TV preference (Fribb TMDB lookup skipped — unreliable)
+      kitsuId = await searchKitsuByTmdbTitle(titleTmdbId, true);
+      // If title search failed, still try TVDB/IMDB chains as last resort
+      if (!kitsuId) {
+        const extIds2 = await fetchJson(
+          `https://api.themoviedb.org/3/tv/${titleTmdbId}/external_ids?api_key=${TMDB_API_KEY}`
+        );
+        if (extIds2?.tvdb_id) {
+          kitsuId = await findKitsuIdByExternalId("tvdb", String(extIds2.tvdb_id));
+        }
+        if (!kitsuId && extIds2?.imdb_id) {
+          kitsuId = await findKitsuIdByExternalId("imdb", extIds2.imdb_id);
+        }
+      }
     }
   }
 
