@@ -538,6 +538,28 @@ async function searchAnimeSaturn(titles) {
     const html = await fetchHtml(`${base}/animelist?search=${encodeURIComponent(title)}`);
     const paths = [];
 
+    // Precompute title words once for strict prefix matching (shared by all block extractors)
+    const asTitleNormBlocks = title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const asTitleWordsBlocks = asTitleNormBlocks ? asTitleNormBlocks.split(/\s+/).filter(Boolean) : [];
+
+    // Helper: strict word-prefix match — slug must start with all title words (in order),
+    // any trailing slug words beyond the title must be purely numeric (season markers).
+    // This prevents "one-piece-in-love", "one-piece-fan-letter", etc. from matching "One Piece".
+    const slugMatchesTitle = (slug) => {
+      if (asTitleWordsBlocks.length === 0) return true; // non-Latin titles: accept all
+      const slugNorm = slug
+        .toLowerCase()
+        .replace(/-(subita|ita-sub|sub-ita|ita|sub|eng|raw|jp|dub)(-[a-z0-9]+)?$/i, "")
+        .replace(/[-_]+/g, " ")
+        .trim();
+      const sw = slugNorm.split(/\s+/).filter(Boolean);
+      if (sw.length < asTitleWordsBlocks.length) return false;
+      for (let i = 0; i < asTitleWordsBlocks.length; i++) {
+        if (sw[i] !== asTitleWordsBlocks[i]) return false;
+      }
+      return sw.slice(asTitleWordsBlocks.length).every(w => /^\d+$/.test(w));
+    };
+
     // AnimeSaturn search results are inside <div class="item-archivio"> blocks
     const resultBlockRegex = /class="[^"]*item-archivio[^"]*"[\s\S]*?<\/(?:div|li)>/gi;
     const blocks = html.match(resultBlockRegex);
@@ -547,7 +569,7 @@ async function searchAnimeSaturn(titles) {
         const linkMatch = block.match(/href="(?:https?:\/\/[^"]*)?\/anime\/([^"?#]+)"/i);
         if (linkMatch) {
           const slug = linkMatch[1];
-          if (!slug.includes("${") && !slug.includes("{{")) {
+          if (!slug.includes("${") && !slug.includes("{{") && slugMatchesTitle(slug)) {
             const path = `/anime/${slug}`;
             if (!paths.includes(path)) paths.push(path);
           }
@@ -564,7 +586,7 @@ async function searchAnimeSaturn(titles) {
           const linkMatch = block.match(/href="(?:https?:\/\/[^"]*)?\/anime\/([^"?#]+)"/i);
           if (linkMatch) {
             const slug = linkMatch[1];
-            if (!slug.includes("${") && !slug.includes("{{")) {
+            if (!slug.includes("${") && !slug.includes("{{") && slugMatchesTitle(slug)) {
               const path = `/anime/${slug}`;
               if (!paths.includes(path)) paths.push(path);
             }
