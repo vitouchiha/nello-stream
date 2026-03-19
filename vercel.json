@@ -14,7 +14,6 @@
           "gs-titles-index.json",
           "gs-episodes-index.json",
           "kk-cache/**",
-          "kk-subs-cache/**",
           "kk-titles-index.json",
           "kk-episodes-index.json",
           "rama-cache/**",
