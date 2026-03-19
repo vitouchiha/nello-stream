@@ -1,3 +1,15 @@
+## [3.2.51] - 2026-03-19
+
+### Fixed
+- **Matching slug: normalizzazione numeri, articoli, suffisso disambiguazione** (`src/mapping/index.js`)
+  - Numeri con zero iniziale nello slug ora matchano: `08` = `8` (canon normalizza numeri).
+  - Articolo "the" nel titolo viene saltato quando non presente nello slug (es. "One Piece The Movie" vs slug `one-piece-movie-...`).
+  - Suffisso disambiguazione AS inline: slug `tachia` ora matcha titolo `tachi` + suffisso `a` (non solo come parola separata).
+  - Fix applicato in tutte e 5 le location di matching (AW main, AW fallback, AS slugMatchesTitle, AS tier3, AS fallback).
+  - Testato: tt1037116 (One Piece Movie 8: Alabasta) ora trova AW + AS; Stampede, Frieren S2, Film Z, Jack of All Trades invariati ✓
+
+---
+
 ## [3.2.50] - 2026-03-19
 
 ### Fixed

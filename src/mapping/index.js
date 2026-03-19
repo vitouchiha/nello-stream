@@ -600,10 +600,13 @@ async function searchAnimeWorld(titles, opts) {
       // - "film" and "movie" are treated as equivalent (sites use "movie" for anime films)
       // - Pure-numeric and "movie" slug words are skipped when they don't match the current
       //   title word (sites add episode numbers "movie-12" or prefix slugs with "movie")
-      const canon = w => (w === 'film' ? 'movie' : w);
+      const canon = w => { if (w === 'film') return 'movie'; if (/^\d+$/.test(w)) return String(parseInt(w, 10)); return w; };
       let ti = 0, si = 0;
       while (si < slugWords.length && ti < titleWords.length) {
         if (canon(slugWords[si]) === canon(titleWords[ti])) { ti++; si++; continue; }
+        // AS disambiguation suffix: slug "tachia" = title "tachi" + "a"
+        const csi = canon(slugWords[si]), cti = canon(titleWords[ti]);
+        if (csi.length > cti.length && csi.startsWith(cti) && /^a+$/.test(csi.slice(cti.length))) { ti++; si++; continue; }
         // Try merging consecutive title words to match one slug word
         // (e.g. en_jp "kiyou binbou" → slug "kiyoubinbou")
         let merged = titleWords[ti], found = false;
@@ -613,6 +616,8 @@ async function searchAnimeWorld(titles, opts) {
         }
         if (found) continue;
         if (/^\d+$/.test(slugWords[si]) || slugWords[si] === 'movie') { si++; continue; }
+        // Skip articles in title that sites strip from URLs
+        if (titleWords[ti] === 'the') { ti++; continue; }
         return false;
       }
       if (ti < titleWords.length) return false;
@@ -661,7 +666,7 @@ async function searchAnimeWorld(titles, opts) {
         cacheSet(subKey, subLinks);
       }
 
-      const canon = w => (w === 'film' ? 'movie' : w);
+      const canon = w => { if (w === 'film') return 'movie'; if (/^\d+$/.test(w)) return String(parseInt(w, 10)); return w; };
       const subPaths = subLinks.filter(p => {
         const slug = p.replace(/^\/play\//, "").replace(/\.[^.]+$/, "");
         const slugNorm = slug.toLowerCase().replace(/-(subita|ita-sub|sub-ita|ita|sub|eng|raw|jp|dub)$/i, "").replace(/[-_]+/g, " ").trim();
@@ -669,6 +674,8 @@ async function searchAnimeWorld(titles, opts) {
         let ti = 0, si = 0;
         while (si < sw.length && ti < origWords.length) {
           if (canon(sw[si]) === canon(origWords[ti])) { ti++; si++; continue; }
+          const csi = canon(sw[si]), cti = canon(origWords[ti]);
+          if (csi.length > cti.length && csi.startsWith(cti) && /^a+$/.test(csi.slice(cti.length))) { ti++; si++; continue; }
           let merged = origWords[ti], found = false;
           for (let k = ti + 1; k < origWords.length && merged.length < sw[si].length; k++) {
             merged += origWords[k];
@@ -676,6 +683,7 @@ async function searchAnimeWorld(titles, opts) {
           }
           if (found) continue;
           if (/^\d+$/.test(sw[si]) || sw[si] === 'movie') { si++; continue; }
+          if (origWords[ti] === 'the') { ti++; continue; }
           return false;
         }
         if (ti < origWords.length) return false;
@@ -722,10 +730,12 @@ async function searchAnimeSaturn(titles, opts) {
         .trim();
       const sw = slugNorm.split(/\s+/).filter(Boolean);
       // Filler-aware prefix match: "film"↔"movie" equivalent, numeric/"movie" slug words skippable
-      const canon = w => (w === 'film' ? 'movie' : w);
+      const canon = w => { if (w === 'film') return 'movie'; if (/^\d+$/.test(w)) return String(parseInt(w, 10)); return w; };
       let ti = 0, si = 0;
       while (si < sw.length && ti < asTitleWordsBlocks.length) {
         if (canon(sw[si]) === canon(asTitleWordsBlocks[ti])) { ti++; si++; continue; }
+        const csi = canon(sw[si]), cti = canon(asTitleWordsBlocks[ti]);
+        if (csi.length > cti.length && csi.startsWith(cti) && /^a+$/.test(csi.slice(cti.length))) { ti++; si++; continue; }
         // Try merging consecutive title words to match one slug word
         let merged = asTitleWordsBlocks[ti], found = false;
         for (let k = ti + 1; k < asTitleWordsBlocks.length && merged.length < sw[si].length; k++) {
@@ -734,6 +744,7 @@ async function searchAnimeSaturn(titles, opts) {
         }
         if (found) continue;
         if (/^\d+$/.test(sw[si]) || sw[si] === 'movie') { si++; continue; }
+        if (asTitleWordsBlocks[ti] === 'the') { ti++; continue; }
         return false;
       }
       if (ti < asTitleWordsBlocks.length) return false;
@@ -796,10 +807,12 @@ async function searchAnimeSaturn(titles, opts) {
           .trim();
         const slugWordsAs = slugNorm.split(/\s+/).filter(Boolean);
         // Filler-aware prefix match: "film"↔"movie" equivalent, numeric/"movie" skippable
-        const canonAs = w => (w === 'film' ? 'movie' : w);
+        const canonAs = w => { if (w === 'film') return 'movie'; if (/^\d+$/.test(w)) return String(parseInt(w, 10)); return w; };
         let asOk = true, tiAs = 0, siAs = 0;
         while (siAs < slugWordsAs.length && tiAs < asTitleWords.length) {
           if (canonAs(slugWordsAs[siAs]) === canonAs(asTitleWords[tiAs])) { tiAs++; siAs++; continue; }
+          const csiAs = canonAs(slugWordsAs[siAs]), ctiAs = canonAs(asTitleWords[tiAs]);
+          if (csiAs.length > ctiAs.length && csiAs.startsWith(ctiAs) && /^a+$/.test(csiAs.slice(ctiAs.length))) { tiAs++; siAs++; continue; }
           // Try merging consecutive title words to match one slug word
           let mergedAs = asTitleWords[tiAs], foundAs = false;
           for (let k = tiAs + 1; k < asTitleWords.length && mergedAs.length < slugWordsAs[siAs].length; k++) {
@@ -808,6 +821,7 @@ async function searchAnimeSaturn(titles, opts) {
           }
           if (foundAs) continue;
           if (/^\d+$/.test(slugWordsAs[siAs]) || slugWordsAs[siAs] === 'movie') { siAs++; continue; }
+          if (asTitleWords[tiAs] === 'the') { tiAs++; continue; }
           asOk = false; break;
         }
         if (tiAs < asTitleWords.length) asOk = false;
@@ -829,7 +843,7 @@ async function searchAnimeSaturn(titles, opts) {
   //   2. "Franchise Movie" prefix ("One Piece Movie") — AS lists movies with "movie" in slug
   if (allPaths.size === 0) {
     const asSlugMatchesFull = (slug, origWords) => {
-      const canon = w => (w === 'film' ? 'movie' : w);
+      const canon = w => { if (w === 'film') return 'movie'; if (/^\d+$/.test(w)) return String(parseInt(w, 10)); return w; };
       const slugNorm = slug.toLowerCase()
         .replace(/-(subita|ita-sub|sub-ita|ita|sub|eng|raw|jp|dub)(-[a-z0-9]+)?$/i, "")
         .replace(/[-_]+/g, " ").trim();
@@ -837,6 +851,8 @@ async function searchAnimeSaturn(titles, opts) {
       let ti = 0, si = 0;
       while (si < sw.length && ti < origWords.length) {
         if (canon(sw[si]) === canon(origWords[ti])) { ti++; si++; continue; }
+        const csi = canon(sw[si]), cti = canon(origWords[ti]);
+        if (csi.length > cti.length && csi.startsWith(cti) && /^a+$/.test(csi.slice(cti.length))) { ti++; si++; continue; }
         let merged = origWords[ti], found = false;
         for (let k = ti + 1; k < origWords.length && merged.length < sw[si].length; k++) {
           merged += origWords[k];
@@ -844,6 +860,7 @@ async function searchAnimeSaturn(titles, opts) {
         }
         if (found) continue;
         if (/^\d+$/.test(sw[si]) || sw[si] === 'movie') { si++; continue; }
+        if (origWords[ti] === 'the') { ti++; continue; }
         return false;
       }
       if (ti < origWords.length) return false;
