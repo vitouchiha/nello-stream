@@ -1715,7 +1715,7 @@ const _COMMUNITY_SOURCES = [
 // ── Known alternate domains per provider (fallback probing) ──────────────────
 const _KNOWN_DOMAINS = {
   streamingcommunity: ['streamingcommunity.computer', 'vixsrc.to', 'streamingcommunity.bond'],
-  cb01:              ['cb01uno.digital', 'cb01uno.life', 'cb01.uno', 'cb01uno.uno'],
+  cb01:              ['cb01uno.digital', 'cb01uno.life', 'cb01.uno', 'cb01uno.uno', 'cb01uno.click'],
   guardaserie:       ['guardaserietv.bar', 'guardaserietv.skin', 'guardaserietv.autos', 'guardaserietv.asia', 'guardaserie.cfd'],
   guardoserie:       ['guardoserie.best', 'guardoserie.digital', 'guardoserie.surf', 'guardoserie.bar', 'guardoserie.blog'],
   eurostreaming:     ['eurostream.ing', 'eurostreamings.life'],
