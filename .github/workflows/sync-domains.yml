@@ -1,0 +1,143 @@
+name: Sync Provider Domains
+
+# Backup domain sync: fetches live domains from CF Worker, updates repo if changed.
+# Also updates _KNOWN_DOMAINS in cfworker.js if a new TLD is discovered.
+# Primary sync is done by the CF Worker itself (pushes to GitHub on change).
+# This workflow is a safety net + handles _KNOWN_DOMAINS auto-update.
+
+on:
+  schedule:
+    - cron: '30 */6 * * *'  # Every 6 hours at :30
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Fetch live domains from CF Worker
+        env:
+          CF_WORKER_URL: ${{ secrets.CF_WORKER_URL }}
+          CF_WORKER_AUTH: ${{ secrets.CF_WORKER_AUTH }}
+        run: |
+          # Fetch live domain data from primary CF Worker
+          curl -sf -H "x-worker-auth: ${CF_WORKER_AUTH}" \
+            "${CF_WORKER_URL}/?provider_urls=1" \
+            -o /tmp/live_urls.json || { echo "::warning::CF Worker fetch failed"; exit 0; }
+          echo "Live domains fetched:"
+          cat /tmp/live_urls.json | python3 -m json.tool 2>/dev/null || cat /tmp/live_urls.json
+
+      - name: Compare and update provider_urls.json
+        id: check
+        run: |
+          node -e "
+            const fs = require('fs');
+            const live = JSON.parse(fs.readFileSync('/tmp/live_urls.json', 'utf8'));
+            const repo = JSON.parse(fs.readFileSync('data/provider_urls.json', 'utf8'));
+
+            // Compare domain URLs (ignore metadata keys starting with _)
+            const changes = {};
+            let hasChanges = false;
+            for (const [k, v] of Object.entries(live)) {
+              if (k.startsWith('_')) continue;
+              if (repo[k] !== v) {
+                changes[k] = { from: repo[k] || '(missing)', to: v };
+                hasChanges = true;
+              }
+            }
+
+            if (hasChanges) {
+              console.log('Domain changes detected:');
+              console.log(JSON.stringify(changes, null, 2));
+
+              // Merge: keep all existing keys, overwrite with live data
+              const merged = { ...repo };
+              for (const [k, v] of Object.entries(live)) {
+                if (!k.startsWith('_')) merged[k] = v;
+              }
+              fs.writeFileSync('data/provider_urls.json', JSON.stringify(merged, null, 2) + '\n');
+            } else {
+              console.log('No domain changes detected.');
+            }
+
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'changed=' + hasChanges + '\n');
+          "
+
+      - name: Update _KNOWN_DOMAINS in cfworker.js
+        if: steps.check.outputs.changed == 'true'
+        id: known
+        run: |
+          node -e "
+            const fs = require('fs');
+            const live = JSON.parse(fs.readFileSync('/tmp/live_urls.json', 'utf8'));
+            let code = fs.readFileSync('workers/cfworker.js', 'utf8');
+            let modified = false;
+
+            for (const [provider, url] of Object.entries(live)) {
+              if (provider.startsWith('_')) continue;
+              let hostname;
+              try { hostname = new URL(url).hostname; } catch { continue; }
+
+              // Check if this hostname is already in _KNOWN_DOMAINS
+              if (code.includes(hostname)) continue;
+
+              // Find the provider's array in _KNOWN_DOMAINS and append the new domain
+              const escapedProvider = provider.replace(/[.*+?^\${}()|[\]\\\\]/g, '\\\\\\$&');
+              const regex = new RegExp('(' + escapedProvider + ':\\\\s*\\\\[)([^\\\\]]+)(\\\\])');
+              const match = code.match(regex);
+              if (match) {
+                const newEntry = match[2].trimEnd() + \", '\" + hostname + \"'\";
+                code = code.replace(regex, '\$1' + newEntry + '\$3');
+                modified = true;
+                console.log('Added ' + hostname + ' to _KNOWN_DOMAINS.' + provider);
+              }
+            }
+
+            if (modified) {
+              fs.writeFileSync('workers/cfworker.js', code);
+              console.log('cfworker.js updated with new known domains');
+            } else {
+              console.log('No new domains to add to _KNOWN_DOMAINS');
+            }
+
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'cfworker_changed=' + modified + '\n');
+          "
+
+      - name: Bump version
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          node -e "
+            const fs = require('fs');
+            for (const f of ['package.json', 'manifest.json']) {
+              const pkg = JSON.parse(fs.readFileSync(f, 'utf8'));
+              const parts = pkg.version.split('.');
+              parts[2] = parseInt(parts[2]) + 1;
+              pkg.version = parts.join('.');
+              fs.writeFileSync(f, JSON.stringify(pkg, null, 2) + '\n');
+              console.log(f + ' → v' + pkg.version);
+            }
+          "
+
+      - name: Commit & push
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/provider_urls.json workers/cfworker.js package.json manifest.json
+          if git diff --cached --quiet; then
+            echo "No actual changes to commit"
+          else
+            git commit -m "fix(auto-domain): sync provider domains [auto-domain]"
+            git push
+          fi

@@ -1668,6 +1668,11 @@ const _DOMAIN_STATE_CACHE_KEY = 'https://internal.worker/domain-state';
 const _DOMAIN_KV_KEY = 'domains:urls';
 const _DOMAIN_KV_TTL = 172800; // 48h expiry in KV (safety net)
 
+// ── GitHub auto-sync (push domain changes to repo on detection) ─────────────
+const _GITHUB_REPO = 'vitouchiha/nello-stream';
+const _GITHUB_BRANCH = 'master';
+const _GITHUB_PROVIDER_URLS_PATH = 'data/provider_urls.json';
+
 const _UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
 // ── Community sources ────────────────────────────────────────────────────────
@@ -1898,15 +1903,110 @@ async function _putDomainState(state, env) {
   } catch {}
 }
 
+/** Push updated provider_urls.json to GitHub when domains change */
+async function _pushProviderUrlsToGitHub(env, newDomains, changes) {
+  const token = env.GITHUB_TOKEN;
+  if (!token) return;
+
+  const apiBase = `https://api.github.com/repos/${_GITHUB_REPO}/contents`;
+  const ghHeaders = {
+    'Authorization': `Bearer ${token}`,
+    'Accept': 'application/vnd.github+json',
+    'User-Agent': 'SFM-Worker',
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+
+  try {
+    // 1. Get current file from GitHub (SHA needed for update + merge existing keys)
+    const getResp = await fetch(
+      `${apiBase}/${_GITHUB_PROVIDER_URLS_PATH}?ref=${_GITHUB_BRANCH}`,
+      { headers: ghHeaders, signal: AbortSignal.timeout(15000) }
+    );
+
+    let sha = null;
+    let existing = {};
+    if (getResp.ok) {
+      const data = await getResp.json();
+      sha = data.sha;
+      try { existing = JSON.parse(atob(data.content.replace(/\s/g, ''))); } catch {}
+    }
+
+    // 2. Merge: keep non-domain keys (mapping_api etc), overwrite domain URLs
+    const merged = { ...existing };
+    for (const [k, v] of Object.entries(newDomains)) {
+      merged[k] = v;
+    }
+
+    // 3. Build commit message with change summary
+    const changeDesc = Object.entries(changes)
+      .map(([p, c]) => `${p}: ${c.from} → ${c.to}`)
+      .join(', ');
+
+    const body = {
+      message: `fix(auto-domain): ${changeDesc}`,
+      content: btoa(unescape(encodeURIComponent(JSON.stringify(merged, null, 2) + '\n'))),
+      branch: _GITHUB_BRANCH,
+    };
+    if (sha) body.sha = sha;
+
+    // 4. Push update
+    const putResp = await fetch(
+      `${apiBase}/${_GITHUB_PROVIDER_URLS_PATH}`,
+      {
+        method: 'PUT',
+        headers: { ...ghHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15000),
+      }
+    );
+
+    if (!putResp.ok) {
+      const err = await putResp.text();
+      console.log(`GitHub push failed (${putResp.status}): ${err}`);
+    } else {
+      console.log(`GitHub push OK — domains updated: ${changeDesc}`);
+    }
+  } catch (e) {
+    console.log(`GitHub push error: ${e.message}`);
+  }
+}
+
 async function _handleScheduledDomainUpdate(env) {
   if (!env?.ES_CACHE) return;
 
   const state = await _getDomainState(env);
   if (state.lastComplete && Date.now() - state.lastComplete < _DOMAIN_COOLDOWN_MS) return;
 
+  // Snapshot current domains before resolve (for change detection)
+  let prevDomains = {};
   try {
-    await _resolveDomains(env);
+    const prev = await env.ES_CACHE.get(_DOMAIN_KV_KEY, 'json');
+    if (prev) {
+      for (const [k, v] of Object.entries(prev)) {
+        if (!k.startsWith('_')) prevDomains[k] = v;
+      }
+    }
+  } catch {}
+
+  try {
+    const result = await _resolveDomains(env);
     await _putDomainState({ lastComplete: Date.now() }, env);
+
+    // Detect domain changes → push to GitHub
+    if (env.GITHUB_TOKEN) {
+      const newDomains = {};
+      const changes = {};
+      for (const [k, v] of Object.entries(result)) {
+        if (k.startsWith('_')) continue;
+        newDomains[k] = v;
+        if (prevDomains[k] !== v) {
+          changes[k] = { from: prevDomains[k] || '(new)', to: v };
+        }
+      }
+      if (Object.keys(changes).length > 0) {
+        await _pushProviderUrlsToGitHub(env, newDomains, changes);
+      }
+    }
   } catch { /* resolve failed — try next cron run */ }
 }
 
