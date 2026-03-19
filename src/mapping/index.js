@@ -627,6 +627,67 @@ async function searchAnimeWorld(titles, opts) {
     paths.forEach(p => allPaths.add(p));
     if (allPaths.size >= 10) break;
   }
+
+  // Subtitle-keyword fallback: for "Franchise: Subtitle" style movie titles where the
+  // main title search doesn't surface the movie slug (AW ranks the main series higher),
+  // try searching with the subtitle alone but match against the FULL original title words.
+  // e.g. "One Piece: Stampede" → search "Stampede" → finds one-piece-movie-14-stampede
+  //      then match using full words ["one","piece","stampede"] → PASS ✓
+  if (allPaths.size === 0) {
+    for (const origTitle of titles.slice(0, 3)) {
+      const colonIdx = origTitle.indexOf(':');
+      if (colonIdx < 2) continue;
+      const subtitle = origTitle.substring(colonIdx + 1).trim();
+      if (!subtitle || subtitle.length < 4 || !/[a-zA-Z]/.test(subtitle)) continue;
+
+      const origNorm = origTitle.toLowerCase().replace(/['\u2018\u2019\u02bc`]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+      if (!origNorm) continue;
+      const origWords = origNorm.split(/\s+/).filter(Boolean);
+
+      const subKey = `aw:sub:${subtitle.toLowerCase()}`;
+      let subLinks;
+      const subCached = cacheGet(subKey);
+      if (subCached !== undefined) {
+        subLinks = subCached;
+      } else {
+        const subHtml = await fetchHtml(`${base}/search?keyword=${encodeURIComponent(subtitle)}`);
+        subLinks = [];
+        const subRegex = /href="(\/play\/[^"]+)"/g;
+        let sm;
+        while ((sm = subRegex.exec(subHtml)) !== null) {
+          const p = sm[1].split("?")[0];
+          if (p && !subLinks.includes(p)) subLinks.push(p);
+        }
+        cacheSet(subKey, subLinks);
+      }
+
+      const canon = w => (w === 'film' ? 'movie' : w);
+      const subPaths = subLinks.filter(p => {
+        const slug = p.replace(/^\/play\//, "").replace(/\.[^.]+$/, "");
+        const slugNorm = slug.toLowerCase().replace(/-(subita|ita-sub|sub-ita|ita|sub|eng|raw|jp|dub)$/i, "").replace(/[-_]+/g, " ").trim();
+        const sw = slugNorm.split(/\s+/).filter(Boolean);
+        let ti = 0, si = 0;
+        while (si < sw.length && ti < origWords.length) {
+          if (canon(sw[si]) === canon(origWords[ti])) { ti++; si++; continue; }
+          let merged = origWords[ti], found = false;
+          for (let k = ti + 1; k < origWords.length && merged.length < sw[si].length; k++) {
+            merged += origWords[k];
+            if (merged === sw[si]) { ti = k + 1; si++; found = true; break; }
+          }
+          if (found) continue;
+          if (/^\d+$/.test(sw[si]) || sw[si] === 'movie') { si++; continue; }
+          return false;
+        }
+        if (ti < origWords.length) return false;
+        if (opts?.relaxSlugMatch) return true;
+        return sw.slice(si).every(w => /^\d+$/.test(w) || w === 'movie' || /^a+$/.test(w));
+      });
+
+      subPaths.forEach(p => allPaths.add(p));
+      if (allPaths.size >= 10) break;
+    }
+  }
+
   return [...allPaths].slice(0, 20);
 }
 

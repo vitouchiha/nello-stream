@@ -1,3 +1,14 @@
+## [3.2.49] - 2026-03-19
+
+### Fixed
+- **AnimeWorld: subtitle-keyword fallback per film anime** (`src/mapping/index.js`)
+  - AW search per "One Piece: Stampede" restituisce la serie principale, non il film `one-piece-movie-14-stampede`.
+  - Aggiunto fallback: quando la ricerca principale non trova path, prova a cercare con il **sottotitolo** (testo dopo il `:`) ma confronta lo slug con le parole del **titolo completo**.
+  - Esempio: titolo "One Piece: Stampede" → cerca AW per "Stampede" → ottiene `one-piece-movie-14-stampede` → match con ["one","piece","stampede"] (movie/14 saltati come filler) ✓
+  - Validato: Stampede AW trova correttamente i path; Frieren S2, Film Z, Jack of All Trades invariati ✓
+
+---
+
 ## [3.2.48] - 2026-03-19
 
 ### Fixed
