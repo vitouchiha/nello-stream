@@ -1,3 +1,14 @@
+## [3.2.53] - 2026-03-19
+
+### Fixed
+- **KissKH IMDB: episode numbering + season matching per Cinemeta** (`src/providers/kisskh.js`, `src/providers/index.js`)
+  - `_buildMeta`: KissKH ritorna `season=1` e numerazione episodi invertita per serie con stagioni separate (es. "Bloody Game Season 3"). Ora il season viene parsato dal nome serie ("Season 3" → 3) e il numero episodio dal titolo ("Episode 1" → 1).
+  - `_legacyProviderStreamsForImdb`: quando `seasonNum > 1` e i risultati di ricerca includono una serie con "Season N" nel nome, viene preferita direttamente invece di affidarsi al fuzzy match.
+  - `_matchEpisode`: il fallback senza stagione ora è bloccato quando tutti gli episodi appartengono a una stagione diversa da quella richiesta (evita di matchare S2E1 quando si vuole S3E1).
+  - Testato: tt19372622:3:1 (Bloody Game S3E1) → `kisskh_10010:173208` con SUB ITA ✓ (prima matchava Episode 14 senza sub)
+
+---
+
 ## [3.2.52] - 2026-03-19
 
 ### Fixed

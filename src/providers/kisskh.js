@@ -513,14 +513,24 @@ function _buildMeta(id, serieId, data, castData) {
       : (data.subCategory ? [data.subCategory] : undefined),
     cast: cast && cast.length ? cast : undefined,
     serieId,
-    videos: (data.episodes || []).map((ep, idx) => {
-      const video = {
-        id: `${id}:${ep.id}`,
-        title: ep.title || `Episode ${ep.number || idx + 1}`,
-        season: Number(ep.season) || 1,
-        episode: Number(ep.episode || ep.number || idx + 1),
-        thumbnail: ep.thumbnail || data.thumbnail,
-      };
+    videos: (() => {
+      // KissKH has separate series per season ("Bloody Game Season 3") but
+      // reports season=1 for all episodes. Parse real season from series title.
+      const _seasonMatch = (data.title || '').match(/season\s+(\d+)/i);
+      const _parsedSeason = _seasonMatch ? Number(_seasonMatch[1]) : null;
+      return (data.episodes || []).map((ep, idx) => {
+        // KissKH episode numbers are often reversed (e=14 for "Episode 1").
+        // Parse the real episode number from the title when possible.
+        const _titleEpMatch = (ep.title || '').match(/(?:episode|ep\.?)\s*(\d+)/i);
+        const realEpisode = _titleEpMatch ? Number(_titleEpMatch[1]) : Number(ep.episode || ep.number || idx + 1);
+        const realSeason = _parsedSeason || Number(ep.season) || 1;
+        const video = {
+          id: `${id}:${ep.id}`,
+          title: ep.title || `Episode ${ep.number || idx + 1}`,
+          season: realSeason,
+          episode: realEpisode,
+          thumbnail: ep.thumbnail || data.thumbnail,
+        };
 
       const overview = ep.description || ep.overview || ep.synopsis;
       if (overview) video.overview = overview;
@@ -529,7 +539,8 @@ function _buildMeta(id, serieId, data, castData) {
       if (released) video.released = released;
 
       return video;
-    }),
+    });
+    })(),
   };
 }
 

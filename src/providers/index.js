@@ -556,7 +556,14 @@ async function _legacyProviderStreamsForImdb(opts) {
     }
     if (!Array.isArray(metas) || metas.length === 0) continue;
 
-    const best = _bestMatch(metas, title, minTitleSimilarity);
+    // When seasonNum > 1, prefer series with "Season N" in name — KissKH
+    // lists separate entries per season (e.g. "Bloody Game Season 3")
+    let best;
+    if (seasonForMatch > 1 && Array.isArray(metas) && metas.length > 1) {
+      const seasonRx = new RegExp(`season\\s*${seasonForMatch}\\b`, 'i');
+      best = metas.find(m => seasonRx.test(m.name || m.title || ''));
+    }
+    if (!best) best = _bestMatch(metas, title, minTitleSimilarity);
     if (!best?.id) continue;
 
     const { meta } = await withTimeout(
@@ -857,7 +864,12 @@ function _matchEpisode(videos, seasonNum, episodeNum) {
     const exact = videos.find(v => v.season === seasonNum && epNum(v) === episodeNum);
     if (exact) return exact;
   }
-  // Fallback: just episode / sequential number (Korean dramas always season=1)
+  // Fallback: episode only — but skip if ALL episodes share a different season
+  // (prevents matching Season 2 Episode 1 when Season 3 Episode 1 was requested)
+  if (seasonNum > 1) {
+    const seasons = new Set(videos.map(v => v.season).filter(Boolean));
+    if (seasons.size === 1 && !seasons.has(seasonNum)) return null;
+  }
   return videos.find(v => epNum(v) === episodeNum) || null;
 }
 
