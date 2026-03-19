@@ -20,21 +20,34 @@ data/
 .DS_Store
 Thumbs.db
 
-# Deploy script (contains API tokens)
+# Sensitive files (API tokens, credentials)
 deploy-workers.js
+wrangler.toml
+_set_env.js
+proxies.json
+tmp_secret.txt
+
+# Documentation (local only)
+docs/
+
+# Cache directories (regenerable via warm scripts + KV)
+es-cache/
+gs-cache/
+kk-cache/
+kk-subs-cache/
+loonex-cache/
+rama-cache/
 
 # Logs & debug output
 *.log
 *.txt
 *.json
-kk-subs-warm-state.json
 
 # Exceptions - tracked JSON files
 !manifest.json
 !package.json
 !package-lock.json
 !vercel.json
-!proxies.json
 !provider_urls.json
 !es-titles-index.json
 !gs-titles-index.json
@@ -45,12 +58,14 @@ kk-subs-warm-state.json
 !loonex-titles-index.json
 !loonex-episodes-index.json
 !src/**/*.json
-!kk-subs-cache/**/*.json
 
 # Test/debug scripts
 _test_*.js
+_qa_*.js
 _warm_*.js
 warm-uprot.js
+test.js
+test2.js
 test-*.js
 test-*.ps1
 check*.js
@@ -59,6 +74,8 @@ debug*.js
 cb01*.mjs
 inject*.js
 inspect.js
+inspect-*.js
+1-get-captcha.js
 patch.js
 replace.js
 res.js
@@ -70,6 +87,7 @@ temp_*.js
 update_ui_clean.js
 update2.js
 src/index_debug*.js
+src/animeunity/index_debug.js
 
 # Other
 upload_hf.js

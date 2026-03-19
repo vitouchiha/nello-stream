@@ -30,7 +30,8 @@ const LOCAL_CACHE_DIR = path.resolve(__dirname, 'kk-subs-cache');
 
 // Config
 const CF_WORKER_URL = process.env.CF_WORKER_URL || 'https://kisskh-proxy.vitobsfm.workers.dev';
-const CF_WORKER_AUTH = process.env.CF_WORKER_AUTH || 'PJxVzfuySO5IkMGec1pZsFvWDNbiHRE6jULnB2t3';
+const CF_WORKER_AUTH = process.env.CF_WORKER_AUTH;
+if (!CF_WORKER_AUTH) { console.error('CF_WORKER_AUTH env var required'); process.exit(1); }
 
 const args = process.argv.slice(2);
 function getArg(name) {
