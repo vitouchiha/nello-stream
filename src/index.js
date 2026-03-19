@@ -314,6 +314,11 @@ async function getStreams(id, type, season, episode, config = {}) {
             selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'guardoserie', 'streamingcommunity', 'guardahd');
         } else {
             selectedProviders.push('streamingcommunity', 'guardahd', 'guardaflix', 'guardoserie', 'toonitalia', 'loonex', 'cb01');
+            if (isImdbRequest) {
+                // IMDB movies may be anime even if mapping didn't resolve a kitsuId
+                // (e.g. cold-start GitHub download failure). Anime providers return [] gracefully for non-anime.
+                selectedProviders.push('animeunity', 'animeworld', 'animesaturn');
+            }
         }
     } else if (normalizedType === 'anime') {
         selectedProviders.push('cb01', 'eurostreaming', 'animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'guardaserie', 'guardoserie');
@@ -322,7 +327,9 @@ async function getStreams(id, type, season, episode, config = {}) {
             selectedProviders.push('cb01', 'eurostreaming', 'animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'guardaserie', 'guardoserie', 'streamingcommunity');
         } else {
             if (isImdbRequest) {
-                selectedProviders.push('streamingcommunity', 'guardaserie', 'guardoserie', 'eurostreaming', 'cb01', 'toonitalia', 'loonex');
+                // Include anime providers even when kitsuId wasn't resolved: they retry internally
+                // and return [] gracefully if the title isn't actually anime.
+                selectedProviders.push('streamingcommunity', 'guardaserie', 'guardoserie', 'eurostreaming', 'cb01', 'toonitalia', 'loonex', 'animeunity', 'animeworld', 'animesaturn');
             } else {
                 selectedProviders.push('streamingcommunity', 'guardaserie', 'guardoserie', 'animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'eurostreaming', 'cb01');
             }

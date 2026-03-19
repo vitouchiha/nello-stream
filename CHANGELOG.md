@@ -1,3 +1,13 @@
+## [3.2.46] - 2026-03-19
+
+### Fixed
+- **AnimeWorld / AnimeSaturn / AnimeUnity non visibili su richieste IMDB** (`src/index.js`)
+  - Per `type='movie'` e `type='series'` con IMDB ID, i provider anime venivano inclusi in `selectedProviders` **solo se** `isKitsuRequest=true` (kitsuId risolto dalla mapping API).
+  - Se la mapping falliva (e.g. lista Fribb non ancora scaricata su cold start Vercel), i provider anime erano completamente esclusi → zero stream anime.
+  - Fix: per richieste IMDB, i provider anime (`animeunity`, `animeworld`, `animesaturn`) vengono ora inclusi **sempre**, anche quando `isKitsuRequest=false`. I provider gestiscono silenziosamente il caso "non anime" (ritornano `[]`). Per i titoli anime, ritentano internamente la risoluzione mapping.
+
+---
+
 ## [3.2.45] - 2026-03-19
 
 ### Fixed
