@@ -10,6 +10,9 @@ on:
     - cron: '30 */6 * * *'  # Every 6 hours at :30
   workflow_dispatch: {}
 
+permissions:
+  contents: write
+
 jobs:
   sync:
     runs-on: ubuntu-latest
