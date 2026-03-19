@@ -596,15 +596,31 @@ async function searchAnimeWorld(titles, opts) {
         .replace(/[-_]+/g, " ")
         .trim();
       const slugWords = slugNorm.split(/\s+/).filter(Boolean);
-      // Slug must start with all title words, in exact order
-      if (slugWords.length < titleWords.length) return false;
-      for (let i = 0; i < titleWords.length; i++) {
-        if (slugWords[i] !== titleWords[i]) return false;
+      // Filler-aware prefix match:
+      // - "film" and "movie" are treated as equivalent (sites use "movie" for anime films)
+      // - Pure-numeric and "movie" slug words are skipped when they don't match the current
+      //   title word (sites add episode numbers "movie-12" or prefix slugs with "movie")
+      const canon = w => (w === 'film' ? 'movie' : w);
+      let ti = 0, si = 0;
+      while (si < slugWords.length && ti < titleWords.length) {
+        if (canon(slugWords[si]) === canon(titleWords[ti])) { ti++; si++; continue; }
+        // Try merging consecutive title words to match one slug word
+        // (e.g. en_jp "kiyou binbou" → slug "kiyoubinbou")
+        let merged = titleWords[ti], found = false;
+        for (let k = ti + 1; k < titleWords.length && merged.length < slugWords[si].length; k++) {
+          merged += titleWords[k];
+          if (merged === slugWords[si]) { ti = k + 1; si++; found = true; break; }
+        }
+        if (found) continue;
+        if (/^\d+$/.test(slugWords[si]) || slugWords[si] === 'movie') { si++; continue; }
+        return false;
       }
+      if (ti < titleWords.length) return false;
       // For SPECIAL/OVA/ONA: accept all trailing words (filterSpinoffPaths handles selection)
       if (opts?.relaxSlugMatch) return true;
-      // Any extra slug words beyond title words must be purely numeric (season markers)
-      return slugWords.slice(titleWords.length).every(w => /^\d+$/.test(w));
+      // Any extra slug words beyond the matched portion must be purely numeric, 'movie',
+      // or an AS disambiguation suffix like 'a', 'aa', etc.
+      return slugWords.slice(si).every(w => /^\d+$/.test(w) || w === 'movie' || /^a+$/.test(w));
     });
 
     cacheSet(key, paths);
@@ -644,13 +660,25 @@ async function searchAnimeSaturn(titles, opts) {
         .replace(/[-_]+/g, " ")
         .trim();
       const sw = slugNorm.split(/\s+/).filter(Boolean);
-      if (sw.length < asTitleWordsBlocks.length) return false;
-      for (let i = 0; i < asTitleWordsBlocks.length; i++) {
-        if (sw[i] !== asTitleWordsBlocks[i]) return false;
+      // Filler-aware prefix match: "film"↔"movie" equivalent, numeric/"movie" slug words skippable
+      const canon = w => (w === 'film' ? 'movie' : w);
+      let ti = 0, si = 0;
+      while (si < sw.length && ti < asTitleWordsBlocks.length) {
+        if (canon(sw[si]) === canon(asTitleWordsBlocks[ti])) { ti++; si++; continue; }
+        // Try merging consecutive title words to match one slug word
+        let merged = asTitleWordsBlocks[ti], found = false;
+        for (let k = ti + 1; k < asTitleWordsBlocks.length && merged.length < sw[si].length; k++) {
+          merged += asTitleWordsBlocks[k];
+          if (merged === sw[si]) { ti = k + 1; si++; found = true; break; }
+        }
+        if (found) continue;
+        if (/^\d+$/.test(sw[si]) || sw[si] === 'movie') { si++; continue; }
+        return false;
       }
+      if (ti < asTitleWordsBlocks.length) return false;
       // For SPECIAL/OVA/ONA: accept all trailing words (filterSpinoffPaths handles selection)
       if (opts?.relaxSlugMatch) return true;
-      return sw.slice(asTitleWordsBlocks.length).every(w => /^\d+$/.test(w));
+      return sw.slice(si).every(w => /^\d+$/.test(w) || w === 'movie' || /^a+$/.test(w));
     };
 
     // AnimeSaturn search results are inside <div class="item-archivio"> blocks
@@ -706,13 +734,24 @@ async function searchAnimeSaturn(titles, opts) {
           .replace(/[-_]+/g, " ")
           .trim();
         const slugWordsAs = slugNorm.split(/\s+/).filter(Boolean);
-        if (slugWordsAs.length < asTitleWords.length) continue;
-        let asOk = true;
-        for (let i = 0; i < asTitleWords.length; i++) {
-          if (slugWordsAs[i] !== asTitleWords[i]) { asOk = false; break; }
+        // Filler-aware prefix match: "film"↔"movie" equivalent, numeric/"movie" skippable
+        const canonAs = w => (w === 'film' ? 'movie' : w);
+        let asOk = true, tiAs = 0, siAs = 0;
+        while (siAs < slugWordsAs.length && tiAs < asTitleWords.length) {
+          if (canonAs(slugWordsAs[siAs]) === canonAs(asTitleWords[tiAs])) { tiAs++; siAs++; continue; }
+          // Try merging consecutive title words to match one slug word
+          let mergedAs = asTitleWords[tiAs], foundAs = false;
+          for (let k = tiAs + 1; k < asTitleWords.length && mergedAs.length < slugWordsAs[siAs].length; k++) {
+            mergedAs += asTitleWords[k];
+            if (mergedAs === slugWordsAs[siAs]) { tiAs = k + 1; siAs++; foundAs = true; break; }
+          }
+          if (foundAs) continue;
+          if (/^\d+$/.test(slugWordsAs[siAs]) || slugWordsAs[siAs] === 'movie') { siAs++; continue; }
+          asOk = false; break;
         }
+        if (tiAs < asTitleWords.length) asOk = false;
         if (!asOk) continue;
-        if (!opts?.relaxSlugMatch && !slugWordsAs.slice(asTitleWords.length).every(w => /^\d+$/.test(w))) continue;
+        if (!opts?.relaxSlugMatch && !slugWordsAs.slice(siAs).every(w => /^\d+$/.test(w) || w === 'movie' || /^a+$/.test(w))) continue;
         const path = `/anime/${slug}`;
         if (!paths.includes(path)) paths.push(path);
       }

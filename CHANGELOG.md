@@ -1,3 +1,15 @@
+## [3.2.48] - 2026-03-19
+
+### Fixed
+- **AnimeWorld / AnimeSaturn: word-merge per slug con parole unite + suffissi AS `-a`** (`src/mapping/index.js`)
+  - Titoli `en_jp` con parole separate possono corrispondere a slug che le unisce: es. "Kiyou Binbou" → `kiyoubinbou`. Il vecchio match word-by-word falliva.
+  - Aggiunto **word-merge**: quando la parola in corso non matcha, si accumulano le parole del titolo finché la concatenazione non eguaglia la parola dello slug.
+  - AnimeSaturn aggiunge suffissi di disambiguazione (`-a`, `-aa`) agli slug: ora i caratteri finali `/^a+$/` sono accettati come extra trailing words.
+  - Fix valido anche per "film"↔"movie" equivalence e filler numerici (già presenti da v3.2.48-pre).
+  - Testato: `50423` (Jack of All Trades) ora trova AW `/play/yuusha-party-wo-oidasareta-kiyoubinbou`, AS `/anime/Jack-of-All-Trades-Party-of-None`, AU `/anime/7281-...`; `6827` (One Piece Film Z) AS ora trova `One-Piece-Movie-12-Z-a`; `46474` (Frieren S2) invariato ✓.
+
+---
+
 ## [3.2.47] - 2026-03-19
 
 ### Fixed
