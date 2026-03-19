@@ -16,14 +16,14 @@ let embeddedProviderUrls = {};
 try {
   // Bootstrap defaults from JSON (bundled in provider builds, RN-safe).
   // eslint-disable-next-line global-require
-  embeddedProviderUrls = require("../provider_urls.json");
+  embeddedProviderUrls = require("../data/provider_urls.json");
 } catch {
   embeddedProviderUrls = {};
 }
 
 const defaultProviderUrlsFile =
   path && typeof __dirname !== "undefined"
-    ? path.resolve(__dirname, "..", "provider_urls.json")
+    ? path.resolve(__dirname, "..", "data", "provider_urls.json")
     : "";
 
 const PROVIDER_URLS_FILE = defaultProviderUrlsFile;

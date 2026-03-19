@@ -24,9 +24,9 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 
-const INDEX_PATH = path.resolve(__dirname, 'kk-episodes-index.json');
-const STATE_PATH = path.resolve(__dirname, 'kk-cf-subs-state.json');
-const LOCAL_CACHE_DIR = path.resolve(__dirname, 'kk-subs-cache');
+const INDEX_PATH = path.resolve(__dirname, '../../data/kk-episodes-index.json');
+const STATE_PATH = path.resolve(__dirname, '../../kk-cf-subs-state.json');
+const LOCAL_CACHE_DIR = path.resolve(__dirname, '../../kk-subs-cache');
 
 // Config
 const CF_WORKER_URL = process.env.CF_WORKER_URL || 'https://kisskh-proxy.vitobsfm.workers.dev';

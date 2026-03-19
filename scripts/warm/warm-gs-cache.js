@@ -16,7 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 
-const CACHE_DIR = path.join(__dirname, 'gs-cache');
+const CACHE_DIR = path.join(__dirname, '../../gs-cache');
 
 const BASE = 'https://guardoserie.website';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -145,7 +145,7 @@ async function main() {
     }
   }
 
-  const outPath = path.resolve(__dirname, 'gs-titles-index.json');
+  const outPath = path.resolve(__dirname, '../../data/gs-titles-index.json');
   fs.writeFileSync(outPath, JSON.stringify(index, null, 0));
   const fileSizeKB = (fs.statSync(outPath).size / 1024).toFixed(1);
   console.log(`📦 Saved ${outPath} (${Object.keys(index).length} entries, ${fileSizeKB} KB)`);

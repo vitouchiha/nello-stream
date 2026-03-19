@@ -30,8 +30,8 @@ const HEADERS = {
   'Origin': 'https://kisskh.do',
 };
 
-const INDEX_PATH = path.resolve(__dirname, 'kk-titles-index.json');
-const OUT_PATH = path.resolve(__dirname, 'kk-episodes-index.json');
+const INDEX_PATH = path.resolve(__dirname, '../../data/kk-titles-index.json');
+const OUT_PATH = path.resolve(__dirname, '../../data/kk-episodes-index.json');
 
 // ── CLI args ─────────────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
@@ -169,20 +169,20 @@ async function main() {
 // ── Git deploy ───────────────────────────────────────────────────────────────
 
 async function gitDeploy() {
-  const cwd = __dirname;
+  const cwd = path.resolve(__dirname, '../..');
   const run = (cmd) => {
     console.log(`  $ ${cmd}`);
     return execSync(cmd, { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   };
 
-  const diff = run('git diff --stat kk-episodes-index.json');
+  const diff = run('git diff --stat data/kk-episodes-index.json');
   if (!diff) {
     console.log('📦 No changes in kk-episodes-index.json, skipping deploy.');
     return;
   }
 
   console.log('\n🚀 Deploying updated KK episode cache...');
-  run('git add kk-episodes-index.json');
+  run('git add data/kk-episodes-index.json');
 
   const count = Object.keys(JSON.parse(fs.readFileSync(OUT_PATH, 'utf-8'))).length;
   const msg = `chore: update kk-episodes-index (${count} series)`;

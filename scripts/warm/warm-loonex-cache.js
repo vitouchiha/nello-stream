@@ -20,7 +20,7 @@ const cheerio = require('cheerio');
 const BASE_URL = 'https://loonex.eu';
 const CATALOG_URL = BASE_URL + '/cartoni/';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
-const CACHE_DIR = path.join(__dirname, 'loonex-cache');
+const CACHE_DIR = path.join(__dirname, '../../loonex-cache');
 
 async function main() {
   console.log('Warming Loonex catalog cache...\n');
@@ -84,7 +84,7 @@ async function main() {
   fs.writeFileSync(catalogPath, zlib.gzipSync(catalogJson));
 
   // Save titles index
-  const indexPath = path.join(__dirname, 'loonex-titles-index.json');
+  const indexPath = path.join(__dirname, '../../data/loonex-titles-index.json');
   fs.writeFileSync(indexPath, JSON.stringify(allTitles));
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);

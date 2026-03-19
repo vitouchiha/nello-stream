@@ -33,20 +33,23 @@ jobs:
       - name: Run warm-all-cache
         run: |
           if [ -n "${{ github.event.inputs.only }}" ]; then
-            node warm-all-cache.js --only=${{ github.event.inputs.only }}
+            node scripts/warm/warm-all-cache.js --only=${{ github.event.inputs.only }}
           else
-            node warm-all-cache.js
+            node scripts/warm/warm-all-cache.js
           fi
 
       - name: Commit & push updated cache files
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add es-cache/ es-titles-index.json \
-                  gs-cache/ gs-titles-index.json \
-                  kk-cache/ kk-titles-index.json \
-                  rama-cache/ rama-titles-index.json \
-                  loonex-cache/ loonex-titles-index.json
+          git add data/es-titles-index.json \
+                  data/gs-titles-index.json \
+                  data/gs-episodes-index.json \
+                  data/kk-titles-index.json \
+                  data/kk-episodes-index.json \
+                  data/rama-titles-index.json \
+                  data/loonex-titles-index.json \
+                  data/loonex-episodes-index.json
           if git diff --cached --quiet; then
             echo "No cache changes detected, skipping commit."
           else

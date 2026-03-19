@@ -8,19 +8,14 @@
       "config": {
         "maxDuration": 60,
         "includeFiles": [
-          "es-cache/**",
-          "es-titles-index.json",
-          "gs-cache/**",
-          "gs-titles-index.json",
-          "gs-episodes-index.json",
-          "kk-cache/**",
-          "kk-titles-index.json",
-          "kk-episodes-index.json",
-          "rama-cache/**",
-          "rama-titles-index.json",
-          "loonex-cache/**",
-          "loonex-titles-index.json",
-          "loonex-episodes-index.json"
+          "data/es-titles-index.json",
+          "data/gs-titles-index.json",
+          "data/gs-episodes-index.json",
+          "data/kk-titles-index.json",
+          "data/kk-episodes-index.json",
+          "data/rama-titles-index.json",
+          "data/loonex-titles-index.json",
+          "data/loonex-episodes-index.json"
         ]
       }
     }
@@ -34,8 +29,6 @@
     { "path": "/api/cron/gs-index-push",  "schedule": "0 4 * * *" }
   ],
   "env": {
-    "NODE_ENV": "production",
-    "CF_WORKER_URL": "https://kisskh-proxy.vitobsfm.workers.dev",
-    "CF_WORKER_AUTH": "PJxVzfuySO5IkMGec1pZsFvWDNbiHRE6jULnB2t3"
+    "NODE_ENV": "production"
   }
 }

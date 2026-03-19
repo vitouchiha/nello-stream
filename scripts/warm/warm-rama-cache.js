@@ -19,7 +19,7 @@ const cheerio = require('cheerio');
 const BASE_URL = 'https://ramaorientalfansub.live';
 const CATALOG_PATH = '/paese/corea-del-sud/';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
-const CACHE_DIR = path.join(__dirname, 'rama-cache');
+const CACHE_DIR = path.join(__dirname, '../../rama-cache');
 const MAX_PAGES = 40;
 const DELAY_MS = 500;
 
@@ -126,7 +126,7 @@ async function main() {
   }
 
   // Save titles index
-  const indexPath = path.join(__dirname, 'rama-titles-index.json');
+  const indexPath = path.join(__dirname, '../../data/rama-titles-index.json');
   fs.writeFileSync(indexPath, JSON.stringify(allTitles));
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);

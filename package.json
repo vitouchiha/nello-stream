@@ -1,6 +1,6 @@
 {
   "name": "nello-drama",
-  "version": "3.2.54",
+  "version": "3.2.55",
   "description": "L'aggregatore premium di Drama per Stremio",
   "main": "server.js",
   "engines": {
@@ -12,7 +12,7 @@
     "lint": "eslint .",
     "test:vercel": "node scripts/vercel-smoke.js",
     "vercel-build": "npm install",
-    "release": "node update-all.js && node scripts/vercel-smoke.js --wait"
+    "release": "node scripts/update-all.js && node scripts/vercel-smoke.js --wait"
   },
   "dependencies": {
     "@sparticuz/chromium": "^143.0.4",

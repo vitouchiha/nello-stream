@@ -516,7 +516,7 @@ function _loadTitlesIndex() {
   try {
     const path = require('path');
     const fs = require('fs');
-    const indexPath = path.resolve(__dirname, '..', '..', 'es-titles-index.json');
+    const indexPath = path.resolve(__dirname, '..', '..', 'data', 'es-titles-index.json');
     if (fs.existsSync(indexPath)) {
       _cachedTitlesIndex = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
       console.log(`[Eurostreaming] Loaded titles index: ${Object.keys(_cachedTitlesIndex).length} entries`);

@@ -7,7 +7,7 @@ REM
 echo Creating monthly Task Scheduler job: StreamFusion-WarmKK-Monthly...
 echo.
 
-schtasks /create /tn "StreamFusion-WarmKK-Monthly" /tr "C:\Users\vitob\Desktop\bot telegram\Streaming Koreano\StreamFusionMail\warm-kk-subs-cron.bat" /sc monthly /d 1 /st 11:00 /f
+schtasks /create /tn "StreamFusion-WarmKK-Monthly" /tr "C:\Users\vitob\Desktop\bot telegram\Streaming Koreano\StreamFusionMail\scripts\cron\warm-kk-subs-cron.bat" /sc monthly /d 1 /st 11:00 /f
 
 if %ERRORLEVEL% EQU 0 (
   echo ✓ Task created successfully

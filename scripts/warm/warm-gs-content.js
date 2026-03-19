@@ -23,7 +23,7 @@ const path = require('path');
 // Read active domain from provider_urls.json (auto-updated by CF Worker cron)
 let BASE = 'https://guardoserie.website';
 try {
-  const urls = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'provider_urls.json'), 'utf-8'));
+  const urls = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../data/provider_urls.json'), 'utf-8'));
   if (urls?.guardoserie) BASE = urls.guardoserie.replace(/\/$/, '');
 } catch { /* fallback to default */ }
 // Normalize any guardoserie variant → .website (canonical KV domain, matches cfworker.js)
@@ -40,7 +40,7 @@ const EP_FETCH_TIMEOUT = 15000;
 
 // ── Load env ────────────────────────────────────────────────────────────────
 try {
-  const envPath = path.resolve(__dirname, '.env');
+  const envPath = path.resolve(__dirname, '../../.env');
   if (fs.existsSync(envPath)) {
     for (const line of fs.readFileSync(envPath, 'utf-8').split('\n')) {
       const m = line.match(/^([A-Z_]+)=(.+)$/);
@@ -173,7 +173,7 @@ async function main() {
   const args = process.argv.slice(2);
 
   // Load titles index
-  const indexPath = path.resolve(__dirname, 'gs-titles-index.json');
+  const indexPath = path.resolve(__dirname, '../../data/gs-titles-index.json');
   if (!fs.existsSync(indexPath)) {
     console.error('❌ gs-titles-index.json not found. Run warm-gs-cache.js first.');
     process.exit(1);

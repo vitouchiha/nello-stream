@@ -21,12 +21,12 @@
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
-const { launchBrowser, applyStealthEvasions } = require('./src/utils/browser');
-const { decryptKisskhSubtitleFull, decryptKisskhSubtitleStatic } = require('./src/utils/subDecrypter');
+const { launchBrowser, applyStealthEvasions } = require('../../src/utils/browser');
+const { decryptKisskhSubtitleFull, decryptKisskhSubtitleStatic } = require('../../src/utils/subDecrypter');
 
-const INDEX_PATH = path.resolve(__dirname, 'kk-episodes-index.json');
-const STATE_PATH = path.resolve(__dirname, 'kk-subs-warm-state.json');
-const LOCAL_CACHE_DIR = path.resolve(__dirname, 'kk-subs-cache');
+const INDEX_PATH = path.resolve(__dirname, '../../data/kk-episodes-index.json');
+const STATE_PATH = path.resolve(__dirname, '../../kk-subs-warm-state.json');
+const LOCAL_CACHE_DIR = path.resolve(__dirname, '../../kk-subs-cache');
 
 const SITE_BASE = 'https://kisskh.do';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';

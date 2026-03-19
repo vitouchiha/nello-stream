@@ -39,7 +39,7 @@ function _loadRamaTitlesIndex() {
   try {
     const pathMod = require('path');
     const fs = require('fs');
-    const indexPath = pathMod.resolve(__dirname, '..', '..', 'rama-titles-index.json');
+    const indexPath = pathMod.resolve(__dirname, '..', '..', 'data', 'rama-titles-index.json');
     if (fs.existsSync(indexPath)) {
       _cachedRamaTitlesIndex = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
       log.info(`Loaded Rama titles index: ${Object.keys(_cachedRamaTitlesIndex).length} entries`);

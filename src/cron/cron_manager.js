@@ -248,7 +248,7 @@ registerJob('gs-index-push', async () => {
   const path = require('path');
   const { getAllWorkers } = require('../utils/cfWorkerPool');
 
-  const indexPath = path.resolve(__dirname, '..', '..', 'gs-titles-index.json');
+  const indexPath = path.resolve(__dirname, '..', '..', 'data', 'gs-titles-index.json');
   if (!fs.existsSync(indexPath)) return { status: 'skip', reason: 'no static index file' };
 
   const index = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));

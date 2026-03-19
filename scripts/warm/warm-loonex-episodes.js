@@ -30,8 +30,8 @@ const HEADERS = {
   'Referer': BASE_URL + '/',
 };
 
-const CATALOG_GZ = path.resolve(__dirname, 'loonex-cache', 'catalog.json.gz');
-const OUT_PATH = path.resolve(__dirname, 'loonex-episodes-index.json');
+const CATALOG_GZ = path.resolve(__dirname, '../../loonex-cache', 'catalog.json.gz');
+const OUT_PATH = path.resolve(__dirname, '../../data/loonex-episodes-index.json');
 
 // ── CLI args ─────────────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
@@ -297,20 +297,20 @@ async function main() {
 // ── Git deploy ───────────────────────────────────────────────────────────────
 
 async function gitDeploy() {
-  const cwd = __dirname;
+  const cwd = path.resolve(__dirname, '../..');
   const run = (cmd) => {
     console.log(`  $ ${cmd}`);
     return execSync(cmd, { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   };
 
-  const diff = run('git diff --stat loonex-episodes-index.json');
+  const diff = run('git diff --stat data/loonex-episodes-index.json');
   if (!diff) {
     console.log('📦 No changes in loonex-episodes-index.json, skipping deploy.');
     return;
   }
 
   console.log('\n🚀 Deploying updated Loonex episode cache...');
-  run('git add loonex-episodes-index.json');
+  run('git add data/loonex-episodes-index.json');
 
   const count = Object.keys(JSON.parse(fs.readFileSync(OUT_PATH, 'utf-8'))).length;
   const msg = `chore: update loonex-episodes-index (${count} episodes)`;

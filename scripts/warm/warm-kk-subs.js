@@ -19,11 +19,11 @@
 
 const fs = require('fs');
 const path = require('path');
-const kisskh = require('./src/providers/kisskh');
+const kisskh = require('../../src/providers/kisskh');
 
-const INDEX_PATH = path.resolve(__dirname, 'kk-episodes-index.json');
-const STATE_PATH = path.resolve(__dirname, 'kk-subs-warm-state.json');
-const LOCAL_CACHE_DIR = path.resolve(__dirname, 'kk-subs-cache');
+const INDEX_PATH = path.resolve(__dirname, '../../data/kk-episodes-index.json');
+const STATE_PATH = path.resolve(__dirname, '../../kk-subs-warm-state.json');
+const LOCAL_CACHE_DIR = path.resolve(__dirname, '../../kk-subs-cache');
 
 const args = process.argv.slice(2);
 function getArg(name) {

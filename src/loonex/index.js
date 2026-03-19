@@ -102,7 +102,7 @@ function _loadLoonexEpisodesIndex() {
   try {
     const pathMod = require("path");
     const fs = require("fs");
-    const indexPath = pathMod.resolve(__dirname, "..", "..", "loonex-episodes-index.json");
+    const indexPath = pathMod.resolve(__dirname, "..", "..", "data", "loonex-episodes-index.json");
     if (fs.existsSync(indexPath)) {
       _cachedLoonexEpisodesIndex = JSON.parse(fs.readFileSync(indexPath, "utf-8"));
     }

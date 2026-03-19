@@ -10,7 +10,7 @@ schtasks /delete /tn "StreamFusion-WarmGS-Monthly" /f >nul 2>&1
 
 schtasks /create ^
   /tn "StreamFusion-WarmGS-Monthly" ^
-  /tr "C:\Users\vitob\Desktop\bot telegram\Streaming Koreano\StreamFusionMail\warm-gs-episodes-cron.bat" ^
+  /tr "C:\Users\vitob\Desktop\bot telegram\Streaming Koreano\StreamFusionMail\scripts\cron\warm-gs-episodes-cron.bat" ^
   /sc monthly ^
   /d 1 ^
   /st 10:00 ^

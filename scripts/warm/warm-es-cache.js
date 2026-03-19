@@ -18,7 +18,7 @@ const zlib = require('zlib');
 
 const ES_BASE = 'https://eurostream.ing';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
-const CACHE_DIR = path.join(__dirname, 'es-cache');
+const CACHE_DIR = path.join(__dirname, '../../es-cache');
 
 async function fetchPage(page) {
   const url = `${ES_BASE}/wp-json/wp/v2/posts?per_page=100&page=${page}&_fields=id,title,content`;
@@ -104,7 +104,7 @@ async function main() {
   }
 
   // Save titles index
-  const indexPath = path.join(__dirname, 'es-titles-index.json');
+  const indexPath = path.join(__dirname, '../../data/es-titles-index.json');
   fs.writeFileSync(indexPath, JSON.stringify(allTitles));
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);

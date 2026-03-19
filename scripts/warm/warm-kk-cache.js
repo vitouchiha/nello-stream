@@ -17,7 +17,7 @@ const zlib = require('zlib');
 
 const API_BASE = 'https://kisskh.do/api';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
-const CACHE_DIR = path.join(__dirname, 'kk-cache');
+const CACHE_DIR = path.join(__dirname, '../../kk-cache');
 const PAGE_SIZE = 30;
 const MAX_PAGES = 25;
 const DELAY_MS = 500;
@@ -85,7 +85,7 @@ async function main() {
   }
 
   // Save titles index
-  const indexPath = path.join(__dirname, 'kk-titles-index.json');
+  const indexPath = path.join(__dirname, '../../data/kk-titles-index.json');
   fs.writeFileSync(indexPath, JSON.stringify(allTitles));
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);

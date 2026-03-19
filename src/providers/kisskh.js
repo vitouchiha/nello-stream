@@ -54,7 +54,7 @@ function _loadKkTitlesIndex() {
   try {
     const path = require('path');
     const fs = require('fs');
-    const indexPath = path.resolve(__dirname, '..', '..', 'kk-titles-index.json');
+    const indexPath = path.resolve(__dirname, '..', '..', 'data', 'kk-titles-index.json');
     if (fs.existsSync(indexPath)) {
       _cachedKkTitlesIndex = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
       log.info(`Loaded KK titles index: ${Object.keys(_cachedKkTitlesIndex).length} entries`);
@@ -68,7 +68,7 @@ function _loadKkEpisodesIndex() {
   try {
     const path = require('path');
     const fs = require('fs');
-    const indexPath = path.resolve(__dirname, '..', '..', 'kk-episodes-index.json');
+    const indexPath = path.resolve(__dirname, '..', '..', 'data', 'kk-episodes-index.json');
     if (fs.existsSync(indexPath)) {
       _cachedKkEpisodesIndex = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
       log.info(`Loaded KK episodes index: ${Object.keys(_cachedKkEpisodesIndex).length} series`);

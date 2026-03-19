@@ -11,7 +11,6 @@ stack.env
 # Build & cache
 dist/
 /cache/
-data/
 .vercel
 .wrangler/
 !src/cache/
@@ -48,16 +47,19 @@ rama-cache/
 !package.json
 !package-lock.json
 !vercel.json
-!provider_urls.json
-!es-titles-index.json
-!gs-titles-index.json
-!gs-episodes-index.json
-!kk-episodes-index.json
-!kk-titles-index.json
-!rama-titles-index.json
-!loonex-titles-index.json
-!loonex-episodes-index.json
+!data/provider_urls.json
+!data/es-titles-index.json
+!data/gs-titles-index.json
+!data/gs-episodes-index.json
+!data/kk-episodes-index.json
+!data/kk-titles-index.json
+!data/rama-titles-index.json
+!data/loonex-titles-index.json
+!data/loonex-episodes-index.json
 !src/**/*.json
+
+# Cache files in data/
+data/*.cache
 
 # Test/debug scripts
 _test_*.js

@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const ROOT = __dirname;
+const ROOT = path.resolve(__dirname, '..');
 const DEFAULT_VERCEL_BASE_URL = 'https://nellostream.vercel.app';
 
 const manifestPath = path.join(ROOT, 'manifest.json');

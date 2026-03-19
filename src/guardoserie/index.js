@@ -553,7 +553,7 @@ function _loadGsTitlesIndex() {
     try {
         const path = require('path');
         const fs = require('fs');
-        const indexPath = path.resolve(__dirname, '..', '..', 'gs-titles-index.json');
+        const indexPath = path.resolve(__dirname, '..', '..', 'data', 'gs-titles-index.json');
         if (fs.existsSync(indexPath)) {
             _cachedGsTitlesIndex = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
             console.log(`[Guardoserie] Loaded titles index: ${Object.keys(_cachedGsTitlesIndex).length} entries`);
@@ -569,7 +569,7 @@ function _loadGsEpisodesIndex() {
     try {
         const path = require('path');
         const fs = require('fs');
-        const indexPath = path.resolve(__dirname, '..', '..', 'gs-episodes-index.json');
+        const indexPath = path.resolve(__dirname, '..', '..', 'data', 'gs-episodes-index.json');
         if (fs.existsSync(indexPath)) {
             _cachedGsEpisodesIndex = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
             console.log(`[Guardoserie] Loaded episodes index: ${Object.keys(_cachedGsEpisodesIndex).length} entries`);

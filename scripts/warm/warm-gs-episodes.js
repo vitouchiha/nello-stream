@@ -34,8 +34,8 @@ const HEADERS = {
   'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
 };
 
-const INDEX_PATH = path.resolve(__dirname, 'gs-titles-index.json');
-const OUT_PATH = path.resolve(__dirname, 'gs-episodes-index.json');
+const INDEX_PATH = path.resolve(__dirname, '../../data/gs-titles-index.json');
+const OUT_PATH = path.resolve(__dirname, '../../data/gs-episodes-index.json');
 
 // ── CLI args ─────────────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
@@ -303,21 +303,21 @@ async function main() {
 const { execSync } = require('child_process');
 
 async function gitDeploy() {
-  const cwd = __dirname;
+  const cwd = path.resolve(__dirname, '../..');
   const run = (cmd) => {
     console.log(`  $ ${cmd}`);
     return execSync(cmd, { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   };
 
   // Check if there are actual changes
-  const diff = run('git diff --stat gs-episodes-index.json');
+  const diff = run('git diff --stat data/gs-episodes-index.json');
   if (!diff) {
     console.log('📦 No changes in gs-episodes-index.json, skipping deploy.');
     return;
   }
 
   console.log('\n🚀 Deploying updated episode cache...');
-  run('git add gs-episodes-index.json');
+  run('git add data/gs-episodes-index.json');
 
   const count = Object.keys(JSON.parse(fs.readFileSync(OUT_PATH, 'utf-8'))).length;
   const msg = `chore: update gs-episodes-index (${count} episodes)`;

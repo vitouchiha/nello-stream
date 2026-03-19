@@ -35,7 +35,7 @@ function Get-WarmGsProcess {
 function Start-WarmGs {
     Log "Starting warm-gs-episodes with 4GB heap..."
     Push-Location $dir
-    & node --max-old-space-size=4096 warm-gs-episodes.js --continue --deploy
+    & node --max-old-space-size=4096 scripts/warm/warm-gs-episodes.js --continue --deploy
     Pop-Location
 }
 
