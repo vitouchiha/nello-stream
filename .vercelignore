@@ -6,7 +6,6 @@ kk-subs-cache/
 # Dev / local artifacts
 .env
 stack.env
-data/
 /cache/
 *.log
 
