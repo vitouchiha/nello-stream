@@ -1,3 +1,17 @@
+## [3.2.50] - 2026-03-19
+
+### Fixed
+- **AnimeSaturn: subtitle-keyword fallback per film anime** (`src/mapping/index.js`)
+  - AS search per "One Piece: Stampede" o simili non restituisce il film ma la serie principale o lista trending.
+  - Aggiunto doppio fallback quando la ricerca principale non trova path:
+    1. **Sottotitolo solo**: cerca AS per il testo dopo `:` (es. "Stampede") e confronta slug con le parole del titolo completo.
+    2. **Franchise + Movie**: cerca AS per il testo prima del `:` + "Movie" (es. "One Piece Movie") e confronta slug con le parole del titolo completo.
+  - Helper `asSlugMatchesFull` implementa word-merge + filler-aware matching identico a quello di AW.
+  - Esempio: "One Piece: Stampede" → cerca AS per "Stampede" o "One Piece Movie" → ottiene `One-Piece-Movie-14-Stampede-a` → match ✓
+  - Testato: Stampede (42061) AS trova `/anime/One-Piece-Movie-14-Stampede-a` e `-ITA-a`; Film Z, Frieren S2, Jack of All Trades invariati ✓
+
+---
+
 ## [3.2.49] - 2026-03-19
 
 ### Fixed

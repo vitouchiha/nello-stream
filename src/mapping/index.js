@@ -822,6 +822,108 @@ async function searchAnimeSaturn(titles, opts) {
     paths.forEach(p => allPaths.add(p));
     if (allPaths.size >= 10) break;
   }
+
+  // Subtitle-keyword fallback for AS: when main title search doesn't find the movie slug
+  // (AS returns trending list for unknown titles), try:
+  //   1. subtitle alone ("Stampede") matching against full title words
+  //   2. "Franchise Movie" prefix ("One Piece Movie") — AS lists movies with "movie" in slug
+  if (allPaths.size === 0) {
+    const asSlugMatchesFull = (slug, origWords) => {
+      const canon = w => (w === 'film' ? 'movie' : w);
+      const slugNorm = slug.toLowerCase()
+        .replace(/-(subita|ita-sub|sub-ita|ita|sub|eng|raw|jp|dub)(-[a-z0-9]+)?$/i, "")
+        .replace(/[-_]+/g, " ").trim();
+      const sw = slugNorm.split(/\s+/).filter(Boolean);
+      let ti = 0, si = 0;
+      while (si < sw.length && ti < origWords.length) {
+        if (canon(sw[si]) === canon(origWords[ti])) { ti++; si++; continue; }
+        let merged = origWords[ti], found = false;
+        for (let k = ti + 1; k < origWords.length && merged.length < sw[si].length; k++) {
+          merged += origWords[k];
+          if (merged === sw[si]) { ti = k + 1; si++; found = true; break; }
+        }
+        if (found) continue;
+        if (/^\d+$/.test(sw[si]) || sw[si] === 'movie') { si++; continue; }
+        return false;
+      }
+      if (ti < origWords.length) return false;
+      if (opts?.relaxSlugMatch) return true;
+      return sw.slice(si).every(w => /^\d+$/.test(w) || w === 'movie' || /^a+$/.test(w));
+    };
+
+    for (const origTitle of titles.slice(0, 3)) {
+      if (!origTitle) continue;
+      const origNorm = origTitle.toLowerCase().replace(/['\u2018\u2019\u02bc`]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+      if (!origNorm) continue;
+      const origWords = origNorm.split(/\s+/).filter(Boolean);
+
+      // Build fallback search queries to try
+      const fallbackQueries = new Set();
+      // 1. subtitle after colon
+      const colonIdx = origTitle.indexOf(':');
+      if (colonIdx >= 2) {
+        const subtitle = origTitle.substring(colonIdx + 1).trim();
+        if (subtitle.length >= 4 && /[a-zA-Z]/.test(subtitle)) fallbackQueries.add(subtitle);
+      }
+      // 2. franchise + "Movie" — helps for "One Piece: Stampede" → "One Piece Movie"
+      const preColon = colonIdx >= 2 ? origTitle.substring(0, colonIdx).trim() : null;
+      if (preColon && /[a-zA-Z]/.test(preColon)) fallbackQueries.add(`${preColon} Movie`);
+
+      for (const q of fallbackQueries) {
+        const subKey = `as:sub:${q.toLowerCase()}`;
+        let subHtml;
+        const subCached = cacheGet(subKey);
+        if (subCached !== undefined) {
+          subHtml = subCached;
+        } else {
+          subHtml = await fetchHtml(`${base}/animelist?search=${encodeURIComponent(q)}`);
+          cacheSet(subKey, subHtml);
+        }
+
+        // Run the same three extractors but match slugs against origWords
+        const subPaths = [];
+        const blockRegex = /class="[^"]*item-archivio[^"]*"[\s\S]*?<\/(?:div|li)>/gi;
+        const blocks = subHtml.match(blockRegex);
+        if (blocks) {
+          for (const block of blocks) {
+            const lm = block.match(/href="(?:https?:\/\/[^"]*)?\/anime\/([^"?#]+)"/i);
+            if (lm && !lm[1].includes("${") && asSlugMatchesFull(lm[1], origWords)) {
+              const p = `/anime/${lm[1]}`;
+              if (!subPaths.includes(p)) subPaths.push(p);
+            }
+          }
+        }
+        if (subPaths.length === 0) {
+          const listBlockRegex = /class="[^"]*list-group-item[^"]*"[\s\S]*?<\/li>/gi;
+          const listBlocks = subHtml.match(listBlockRegex);
+          if (listBlocks) {
+            for (const block of listBlocks) {
+              const lm = block.match(/href="(?:https?:\/\/[^"]*)?\/anime\/([^"?#]+)"/i);
+              if (lm && !lm[1].includes("${") && asSlugMatchesFull(lm[1], origWords)) {
+                const p = `/anime/${lm[1]}`;
+                if (!subPaths.includes(p)) subPaths.push(p);
+              }
+            }
+          }
+        }
+        if (subPaths.length === 0) {
+          const hrefRegex = /href="(?:https?:\/\/[^"]*)?\/anime\/([^"?#]+)"/gi;
+          let sm;
+          while ((sm = hrefRegex.exec(subHtml)) !== null) {
+            if (!sm[1].includes("${") && asSlugMatchesFull(sm[1], origWords)) {
+              const p = `/anime/${sm[1]}`;
+              if (!subPaths.includes(p)) subPaths.push(p);
+            }
+          }
+        }
+
+        subPaths.forEach(p => allPaths.add(p));
+        if (allPaths.size >= 10) break;
+      }
+      if (allPaths.size >= 10) break;
+    }
+  }
+
   return [...allPaths].slice(0, 20);
 }
 
