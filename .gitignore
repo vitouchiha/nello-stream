@@ -30,7 +30,7 @@ tmp_secret.txt
 docs/
 
 # Cache directories (regenerable via warm scripts + KV)
-es-cache/
+# es-cache/ — needed for Vercel deployment (eurostreaming post data)
 gs-cache/
 kk-cache/
 kk-subs-cache/
