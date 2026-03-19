@@ -1,3 +1,14 @@
+## [3.2.47] - 2026-03-19
+
+### Fixed
+- **AnimeWorld / AnimeSaturn: slash prefix con apostrofo nel titolo** (`src/mapping/index.js`)
+  - `searchAnimeWorld` e `searchAnimeSaturn` normalizzavano il titolo con `replace(/[^a-z0-9]+/g, " ")`, che spezza l'apostrofo in "Journey's" come `journey` + `s` (due parole).
+  - Gli slug dei siti usano `journeys` (una sola parola): `frieren-beyond-journeys-end-2`.
+  - Il controllo strict word-prefix falliva: `journey` ≠ `journeys` → nessun path trovato → zero stream.
+  - Fix: aggiunto `.replace(/['\u2018\u2019\u02bc]/g, "")` prima del replace sui non-alphanumerici, così "Journey's" → `journeys` che matcha il slug correttamente. Testato: AW e AS ora restituiscono entrambi i path per Frieren S2 (e ITA).
+
+---
+
 ## [3.2.46] - 2026-03-19
 
 ### Fixed

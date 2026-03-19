@@ -581,7 +581,8 @@ async function searchAnimeWorld(titles, opts) {
     // Extra trailing slug words (after the title) must be purely numeric (season markers).
     // This prevents e.g. "naruto-shippuden" or "boruto-naruto-next-generations"
     // from matching a search for "Naruto".
-    const titleNormalized = title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    // Strip apostrophes first so "Journey's" → "journeys" to match slug "journeys" (not "journey"+"s").
+    const titleNormalized = title.toLowerCase().replace(/['\u2018\u2019\u02bc`]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
     // Skip non-Latin titles that normalize to empty
     if (!titleNormalized) { cacheSet(key, []); continue; }
     const titleWords = titleNormalized.split(/\s+/).filter(Boolean);
@@ -628,7 +629,8 @@ async function searchAnimeSaturn(titles, opts) {
     const paths = [];
 
     // Precompute title words once for strict prefix matching (shared by all block extractors)
-    const asTitleNormBlocks = title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    // Strip apostrophes before normalization so "Journey's" → "journeys" to match slug.
+    const asTitleNormBlocks = title.toLowerCase().replace(/['\u2018\u2019\u02bc`]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
     const asTitleWordsBlocks = asTitleNormBlocks ? asTitleNormBlocks.split(/\s+/).filter(Boolean) : [];
 
     // Helper: strict word-prefix match — slug must start with all title words (in order),
@@ -690,7 +692,7 @@ async function searchAnimeSaturn(titles, opts) {
     if (paths.length === 0) {
       const regex = /href="(?:https?:\/\/[^"]*)?\/anime\/([^"?#]+)"/gi;
       let m;
-      const asTitleNorm = title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      const asTitleNorm = title.toLowerCase().replace(/['\u2018\u2019\u02bc`]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
       if (!asTitleNorm) { cacheSet(key, []); continue; } // Skip non-Latin titles
       const asTitleWords = asTitleNorm.split(/\s+/).filter(Boolean);
       while ((m = regex.exec(html)) !== null) {
