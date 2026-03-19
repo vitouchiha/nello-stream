@@ -835,15 +835,15 @@ async function getStreams(stremioId, config = {}) {
         'kisskh.browserStreamExtraction'
       ).catch(() => {
         log.warn('browser stream extraction timed out (45s cap)', { serieId, episodeId });
-        return { streamUrl: null, subApiUrl: null };
+        return { streamUrl: null, subApiUrl: null, subApiData: null };
       });
-      const { streamUrl: extractedUrl, subApiUrl } = browserResult;
+      const { streamUrl: extractedUrl, subApiUrl, subApiData } = browserResult;
       rawUrl    = extractedUrl;
       if (!rawUrl) {
         log.warn('no stream found via browser', { serieId, episodeId });
         return [{ name: '[DEBUG]\\nKissKH', title: 'Nessun URL ottenuto da Browserless.\\nRiprova.', url: 'http://localhost/error.mp4' }];
       }
-      subtitles = await _getSubtitlesFromApiUrl(subApiUrl || `${API_BASE}/Sub/${episodeId}?kkey=${SUB_KKEY}`, serieId, episodeId);
+      subtitles = await _getSubtitlesFromApiUrl(subApiUrl || `${API_BASE}/Sub/${episodeId}?kkey=${SUB_KKEY}`, serieId, episodeId, subApiData);
     }
 
     if (!rawUrl) {
@@ -866,10 +866,10 @@ async function getStreams(stremioId, config = {}) {
         _extractStreamAndSubs(serieId, episodeId),
         35_000,
         'kisskh.browserSubtitleFallback'
-      ).catch(() => ({ subApiUrl: null }));
+      ).catch(() => ({ subApiUrl: null, subApiData: null }));
 
-      if (browserSubResult?.subApiUrl) {
-        const recovered = await _getSubtitlesFromApiUrl(browserSubResult.subApiUrl, serieId, episodeId);
+      if (browserSubResult?.subApiUrl || browserSubResult?.subApiData) {
+        const recovered = await _getSubtitlesFromApiUrl(browserSubResult.subApiUrl, serieId, episodeId, browserSubResult.subApiData);
         if (Array.isArray(recovered) && recovered.length > 0) {
           subtitles = recovered;
           log.info('subtitle fallback recovered Italian subtitles', { serieId, episodeId, count: recovered.length });
@@ -885,6 +885,7 @@ async function getStreams(stremioId, config = {}) {
   if (rawUrl && (!Array.isArray(subtitles) || subtitles.length === 0)) {
     const kvSubs = await _kvGet('kk_sub', `${serieId}:${episodeId}`);
     if (Array.isArray(kvSubs) && kvSubs.length > 0) {
+      for (const s of kvSubs) { if (!s.id) s.id = `kisskh_${s.lang || 'it'}_${serieId}_${episodeId}`; }
       subtitles = kvSubs;
       streamCache.set(cacheKey, { url: rawUrl, subtitles });
       cache.set(`kk:${cacheKey}`, { url: rawUrl, subtitles }, cache.TTL.STREAM);
@@ -1405,6 +1406,7 @@ async function _extractStreamAndSubs(serieId, episodeId) {
   const browser = await launchBrowser();
   let streamUrl = null;
   let subApiUrl = null;
+  let subApiData = null; // intercepted Sub API response body (avoids 2nd server-side call that 403s)
 
   try {
     const page = await browser.newPage();
@@ -1462,7 +1464,7 @@ async function _extractStreamAndSubs(serieId, episodeId) {
       // Intercept subtitle API endpoint
       if (!subApiUrl && u.includes('/api/Sub/')) {
         subApiUrl = u;
-        log.debug(`intercepted sub API: ${u.slice(0, 120)}`);
+        log.debug(`intercepted sub API request: ${u.slice(0, 120)}`);
       }
 
       // Block heavy resources, but never abort m3u8 requests.
@@ -1476,6 +1478,20 @@ async function _extractStreamAndSubs(serieId, episodeId) {
         log.debug(`[intercept] ${rt} ${u.slice(0, 120)}`);
       }
       req.continue().catch(() => {});
+    });
+
+    // Intercept Sub API response body so we don't need a 2nd server-side call (which 403s behind CF).
+    page.on('response', async (res) => {
+      if (!subApiData && res.url().includes('/api/Sub/')) {
+        try {
+          const txt = await res.text();
+          const parsed = JSON.parse(txt);
+          if (Array.isArray(parsed) || (parsed && typeof parsed === 'object')) {
+            subApiData = Array.isArray(parsed) ? parsed : [parsed];
+            log.info('intercepted sub API response', { url: res.url().slice(0, 80), count: subApiData.length });
+          }
+        } catch { /* non-JSON sub response, ignore */ }
+      }
     });
 
     // Some episodes fetch stream JSON via .png but delay the actual m3u8 request.
@@ -1617,7 +1633,7 @@ async function _extractStreamAndSubs(serieId, episodeId) {
     await browser.close().catch(() => {});
   }
 
-  return { streamUrl, subApiUrl };
+  return { streamUrl, subApiUrl, subApiData };
 }
 
 async function _extractStream(serieId, episodeId) {
@@ -1631,15 +1647,24 @@ async function _extractStream(serieId, episodeId) {
  * Fetch & decrypt subtitles given an already-intercepted sub API URL.
  * No browser is launched here.
  */
-async function _getSubtitlesFromApiUrl(subApiUrl, serieId, episodeId) {
+async function _getSubtitlesFromApiUrl(subApiUrl, serieId, episodeId, prefetchedSubList) {
   const cacheKey = `sub_v2:${serieId}:${episodeId}`;
+
+  // Ensure legacy cached entries get an 'id' field (required by Stremio protocol)
+  const _ensureIds = (subs) => {
+    if (!Array.isArray(subs)) return subs;
+    for (const s of subs) { if (!s.id) s.id = `kisskh_${s.lang || 'it'}_${serieId}_${episodeId}`; }
+    return subs;
+  };
+
   const cached = subCache.get(cacheKey);
-  if (cached) return cached;
+  if (cached) return _ensureIds(cached);
 
   // ── KV fallback (decrypted subs survive Vercel cold starts) ───────────
   const kvSubs = await _kvGet('kk_sub', `${serieId}:${episodeId}`);
   if (kvSubs) {
     log.info('subs from KV', { serieId, episodeId });
+    _ensureIds(kvSubs);
     subCache.set(cacheKey, kvSubs);
     return kvSubs;
   }
@@ -1653,6 +1678,7 @@ async function _getSubtitlesFromApiUrl(subApiUrl, serieId, episodeId) {
       const localSubs = JSON.parse(fs.readFileSync(localPath, 'utf-8'));
       if (Array.isArray(localSubs) && localSubs.length > 0) {
         log.info('subs from local cache', { serieId, episodeId });
+        _ensureIds(localSubs);
         subCache.set(cacheKey, localSubs);
         // Back-fill KV so future cold starts don't re-read the file
         _kvPut('kk_sub', `${serieId}:${episodeId}`, localSubs);
@@ -1668,12 +1694,17 @@ async function _getSubtitlesFromApiUrl(subApiUrl, serieId, episodeId) {
 
   const headers = _baseHeaders();
   let subtitleList;
-  try {
-    const resp = await axios.get(subApiUrl, { headers, timeout: 10_000, responseType: 'json' });
-    subtitleList = Array.isArray(resp.data) ? resp.data : [resp.data];
-  } catch (err) {
-    log.warn(`subtitle API request failed: ${err.message}`);
-    return [];
+  if (Array.isArray(prefetchedSubList) && prefetchedSubList.length > 0) {
+    subtitleList = prefetchedSubList;
+    log.info('using pre-fetched sub list from browser interception', { count: subtitleList.length });
+  } else {
+    try {
+      const resp = await axios.get(subApiUrl, { headers, timeout: 10_000, responseType: 'json' });
+      subtitleList = Array.isArray(resp.data) ? resp.data : [resp.data];
+    } catch (err) {
+      log.warn(`subtitle API request failed: ${err.message}`);
+      return [];
+    }
   }
 
   // Filter Italian (KissKH can return language labels like ITA / Italiano / it-IT)
@@ -1714,7 +1745,7 @@ async function _getSubtitlesFromApiUrl(subApiUrl, serieId, episodeId) {
         let mime = ext === 'vtt' ? 'text/vtt' : 'application/x-subrip';
         let base64 = Buffer.from(content, 'utf8').toString('base64');
         let dataUrl = `data:${mime};base64,${base64}`;
-        decoded.push({ lang: 'it', label: 'Italiano', url: dataUrl });
+        decoded.push({ id: `kisskh_it_${serieId}_${episodeId}`, lang: 'it', label: 'Italiano', url: dataUrl });
         log.info('Italian subtitle decoded', { subUrl: subUrl.slice(0, 60) });
         break; // First valid subtitle is enough
       }
@@ -1753,13 +1784,13 @@ async function warmSubtitleCacheForEpisode(serieId, episodeId, config = {}) {
       _extractStreamAndSubs(sid, eid),
       45_000,
       'kisskh.warmSubtitleBrowser'
-    ).catch(() => ({ streamUrl: null, subApiUrl: null }));
+    ).catch(() => ({ streamUrl: null, subApiUrl: null, subApiData: null }));
 
-    if (!browserResult?.subApiUrl) {
+    if (!browserResult?.subApiUrl && !browserResult?.subApiData) {
       return { ok: false, count: 0, reason: 'browser-no-subapi' };
     }
 
-    subtitles = await _getSubtitlesFromApiUrl(browserResult.subApiUrl, sid, eid);
+    subtitles = await _getSubtitlesFromApiUrl(browserResult.subApiUrl, sid, eid, browserResult.subApiData);
     if (subtitles.length > 0) {
       return { ok: true, count: subtitles.length, reason: 'warmed', subtitles };
     }

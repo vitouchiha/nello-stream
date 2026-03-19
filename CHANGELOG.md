@@ -1,3 +1,16 @@
+## [3.2.52] - 2026-03-19
+
+### Fixed
+- **KissKH: sottotitoli ora visibili su Stremio** (`src/providers/kisskh.js`, `vercel.json`)
+  - **Intercettazione risposta Sub API nel browser**: `page.on('response')` cattura il body della risposta `/api/Sub/` durante l'estrazione, evitando la chiamata axios server-side che falliva con 403 (CF protection).
+  - **`prefetchedSubList`**: nuovo parametro in `_getSubtitlesFromApiUrl` — quando il browser ha già i dati, li usa direttamente senza fare richieste HTTP.
+  - **Campo `id` obbligatorio**: aggiunto `id: "kisskh_it_{serieId}_{episodeId}"` sugli oggetti sottotitolo (richiesto dal protocollo Stremio).
+  - **`_ensureIds` retroattivo**: backfill del campo `id` su sottotitoli legacy in cache (in-memory, KV, local FS, KV recovery in `getStreams`).
+  - **Deploy `kk-subs-cache`**: aggiunto `kk-subs-cache/**` a `vercel.json` `includeFiles` per rendere disponibile la cache locale su Vercel (5469 file JSON).
+  - Testato: episodio 171923 (Bloody Game S3) → sub italiano con `id=kisskh_it_10010_171923` ✓
+
+---
+
 ## [3.2.51] - 2026-03-19
 
 ### Fixed
