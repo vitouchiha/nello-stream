@@ -1763,16 +1763,28 @@ async function _domainProbe(url, provider) {
     const finalUrl = new URL(resp.url);
     const origin = `${finalUrl.protocol}//${finalUrl.host}`;
 
-    // Quick HTML check if we got a 200
-    if (resp.ok) {
-      const html = await resp.text();
-      const markers = _SITE_MARKERS[provider] || [];
-      const lower = html.toLowerCase();
-      // At least one marker must be present (or no markers defined)
-      if (markers.length > 0 && !markers.some(m => lower.includes(m.toLowerCase()))) {
-        // Might be a parking/expired page
-        return null;
-      }
+    const html = await resp.text();
+    const lower = html.toLowerCase();
+
+    // Reject permanent CF blocks (WAF deny, suspended, captcha wall)
+    // "Attention Required" = WAF block, "Access denied" = IP/geo block
+    // These are NOT bypassable — domain is effectively dead
+    if (lower.includes('attention required') || lower.includes('access denied') ||
+        lower.includes('this website is using a security service') ||
+        lower.includes('suspended') || lower.includes('parked')) {
+      return null;
+    }
+
+    // On 403: only accept "Just a moment" (JS challenge = domain alive, bypassable)
+    if (resp.status === 403) {
+      if (!lower.includes('just a moment')) return null;
+      return origin; // CF challenge page — domain is alive
+    }
+
+    // On 200: verify HTML markers to catch parking/expired pages
+    const markers = _SITE_MARKERS[provider] || [];
+    if (markers.length > 0 && !markers.some(m => lower.includes(m.toLowerCase()))) {
+      return null;
     }
     return origin;
   } catch { /* DNS fail, timeout, etc. */ }
