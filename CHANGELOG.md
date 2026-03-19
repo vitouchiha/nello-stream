@@ -1,3 +1,19 @@
+## [3.2.45] - 2026-03-19
+
+### Fixed
+- **KissKH sub-ita: cache locale non usata a runtime** (`src/providers/kisskh.js`)
+  - `_getSubtitlesFromApiUrl()` cercava i sub solo in-memory e CF Worker KV.
+  - I 5414 file `kk-subs-cache/{serieId}/{episodeId}.json` (committati su git, disponibili su Vercel) non venivano mai letti.
+  - Fix: aggiunto lookup filesystem tra KV e chiamata live API. ~55% degli episodi ora trovano sub ITA istantaneamente.
+  - Back-fill KV quando il file locale viene trovato (ottimizzazione cold start futuri).
+- **KissKH: ep display mostra numero episodio leggibile** (es. `Ep1` invece di `Ep114580`)
+  - `epTitle` ora usa `_episodeNumberFromMeta()` se la meta è disponibile.
+
+### Docs
+- Aggiornato `docs/KISSKH_SUBTITLES_ITA.md` con documentazione del fix v3.2.45
+
+---
+
 ## [3.2.44] - 2026-03-19
 
 ### Fixed

@@ -907,7 +907,8 @@ async function getStreams(stremioId, config = {}) {
   const metaForTitle = _metaLoaded ? _meta : null;
   const seriesTitle = metaForTitle?.name || null;
   const displayTitle = seriesTitle ? seriesTitle.replace(/\s*\(\d{4}\)\s*$/, '').trim() : `Episode ${episodeId}`;
-  const epTitle = `Ep${episodeId}`;
+  const epNum = _episodeNumberFromMeta(metaForTitle?.videos, episodeId);
+  const epTitle = epNum ? `Ep${epNum}` : `Ep${episodeId}`;
   const hasProxy = !!(process.env.PROXY_URL || process.env.PROXY);
   
   const subInfo = (Array.isArray(subtitles) && subtitles.length > 0) ? '🇰🇷 SUB ITA' : '🇺🇸 SUB ENG';
@@ -1642,6 +1643,23 @@ async function _getSubtitlesFromApiUrl(subApiUrl, serieId, episodeId) {
     subCache.set(cacheKey, kvSubs);
     return kvSubs;
   }
+
+  // ── Local filesystem cache (kk-subs-cache/ committed to git, available on Vercel) ──
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const localPath = path.resolve(__dirname, '..', '..', 'kk-subs-cache', String(serieId), `${episodeId}.json`);
+    if (fs.existsSync(localPath)) {
+      const localSubs = JSON.parse(fs.readFileSync(localPath, 'utf-8'));
+      if (Array.isArray(localSubs) && localSubs.length > 0) {
+        log.info('subs from local cache', { serieId, episodeId });
+        subCache.set(cacheKey, localSubs);
+        // Back-fill KV so future cold starts don't re-read the file
+        _kvPut('kk_sub', `${serieId}:${episodeId}`, localSubs);
+        return localSubs;
+      }
+    }
+  } catch { /* local cache not available, continue */ }
 
   if (!subApiUrl) {
     log.warn('no subtitle API endpoint found', { serieId, episodeId });
