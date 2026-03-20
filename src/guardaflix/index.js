@@ -8,11 +8,8 @@ const cache = require('../cache/cache_manager');
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
 const { TMDB_API_KEY } = require('../utils/config');
 
-// WordPress nonce for admin-ajax search action (long-lived on this site)
-const SEARCH_NONCE = '20115729b4';
-
 function getBaseUrl() {
-  return getProviderUrl('guardaflix') || 'https://guardaplay.space';
+  return getProviderUrl('guardaflix') || 'https://guardaplay.beer';
 }
 
 async function getTitleAndYear(id, type) {
@@ -57,34 +54,31 @@ async function getTitleAndYear(id, type) {
 async function searchMovies(title) {
   const base = getBaseUrl();
   try {
-    // Page cache for search results
     const sCacheKey = `page:gflix:search:${title}`;
     let html = await cache.get(sCacheKey);
     if (!html) {
-      const resp = await fetch(`${base}/wp-admin/admin-ajax.php`, {
-        method: 'POST',
+      const resp = await fetch(`${base}/?s=${encodeURIComponent(title)}`, {
         headers: {
           'User-Agent': USER_AGENT,
-          'Content-Type': 'application/x-www-form-urlencoded',
           'Referer': `${base}/`,
-          'Origin': base,
         },
-        body: `action=action_tr_search_suggest&nonce=${SEARCH_NONCE}&term=${encodeURIComponent(title)}`,
         signal: AbortSignal.timeout(8000),
       });
       if (!resp.ok) return [];
       html = await resp.text();
-      if (html && html.length > 20) cache.set(sCacheKey, html, cache.TTL.MEDIUM);
+      if (html && html.length > 200) cache.set(sCacheKey, html, cache.TTL.MEDIUM);
     }
-    // Parse <a href="...">Title</a> — only movie entries
+    // Parse search results: <article> blocks with <a href class="lnk-blk"> and <h2 class="entry-title">
     const links = [];
-    const regex = /class="type-movies"[^<]*<\/span>([^<]+)<\/a>/g;
-    const hrefRegex = /<a\s+href="([^"]+)"/g;
-    // Parse blocks: <li class="..."><a href="URL"><span class="type-movies">...</span>TITLE</a></li>
-    const blockRegex = /<li[^>]*>\s*<a\s+href="([^"]+)"[^>]*>\s*<span[^>]*class="type-movies"[^>]*>[^<]*<\/span>([^<]+)<\/a>/gi;
+    const articleRe = /<article[^>]*>[\s\S]*?<\/article>/gi;
     let m;
-    while ((m = blockRegex.exec(html)) !== null) {
-      links.push({ href: m[1].trim(), text: m[2].trim() });
+    while ((m = articleRe.exec(html)) !== null) {
+      const article = m[0];
+      const hrefMatch = /<a[^>]+href="([^"]+)"[^>]+class="lnk-blk"/i.exec(article);
+      if (!hrefMatch) continue;
+      const titleMatch = /<h2[^>]+class="entry-title"[^>]*>([^<]+)/i.exec(article);
+      const text = titleMatch ? titleMatch[1].trim() : '';
+      links.push({ href: hrefMatch[1].trim(), text });
     }
     return links;
   } catch (e) {

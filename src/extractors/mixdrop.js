@@ -37,7 +37,7 @@ async function extractMixDrop(url, refererBase = 'https://m1xdrop.net/', provide
     if (mfpConfig.mfpUrl) {
       // MFP only works with m1xdrop.net/e/ — normalize other domains/paths
       const mfpUrl = url
-        .replace(/^(https?:\/\/)(?:mixdrop\.(?:vip|ag|co|to|club|sx)|m1xdrop\.(?:net|com))/i, '$1m1xdrop.net')
+        .replace(/^(https?:\/\/)(?:mixdrop\.(?:vip|ag|co|to|club|sx|ps|nu|click|vc|bz|gl)|m1xdrop\.(?:net|com))/i, '$1m1xdrop.net')
         .replace(/\/(emb|f)\//i, '/e/');
       const proxyUrl = await extractViaMfp(mfpUrl, 'Mixdrop', mfpConfig, true);
       if (proxyUrl) {

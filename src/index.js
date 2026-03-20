@@ -470,18 +470,19 @@ async function getStreams(id, type, season, episode, config = {}) {
           if (resolved) return;
           settled.set(result.provider, result);
           if (result.status === 'fulfilled' && result.streams?.length > 0) {
-            // Deduplicate streams by URL before adding
+            // Deduplicate streams by URL+name (keeps ITA vs SUB-ITA with same video URL)
             for (const s of result.streams) {
               const url = String(s?.url || s?.externalUrl || '').trim();
-              if (url && !seenUrls.has(url)) {
-                seenUrls.add(url);
+              const dedupKey = url + '|' + String(s?.name || '');
+              if (url && !seenUrls.has(dedupKey)) {
+                seenUrls.add(dedupKey);
                 allStreams.push(s);
               } else {
                 // DEBUG: CB01 filtering details
                 if (result.provider === 'CB01') {
                   if (!url) {
                     console.warn(`[Aggregator] CB01 stream FILTERED: NO URL. Name="${(s.name||'').substring(0,60)}"`);
-                  } else if (seenUrls.has(url)) {
+                  } else if (seenUrls.has(dedupKey)) {
                     console.warn(`[Aggregator] CB01 stream FILTERED: DUPLICATE. URL="${url.substring(0,60)}..."`);
                   }
                 }

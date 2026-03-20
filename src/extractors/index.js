@@ -21,7 +21,7 @@ const EXTRACTOR_REGISTRY = [
   },
   {
     name: 'DropLoad',
-    match: /dropload/i,
+    match: /dropload|dr0pstream|dropcdn/i,
     run: (url, options = {}) => extractDropLoad(url, options.refererBase),
   },
   {

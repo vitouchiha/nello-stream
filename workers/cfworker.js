@@ -1724,7 +1724,7 @@ const _KNOWN_DOMAINS = {
   animeworld:        ['www.animeworld.ac', 'www.animeworld.so', 'www.animeworld.tv'],
   animesaturn:       ['www.animesaturn.cx', 'www.animesaturn.dev'],
   guardahd:          ['mostraguarda.stream', 'guardahd.stream'],
-  guardaflix:        ['guardaplay.space', 'guardaplay.blog'],
+  guardaflix:        ['guardaplay.space', 'guardaplay.blog', 'guardaplay.beer'],
   loonex:            ['loonex.eu'],
 };
 
