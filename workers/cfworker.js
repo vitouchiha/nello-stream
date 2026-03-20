@@ -1715,16 +1715,16 @@ const _COMMUNITY_SOURCES = [
 // ── Known alternate domains per provider (fallback probing) ──────────────────
 const _KNOWN_DOMAINS = {
   streamingcommunity: ['streamingcommunity.computer', 'vixsrc.to', 'streamingcommunity.bond'],
-  cb01:              ['cb01uno.digital', 'cb01uno.life', 'cb01.uno', 'cb01uno.uno', 'cb01uno.click'],
+  cb01:              ['cb01uno.digital', 'cb01uno.life', 'cb01.uno', 'cb01uno.uno', 'cb01uno.click', 'cb01.stream'],
   guardaserie:       ['guardaserietv.bar', 'guardaserietv.skin', 'guardaserietv.autos', 'guardaserietv.asia', 'guardaserie.cfd'],
   guardoserie:       ['guardoserie.best', 'guardoserie.digital', 'guardoserie.surf', 'guardoserie.bar', 'guardoserie.blog'],
-  eurostreaming:     ['eurostream.ing', 'eurostreamings.life'],
+  eurostreaming:     ['eurostream.ing', 'eurostreamings.life', 'eurostreamings.buzz', 'www.eurostreaming.net'],
   toonitalia:        ['toonitalia.xyz', 'toonitalia.co'],
-  animeunity:        ['www.animeunity.so', 'www.animeunity.to'],
+  animeunity:        ['www.animeunity.so', 'www.animeunity.to', 'www.animeunity.click', 'animeunity.site', 'animeunity.top', 'animeunity.ch', 'animeunity.click', 'www.animeunity.club', 'www.animeunity.sbs'],
   animeworld:        ['www.animeworld.ac', 'www.animeworld.so', 'www.animeworld.tv'],
-  animesaturn:       ['www.animesaturn.cx', 'www.animesaturn.dev'],
+  animesaturn:       ['www.animesaturn.cx', 'www.animesaturn.dev', 'www.animesaturn.click', 'animesaturn.site', 'www.animesaturn.lol', 'www.animesaturn.me', 'www.animesaturn.app', 'www.animesaturn.sbs'],
   guardahd:          ['mostraguarda.stream', 'guardahd.stream'],
-  guardaflix:        ['guardaplay.space', 'guardaplay.blog', 'guardaplay.beer'],
+  guardaflix:        ['guardaplay.space', 'guardaplay.blog', 'guardaplay.beer', 'guardaplay.com'],
   loonex:            ['loonex.eu'],
 };
 

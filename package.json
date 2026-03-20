@@ -1,6 +1,6 @@
 {
   "name": "nello-drama",
-  "version": "3.2.61",
+  "version": "3.2.62",
   "description": "L'aggregatore premium di Drama per Stremio",
   "main": "server.js",
   "engines": {
@@ -11,6 +11,8 @@
     "dev": "node --watch server.js",
     "lint": "eslint .",
     "test:vercel": "node scripts/vercel-smoke.js",
+    "discover-domains": "node scripts/discover-domains.js",
+    "discover-domains:dry": "node scripts/discover-domains.js --dry-run",
     "vercel-build": "npm install",
     "release": "node scripts/update-all.js && node scripts/vercel-smoke.js --wait"
   },

@@ -1,0 +1,67 @@
+name: Discover New Domains
+
+# TLD brute-force domain discovery for all providers.
+# Tries ~80 TLDs per provider base domain, validates with HTML markers.
+# If a provider's domain died → switches to first working alternative.
+# New working domains → added to _KNOWN_DOMAINS in cfworker.js.
+#
+# When cfworker.js changes, the deploy-workers.yml workflow auto-triggers
+# to deploy updated code to all 5 CF Worker accounts.
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'   # Every 6 hours
+  workflow_dispatch: {}      # Manual trigger
+
+permissions:
+  contents: write
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run domain discovery
+        id: discover
+        run: |
+          node scripts/discover-domains.js | tee /tmp/discover-output.txt
+          EXIT_CODE=${PIPESTATUS[0]}
+          echo "exit_code=${EXIT_CODE}" >> $GITHUB_OUTPUT
+
+          # Extract commit message from script output
+          if [ "$EXIT_CODE" = "0" ]; then
+            MSG=$(grep "fix(domain-discovery):" /tmp/discover-output.txt | sed 's/^.*fix/fix/')
+            echo "commit_msg=${MSG}" >> $GITHUB_OUTPUT
+          fi
+
+          # Don't fail the job if exit code is 1 (no changes)
+          if [ "$EXIT_CODE" = "1" ]; then
+            echo "No changes needed"
+            exit 0
+          fi
+          exit $EXIT_CODE
+
+      - name: Commit & push
+        if: steps.discover.outputs.exit_code == '0'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/provider_urls.json workers/cfworker.js package.json manifest.json
+          if git diff --cached --quiet; then
+            echo "No actual file changes to commit"
+            exit 0
+          fi
+          # Commit WITHOUT [auto-domain] tag so deploy-workers.yml will trigger
+          git commit -m "${{ steps.discover.outputs.commit_msg }}"
+          git push
