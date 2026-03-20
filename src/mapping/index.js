@@ -641,8 +641,8 @@ async function searchAnimeWorld(titles, opts) {
       // For SPECIAL/OVA/ONA: accept all trailing words (filterSpinoffPaths handles selection)
       if (opts?.relaxSlugMatch) return true;
       // Any extra slug words beyond the matched portion must be purely numeric, 'movie',
-      // or an AS disambiguation suffix like 'a', 'aa', etc.
-      return slugWords.slice(si).every(w => /^\d+$/.test(w) || w === 'movie' || /^a+$/.test(w));
+      // or a site disambiguation suffix like 'a', 'aa', 'az', etc.
+      return slugWords.slice(si).every(w => /^\d+$/.test(w) || w === 'movie' || /^[a-z]{1,2}$/.test(w) || /^a+$/.test(w));
     });
 
     cacheSet(key, paths);
@@ -655,24 +655,35 @@ async function searchAnimeWorld(titles, opts) {
   // try searching with the subtitle alone but match against the FULL original title words.
   // e.g. "One Piece: Stampede" → search "Stampede" → finds one-piece-movie-14-stampede
   //      then match using full words ["one","piece","stampede"] → PASS ✓
+  // Also handles titles without colons (e.g. "One Piece Film Z") by trying first 2 words.
   if (allPaths.size === 0) {
     for (const origTitle of titles.slice(0, 3)) {
-      const colonIdx = origTitle.indexOf(':');
-      if (colonIdx < 2) continue;
-      const subtitle = origTitle.substring(colonIdx + 1).trim();
-      if (!subtitle || subtitle.length < 4 || !/[a-zA-Z]/.test(subtitle)) continue;
-
+      if (!origTitle) continue;
       const origNorm = origTitle.toLowerCase().replace(/['\u2018\u2019\u02bc`]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
       if (!origNorm) continue;
       const origWords = origNorm.split(/\s+/).filter(Boolean);
 
-      const subKey = `aw:sub:${subtitle.toLowerCase()}`;
+      const fallbackQueries = new Set();
+      const colonIdx = origTitle.indexOf(':');
+      if (colonIdx >= 2) {
+        const subtitle = origTitle.substring(colonIdx + 1).trim();
+        if (subtitle.length >= 4 && /[a-zA-Z]/.test(subtitle)) fallbackQueries.add(subtitle);
+      }
+      // No colon + 3+ words: try first two words as franchise name
+      if (colonIdx < 2 && origWords.length >= 3) {
+        const shortQuery = origWords.slice(0, 2).join(' ');
+        if (shortQuery.length >= 4) fallbackQueries.add(shortQuery);
+      }
+      if (fallbackQueries.size === 0) continue;
+
+      for (const fallbackQ of fallbackQueries) {
+      const subKey = `aw:sub:${fallbackQ.toLowerCase()}`;
       let subLinks;
       const subCached = cacheGet(subKey);
       if (subCached !== undefined) {
         subLinks = subCached;
       } else {
-        const subHtml = await fetchHtml(`${base}/search?keyword=${encodeURIComponent(subtitle)}`);
+        const subHtml = await fetchHtml(`${base}/search?keyword=${encodeURIComponent(fallbackQ)}`);
         subLinks = [];
         const subRegex = /href="(\/play\/[^"]+)"/g;
         let sm;
@@ -705,10 +716,12 @@ async function searchAnimeWorld(titles, opts) {
         }
         if (ti < origWords.length) return false;
         if (opts?.relaxSlugMatch) return true;
-        return sw.slice(si).every(w => /^\d+$/.test(w) || w === 'movie' || /^a+$/.test(w));
+        return sw.slice(si).every(w => /^\d+$/.test(w) || w === 'movie' || /^[a-z]{1,2}$/.test(w) || /^a+$/.test(w));
       });
 
       subPaths.forEach(p => allPaths.add(p));
+      if (allPaths.size >= 10) break;
+      } // end fallbackQueries loop
       if (allPaths.size >= 10) break;
     }
   }
@@ -767,7 +780,7 @@ async function searchAnimeSaturn(titles, opts) {
       if (ti < asTitleWordsBlocks.length) return false;
       // For SPECIAL/OVA/ONA: accept all trailing words (filterSpinoffPaths handles selection)
       if (opts?.relaxSlugMatch) return true;
-      return sw.slice(si).every(w => /^\d+$/.test(w) || w === 'movie' || /^a+$/.test(w));
+      return sw.slice(si).every(w => /^\d+$/.test(w) || w === 'movie' || /^[a-z]{1,2}$/.test(w) || /^a+$/.test(w));
     };
 
     // AnimeSaturn search results are inside <div class="item-archivio"> blocks
@@ -843,7 +856,7 @@ async function searchAnimeSaturn(titles, opts) {
         }
         if (tiAs < asTitleWords.length) asOk = false;
         if (!asOk) continue;
-        if (!opts?.relaxSlugMatch && !slugWordsAs.slice(siAs).every(w => /^\d+$/.test(w) || w === 'movie' || /^a+$/.test(w))) continue;
+        if (!opts?.relaxSlugMatch && !slugWordsAs.slice(siAs).every(w => /^\d+$/.test(w) || w === 'movie' || /^[a-z]{1,2}$/.test(w) || /^a+$/.test(w))) continue;
         const path = `/anime/${slug}`;
         if (!paths.includes(path)) paths.push(path);
       }
@@ -855,10 +868,16 @@ async function searchAnimeSaturn(titles, opts) {
   }
 
   // Subtitle-keyword fallback for AS: when main title search doesn't find the movie slug
-  // (AS returns trending list for unknown titles), try:
+  // (AS returns trending list for unknown titles), or when results lack ITA/SUB coverage,
+  // try broader searches:
   //   1. subtitle alone ("Stampede") matching against full title words
   //   2. "Franchise Movie" prefix ("One Piece Movie") — AS lists movies with "movie" in slug
-  if (allPaths.size === 0) {
+  //   3. First two words of title as franchise name (e.g. "One Piece Film Z" → "One Piece")
+  const asCurrentPaths = [...allPaths];
+  const asHasIta = asCurrentPaths.some(p => /[-_](ita|sub[-_]?ita|ita[-_]?sub)[-_a-z]*$/i.test(p));
+  const asHasSub = asCurrentPaths.some(p => !/[-_](ita|sub[-_]?ita|ita[-_]?sub)[-_a-z]*$/i.test(p));
+  const asMissingCoverage = allPaths.size > 0 && (!asHasIta || !asHasSub);
+  if (allPaths.size === 0 || asMissingCoverage) {
     const asSlugMatchesFull = (slug, origWords) => {
       const canon = w => { if (w === 'film') return 'movie'; if (/^\d+$/.test(w)) return String(parseInt(w, 10)); return w; };
       const slugNorm = slug.toLowerCase()
@@ -882,7 +901,7 @@ async function searchAnimeSaturn(titles, opts) {
       }
       if (ti < origWords.length) return false;
       if (opts?.relaxSlugMatch) return true;
-      return sw.slice(si).every(w => /^\d+$/.test(w) || w === 'movie' || /^a+$/.test(w));
+      return sw.slice(si).every(w => /^\d+$/.test(w) || w === 'movie' || /^[a-z]{1,2}$/.test(w) || /^a+$/.test(w));
     };
 
     for (const origTitle of titles.slice(0, 3)) {
@@ -902,6 +921,12 @@ async function searchAnimeSaturn(titles, opts) {
       // 2. franchise + "Movie" — helps for "One Piece: Stampede" → "One Piece Movie"
       const preColon = colonIdx >= 2 ? origTitle.substring(0, colonIdx).trim() : null;
       if (preColon && /[a-zA-Z]/.test(preColon)) fallbackQueries.add(`${preColon} Movie`);
+      // 3. No colon + 3+ words: try first two words as franchise name
+      // E.g. "One Piece Film Z" → search "One Piece", slug matching uses full origWords
+      if (colonIdx < 2 && origWords.length >= 3) {
+        const shortQuery = origWords.slice(0, 2).join(' ');
+        if (shortQuery.length >= 4) fallbackQueries.add(shortQuery);
+      }
 
       for (const q of fallbackQueries) {
         const subKey = `as:sub:${q.toLowerCase()}`;
@@ -1145,7 +1170,8 @@ async function searchAnimeUnity(titles, anilistId) {
         }
       }
 
-      // Also match by title similarity (always, even if anilist matched)
+      // Only use title similarity if anilistId matching found nothing
+      if (paths.length === 0) {
       const normalizedTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, "");
         if (normalizedTitle) {
           for (const r of records) {
@@ -1162,6 +1188,7 @@ async function searchAnimeUnity(titles, anilistId) {
             if (paths.length >= 5) break;
           }
         }
+      }
 
       cacheSet(key, paths);
       paths.forEach(p => allPaths.add(p));
@@ -1178,18 +1205,43 @@ async function searchAnimeUnity(titles, anilistId) {
 // ─── Main resolution ──────────────────────────────────────────────────────────
 
 // Season-specific Kitsu ID from Fribb offline list (different seasons = different Kitsu entries)
-async function findSeasonSpecificKitsuId(imdbId, tvdbId, requestedSeason) {
+async function findSeasonSpecificKitsuId(imdbId, tvdbId, requestedSeason, requestedEpisode) {
   if (!Number.isInteger(requestedSeason) || requestedSeason < 1) return null;
   await animeList.ensureLoaded();
+
+  // Collect ALL Fribb entries for this season (handles Part 1 / Part 2 splits)
+  let entries = [];
   if (imdbId) {
-    const entry = animeList.findByImdbSeason(imdbId, requestedSeason);
-    if (entry?.kitsu_id) return String(entry.kitsu_id);
+    const all = animeList.findAllByImdb(imdbId);
+    entries = all.filter(e => e.season?.tvdb === requestedSeason || e.season?.tmdb === requestedSeason);
   }
-  if (tvdbId) {
-    const entry = animeList.findByTvdbSeason(Number(tvdbId), requestedSeason);
-    if (entry?.kitsu_id) return String(entry.kitsu_id);
+  if (entries.length === 0 && tvdbId) {
+    const all = animeList.findAllByTvdb(tvdbId);
+    entries = all.filter(e => e.season?.tvdb === requestedSeason || e.season?.tmdb === requestedSeason);
   }
-  return null;
+  if (entries.length === 0) return null;
+
+  // If only one entry or no episode info, return the first match
+  if (entries.length === 1 || !requestedEpisode) {
+    return { kitsuId: String(entries[0].kitsu_id), episodeOffset: 0 };
+  }
+
+  // Multiple entries for same season (Part 1 / Part 2 split).
+  // Fetch episode counts from Kitsu to determine which part covers the requested episode.
+  let cumulativeOffset = 0;
+  for (const entry of entries) {
+    if (!entry.kitsu_id) continue;
+    const kitsuAnime = await fetchKitsuAnime(String(entry.kitsu_id));
+    const epCount = kitsuAnime?.episodeCount || 0;
+    if (epCount > 0 && requestedEpisode > cumulativeOffset + epCount) {
+      cumulativeOffset += epCount;
+      continue;
+    }
+    return { kitsuId: String(entry.kitsu_id), episodeOffset: cumulativeOffset };
+  }
+  // Fallback: return last entry
+  const last = entries[entries.length - 1];
+  return last?.kitsu_id ? { kitsuId: String(last.kitsu_id), episodeOffset: cumulativeOffset } : null;
 }
 
 // Extract the "clean slug" from a provider path, stripping:
@@ -1266,13 +1318,22 @@ async function resolveByKitsu(kitsuId, options = {}) {
   const requestedSeason = Number.isInteger(parseInt(String(options.season ?? ""), 10))
     ? parseInt(String(options.season), 10) : null;
   if (requestedSeason >= 1 && !options._seasonResolved) {
-    const seasonKitsu = await findSeasonSpecificKitsuId(
+    const requestedEpisode = Number.isInteger(parseInt(String(options.episode ?? ""), 10))
+      ? parseInt(String(options.episode), 10) : null;
+    const seasonResult = await findSeasonSpecificKitsuId(
       externalIds.imdb || null,
       externalIds.tvdb ? Number(externalIds.tvdb) : null,
-      requestedSeason
+      requestedSeason,
+      requestedEpisode
     );
-    if (seasonKitsu && seasonKitsu !== id) {
-      return resolveByKitsu(seasonKitsu, { ...options, _seasonResolved: true });
+    if (seasonResult && seasonResult.kitsuId && seasonResult.kitsuId !== id) {
+      const adjustedEpisode = requestedEpisode && seasonResult.episodeOffset > 0
+        ? requestedEpisode - seasonResult.episodeOffset : requestedEpisode;
+      return resolveByKitsu(seasonResult.kitsuId, {
+        ...options,
+        _seasonResolved: true,
+        ...(adjustedEpisode ? { episode: adjustedEpisode } : {}),
+      });
     }
   }
 

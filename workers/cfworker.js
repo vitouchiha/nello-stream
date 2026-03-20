@@ -725,6 +725,8 @@ async function _handleAuSearch(reqUrl, request) {
         if (!paths.includes(path)) paths.push(path);
       }
     }
+    // Only use title similarity if anilistId matching found nothing
+    if (paths.length === 0) {
     const normTitle = searchTitle.toLowerCase().replace(/[^a-z0-9]+/g, '');
     if (normTitle) {
       for (const r of allRecords) {
@@ -739,6 +741,7 @@ async function _handleAuSearch(reqUrl, request) {
         }
         if (paths.length >= 8) break;
       }
+    }
     }
     return _json({ paths, title: searchTitle, recordCount: allRecords.length });
   } catch (e) {
