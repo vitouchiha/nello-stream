@@ -470,10 +470,11 @@ async function getStreams(id, type, season, episode, config = {}) {
           if (resolved) return;
           settled.set(result.provider, result);
           if (result.status === 'fulfilled' && result.streams?.length > 0) {
-            // Deduplicate streams by URL+name (keeps ITA vs SUB-ITA with same video URL)
+            // Deduplicate streams by URL+name+language (keeps ITA vs SUB-ITA separately)
             for (const s of result.streams) {
               const url = String(s?.url || s?.externalUrl || '').trim();
-              const dedupKey = url + '|' + String(s?.name || '');
+              const langHint = (String(s?.title || '').match(/🇮🇹|🇯🇵|SUB|ITA|MULTI/) || [''])[0];
+              const dedupKey = url + '|' + String(s?.name || '') + '|' + langHint;
               if (url && !seenUrls.has(dedupKey)) {
                 seenUrls.add(dedupKey);
                 allStreams.push(s);

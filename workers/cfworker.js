@@ -683,40 +683,51 @@ async function _handleAuSearch(reqUrl, request) {
 
   // Step 2: POST search using CSRF + session cookies
   const searchTitle = title || 'Frieren';
+  const dubbed = reqUrl.searchParams.get('dubbed') === '1';
   try {
-    const searchResp = await fetch(`${AU_BASE}/archivio/get-animes`, {
-      method: 'POST',
-      headers: {
-        'User-Agent': UA,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'X-Requested-With': 'XMLHttpRequest',
-        'X-CSRF-TOKEN': csrf,
-        'Cookie': sessionCookies,
-        'Referer': AU_BASE + '/archivio',
-      },
-      body: JSON.stringify({ title: searchTitle }),
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!searchResp.ok) {
-      const errText = await searchResp.text().catch(() => '');
-      return _json({ error: 'AU search failed', status: searchResp.status, body: errText.substring(0, 200) }, 502);
+    // Search both SUB and ITA (dubbed) to get all variants
+    const searchVariants = [{ title: searchTitle }];
+    if (!dubbed) searchVariants.push({ title: searchTitle, dubbed: 1 });
+    else searchVariants[0].dubbed = 1;
+
+    const allRecords = [];
+    for (const bodyPayload of searchVariants) {
+      try {
+        const searchResp = await fetch(`${AU_BASE}/archivio/get-animes`, {
+          method: 'POST',
+          headers: {
+            'User-Agent': UA,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-CSRF-TOKEN': csrf,
+            'Cookie': sessionCookies,
+            'Referer': AU_BASE + '/archivio',
+          },
+          body: JSON.stringify(bodyPayload),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (searchResp.ok) {
+          const data = await searchResp.json();
+          const recs = data.records || data.data || data || [];
+          if (Array.isArray(recs)) allRecords.push(...recs);
+        }
+      } catch { /* single variant failed, try next */ }
     }
-    const data = await searchResp.json();
-    const records = data.records || data.data || data || [];
-    if (!Array.isArray(records)) return _json({ records: [], title: searchTitle });
+    if (allRecords.length === 0) return _json({ paths: [], title: searchTitle, recordCount: 0 });
 
     // Step 3: Build paths (matching by anilist_id if available, else title)
     const paths = [];
     if (anilistId) {
-      const match = records.find(r => r.anilist_id === Number(anilistId));
-      if (match && match.id && match.slug) {
-        paths.push(`/anime/${match.id}-${match.slug}`);
+      const matches = allRecords.filter(r => r.anilist_id === Number(anilistId) && r.id && r.slug);
+      for (const match of matches) {
+        const path = `/anime/${match.id}-${match.slug}`;
+        if (!paths.includes(path)) paths.push(path);
       }
     }
     const normTitle = searchTitle.toLowerCase().replace(/[^a-z0-9]+/g, '');
     if (normTitle) {
-      for (const r of records) {
+      for (const r of allRecords) {
         if (!r.id || !r.slug) continue;
         for (const c of [r.title, r.title_eng, r.title_it].filter(Boolean)) {
           const norm = c.toLowerCase().replace(/[^a-z0-9]+/g, '');
@@ -726,10 +737,10 @@ async function _handleAuSearch(reqUrl, request) {
             break;
           }
         }
-        if (paths.length >= 5) break;
+        if (paths.length >= 8) break;
       }
     }
-    return _json({ paths, title: searchTitle, recordCount: records.length });
+    return _json({ paths, title: searchTitle, recordCount: allRecords.length });
   } catch (e) {
     return _json({ error: 'AU POST failed: ' + e.message }, 502);
   }
