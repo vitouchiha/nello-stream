@@ -349,11 +349,11 @@ async function extractSeriesStreams(pageUrl, season, episode, providerContext = 
     // Helper: extract the line/block for an episode and try ALL links in it
     const tryAllLinksInBlock = async (block) => {
       const linkRe = /href=["']([^"']+)["']/gi;
-      for (const lm of block.matchAll(linkRe)) {
-        const s = await extractEpisodeStreams(lm[1], providerContext);
-        if (s.length) return s;
-      }
-      return [];
+      const allLinks = [...block.matchAll(linkRe)].map(lm => lm[1]);
+      const results = await Promise.all(
+        allLinks.map(link => extractEpisodeStreams(link, providerContext).catch(() => []))
+      );
+      return results.flat();
     };
 
     // Helper: resolve an uprot /msfld/ folder link → individual episode URL
