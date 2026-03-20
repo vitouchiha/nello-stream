@@ -51,6 +51,23 @@ async function fetchJson(url, timeoutMs = 8000) {
   finally { if (typeof tc.cleanup === "function") tc.cleanup(); }
 }
 
+// Fetch the Italian title from TMDB (anime sites AW/AS use Italian slugs)
+async function fetchTmdbItalianTitle(tmdbId, subtype) {
+  if (!tmdbId) return null;
+  const type = subtype === 'MOVIE' ? 'movie' : 'tv';
+  const key = `tmdb:it_title:${type}:${tmdbId}`;
+  const cached = cacheGet(key);
+  if (cached !== undefined) return cached;
+  try {
+    const data = await fetchJson(
+      `https://api.themoviedb.org/3/${type}/${tmdbId}?api_key=${TMDB_API_KEY}&language=it-IT`,
+      5000
+    );
+    const title = data?.name || data?.title || null;
+    return cacheSet(key, title);
+  } catch { return cacheSet(key, null); }
+}
+
 async function fetchHtml(url, timeoutMs = 8000) {
   const tc = createTimeoutSignal(timeoutMs);
   try {
@@ -562,7 +579,7 @@ async function searchAnimeWorld(titles, opts) {
   if (!base) return [];
 
   const allPaths = new Set();
-  for (const title of titles.slice(0, 3)) {
+  for (const title of titles.slice(0, 5)) {
     if (!title) continue;
     const key = `aw:search:${title.toLowerCase()}`;
     const cached = cacheGet(key);
@@ -704,7 +721,7 @@ async function searchAnimeSaturn(titles, opts) {
   if (!base) return [];
 
   const allPaths = new Set();
-  for (const title of titles.slice(0, 3)) {
+  for (const title of titles.slice(0, 5)) {
     if (!title) continue;
     const key = `as:search:${title.toLowerCase()}`;
     const cached = cacheGet(key);
@@ -1013,7 +1030,7 @@ async function searchAnimeUnity(titles, anilistId) {
 
   const session = await getAnimeUnitySession(base);
 
-  // Search using each title via POST /archivio/get-animes
+  // Search using each title via POST /archivio/get-animes (both SUB and dubbed ITA)
   const allPaths = new Set();
   for (const title of titles.slice(0, 3)) {
     if (!title) continue;
@@ -1022,6 +1039,11 @@ async function searchAnimeUnity(titles, anilistId) {
     if (cachedPaths !== undefined) { cachedPaths.forEach(p => allPaths.add(p)); continue; }
 
     try {
+      // Search both SUB and ITA (dubbed) in parallel
+      const allRecords = [];
+      const searchVariants = [{ title }, { title, dubbed: 1 }];
+
+      for (const bodyPayload of searchVariants) {
       let records = null;
 
       // Try direct fetch POST first (works locally / non-CF-blocked environments)
@@ -1039,7 +1061,7 @@ async function searchAnimeUnity(titles, anilistId) {
               "Cookie": session.cookies,
               "Accept": "application/json",
             },
-            body: JSON.stringify({ title }),
+            body: JSON.stringify(bodyPayload),
           });
           if (typeof tc.cleanup === "function") tc.cleanup();
           if (res.ok) {
@@ -1055,7 +1077,7 @@ async function searchAnimeUnity(titles, anilistId) {
             const csResp = await cloudscraper.post({
               uri: `${base}/archivio/get-animes`,
               jar: session.jar,
-              json: { title },
+              json: bodyPayload,
               headers: {
                 "User-Agent": UA,
                 "X-Requested-With": "XMLHttpRequest",
@@ -1086,6 +1108,7 @@ async function searchAnimeUnity(titles, anilistId) {
               auth: w.auth,
             });
             if (anilistId) params.set("anilist_id", String(anilistId));
+            if (bodyPayload.dubbed) params.set("dubbed", "1");
             const tc2 = createTimeoutSignal(15000);
             const workerResp = await fetch(`${w.url}?${params}`, {
               signal: tc2.signal,
@@ -1095,10 +1118,8 @@ async function searchAnimeUnity(titles, anilistId) {
             if (workerResp.ok) {
               const workerData = await workerResp.json();
               if (Array.isArray(workerData.paths) && workerData.paths.length > 0) {
-                console.log("[Mapping] AnimeUnity: CF Worker found", workerData.paths.length, "paths for", title);
-                cacheSet(key, workerData.paths);
+                console.log("[Mapping] AnimeUnity: CF Worker found", workerData.paths.length, "paths for", title, bodyPayload.dubbed ? "(ITA)" : "(SUB)");
                 workerData.paths.forEach(p => allPaths.add(p));
-                continue;
               }
             }
           }
@@ -1107,15 +1128,20 @@ async function searchAnimeUnity(titles, anilistId) {
         }
       }
 
-      if (!records || records.length === 0) { cacheSet(key, []); continue; }
+      if (records && records.length > 0) allRecords.push(...records);
+      } // end for searchVariants
+
+      if (allRecords.length === 0) { cacheSet(key, []); continue; }
+      const records = allRecords;
 
       const paths = [];
 
       // If we have an AniList ID, match by ID first (most accurate)
       if (anilistId) {
-        const match = records.find(r => r.anilist_id === Number(anilistId));
-        if (match && match.id && match.slug) {
-          paths.push(`/anime/${match.id}-${match.slug}`);
+        const matches = records.filter(r => r.anilist_id === Number(anilistId) && r.id && r.slug);
+        for (const match of matches) {
+          const path = `/anime/${match.id}-${match.slug}`;
+          if (!paths.includes(path)) paths.push(path);
         }
       }
 
@@ -1319,6 +1345,15 @@ async function resolveByKitsu(kitsuId, options = {}) {
 
   // Provider path search (parallel)
   const searchTitles = buildSearchTitles(kitsuAnime);
+
+  // Add Italian title from TMDB — AW/AS use Italian slugs (e.g. "l-attacco-dei-giganti")
+  if (tmdbId) {
+    const itTitle = await fetchTmdbItalianTitle(tmdbId, kitsuAnime.subtype);
+    if (itTitle && !searchTitles.includes(itTitle)) {
+      searchTitles.splice(1, 0, itTitle); // Insert after EN title, before others
+    }
+  }
+
   const isSpecialType = /^(SPECIAL|OVA|ONA)$/i.test(kitsuAnime.subtype || "");
   const searchOpts = isSpecialType ? { relaxSlugMatch: true } : undefined;
   let [animeWorldPaths, animeSaturnPaths, animeUnityPaths] = await Promise.all([
@@ -1618,6 +1653,10 @@ async function buildMinimalTmdbResponse(tmdbId, options = {}, imdbOverride = nul
   const searchTitles = [];
   if (tvData?.name) searchTitles.push(tvData.name);
   if (tvData?.original_name && tvData.original_name !== tvData.name) searchTitles.push(tvData.original_name);
+
+  // Add Italian title for AW/AS slug matching
+  const itTitle = await fetchTmdbItalianTitle(tmdbId, 'TV');
+  if (itTitle && !searchTitles.includes(itTitle)) searchTitles.splice(1, 0, itTitle);
 
   let animeWorldPaths = [], animeSaturnPaths = [], animeUnityPaths = [];
   if (searchTitles.length > 0) {
