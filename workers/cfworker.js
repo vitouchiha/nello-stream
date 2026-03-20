@@ -1714,20 +1714,20 @@ const _COMMUNITY_SOURCES = [
 
 // ── Known alternate domains per provider (fallback probing) ──────────────────
 const _KNOWN_DOMAINS = {
-  streamingcommunity: ['streamingcommunity.computer', 'vixsrc.to', 'streamingcommunity.bond'],
+  streamingcommunity: ['streamingcommunity.computer', 'vixsrc.to', 'streamingcommunity.bond', 'streamingcommunity.university'],
   cb01:              ['cb01uno.digital', 'cb01uno.life', 'cb01.uno', 'cb01uno.uno', 'cb01uno.click', 'cb01.stream'],
-  guardaserie:       ['guardaserietv.bar', 'guardaserietv.skin', 'guardaserietv.autos', 'guardaserietv.asia', 'guardaserie.cfd'],
-  guardoserie:       ['guardoserie.best', 'guardoserie.digital', 'guardoserie.surf', 'guardoserie.bar', 'guardoserie.blog'],
-  eurostreaming:     ['eurostream.ing', 'eurostreamings.life', 'eurostreamings.buzz', 'www.eurostreaming.net'],
+  guardaserie:       ['guardaserietv.bar', 'guardaserietv.skin', 'guardaserietv.autos', 'guardaserietv.asia', 'guardaserie.cfd', 'guardaserietv.beer', 'guardaserietv.run', 'guardaserietv.cam'],
+  guardoserie:       ['guardoserie.best', 'guardoserie.digital', 'guardoserie.surf', 'guardoserie.bar', 'guardoserie.blog', 'guardoserie.beer', 'guardoserie.it'],
+  eurostreaming:     ['eurostream.ing', 'eurostreamings.life', 'eurostreamings.buzz', 'www.eurostreaming.net', 'eurostreamings.space', 'eurostreamings.bar', 'eurostreamings.beer', 'eurostreamings.run', 'eurostreamings.autos', 'eurostreamings.site', 'eurostreamings.fun', 'eurostreamings.lol', 'eurostreamings.com', 'eurostreamings.org', 'eurostreamings.it', 'eurostreamings.vip', 'eurostreamings.lat', 'eurostreamings.sbs', 'eurostreamings.art', 'eurostreamings.casa', 'eurostreaming.website', 'eurostreaming.top', 'eurostreaming.computer', 'eurostreaming.me', 'eurostreaming.mov'],
   toonitalia:        ['toonitalia.xyz', 'toonitalia.co'],
-  animeunity:        ['www.animeunity.so', 'www.animeunity.to', 'www.animeunity.click', 'animeunity.site', 'animeunity.top', 'animeunity.ch', 'animeunity.click', 'www.animeunity.club', 'www.animeunity.sbs'],
+  animeunity:        ['www.animeunity.so', 'www.animeunity.to', 'www.animeunity.click', 'animeunity.site', 'animeunity.top', 'animeunity.ch', 'animeunity.click', 'www.animeunity.club', 'www.animeunity.sbs', 'animeunity.dev', 'www.animeunity.top'],
   animeworld:        ['www.animeworld.ac', 'www.animeworld.so', 'www.animeworld.tv'],
   animesaturn:       ['www.animesaturn.cx', 'www.animesaturn.dev', 'www.animesaturn.click', 'animesaturn.site', 'www.animesaturn.lol', 'www.animesaturn.me', 'www.animesaturn.app', 'www.animesaturn.sbs'],
   guardahd:          ['mostraguarda.stream', 'guardahd.stream'],
-  guardaflix:        ['guardaplay.space', 'guardaplay.blog', 'guardaplay.beer', 'guardaplay.com'],
+  guardaflix:        ['guardaplay.space', 'guardaplay.blog', 'guardaplay.beer', 'guardaplay.com', 'guardaplay.pro'],
   loonex:            ['loonex.eu'],
-  kisskh:            ['kisskh.do', 'kisskh.co'],
-  rama:              ['ramaorientalfansub.live'],
+  kisskh:            ['kisskh.do', 'kisskh.co', 'kisskh.click', 'kisskh.life', 'kisskh.space', 'kisskh.autos', 'kisskh.asia', 'kisskh.date', 'kisskh.cx', 'kisskh.website', 'kisskh.top', 'kisskh.bond', 'kisskh.lol', 'kisskh.org', 'kisskh.it', 'kisskh.us', 'kisskh.today', 'kisskh.media', 'kisskh.watch', 'kisskh.zone'],
+  rama:              ['ramaorientalfansub.live', 'ramaorientalfansub.tv'],
 };
 
 // ── HTML markers to fingerprint each provider (avoids parking pages) ─────────
