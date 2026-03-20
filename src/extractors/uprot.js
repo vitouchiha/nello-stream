@@ -195,7 +195,7 @@ async function _ocrCaptcha(b64) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-worker-auth': ocrWorker.auth },
           body: JSON.stringify({ image: png.toString('base64'), expectedDigits: 1 }),
-          signal: AbortSignal.timeout(45000),
+          signal: AbortSignal.timeout(15000),
         });
         const data = await resp.json();
         const ans = data?.answer || '?';
@@ -230,7 +230,7 @@ async function _ocrCaptcha(b64) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-worker-auth': fw.auth },
       body: JSON.stringify({ image: cleanPng.toString('base64') }),
-      signal: AbortSignal.timeout(45000),
+      signal: AbortSignal.timeout(15000),
     });
     console.log('[Uprot] Fallback response status:', resp.status);
     const data = await resp.json();
@@ -259,7 +259,7 @@ async function _solveCaptcha(solveUrl) {
         method: 'POST',
         headers: _headers(targetUrl),
         redirect: 'manual',
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(10000),
       });
 
       const setCookie1 = r1.headers.get('set-cookie') || '';
@@ -285,7 +285,7 @@ async function _solveCaptcha(solveUrl) {
         headers: { ..._headers(targetUrl), 'Cookie': `PHPSESSID=${sessid}` },
         body: `captcha=${ocr.answer}`,
         redirect: 'manual',
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(10000),
       });
 
       const html2 = await r2.text();
@@ -450,14 +450,14 @@ async function _bypassUprot(uprotUrl, retried) {
  * so each URL requires solving its own captcha.
  */
 async function _extractMseiUprot(url) {
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
       // 1. GET page → captcha image + token
       const r1 = await _proxyFetch(url, {
         method: 'GET',
         headers: _headers(url),
         redirect: 'manual',
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(10000),
       });
       const html1 = await r1.text();
 
@@ -480,7 +480,7 @@ async function _extractMseiUprot(url) {
         headers: { ..._headers(url), 'Content-Type': 'application/x-www-form-urlencoded' },
         body: `token=${encodeURIComponent(token)}&capt=${encodeURIComponent(ocr.answer)}`,
         redirect: 'manual',
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(10000),
       });
       const html2 = await r2.text();
 
@@ -575,7 +575,7 @@ async function _resolveViaCfWorker(uprotUrl) {
     });
     console.log('[Uprot] Delegating to CF Worker:', uprotUrl);
     const resp = await fetch(`${w.url}/?${params}`, {
-      signal: AbortSignal.timeout(18000),
+      signal: AbortSignal.timeout(8000),
       headers: { 'User-Agent': UA },
     });
     if (!resp.ok) {

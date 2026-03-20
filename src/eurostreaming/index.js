@@ -444,7 +444,8 @@ async function findEpisodeStreams(description, season, episode, providerContext 
     'sesta': 6, 'settima': 7, 'ottava': 8, 'nona': 9, 'decima': 10,
   };
 
-  const allStreams = [];
+  // Collect section jobs, then run all language sections in parallel
+  const sectionJobs = [];
 
   for (const sec of sections) {
     const sectionTitle = (sec[1] || '').trim().toUpperCase();
@@ -481,9 +482,15 @@ async function findEpisodeStreams(description, season, episode, providerContext 
       const atag = parts.length > 1 ? parts.slice(1).join(' – ') : matchText;
       if (!atag.includes('href')) continue;
 
-      const streams = await scrapingLinks(atag, language, 'Eurostreaming', providerContext);
-      allStreams.push(...streams);
+      sectionJobs.push(scrapingLinks(atag, language, 'Eurostreaming', providerContext));
     }
+  }
+
+  // Run all language sections in parallel (ITA + SUB-ITA simultaneously)
+  const sectionResults = await Promise.allSettled(sectionJobs);
+  const allStreams = [];
+  for (const r of sectionResults) {
+    if (r.status === 'fulfilled' && r.value?.length) allStreams.push(...r.value);
   }
 
   // Fallback: if no spoiler sections found, use the old flat regex approach

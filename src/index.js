@@ -311,7 +311,7 @@ async function getStreams(id, type, season, episode, config = {}) {
     if (id === 'tt0157246') console.log(`[DEBUG tt0157246] type=${normalizedType}, isImdbRequest=${isImdbRequest}, isKitsuRequest=${isKitsuRequest}, likelyAnime=${likelyAnime}`);
     if (normalizedType === 'movie') {
         if (likelyAnime || isKitsuRequest) {
-            selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'guardoserie', 'streamingcommunity', 'guardahd');
+            selectedProviders.push('animeunity', 'animeworld', 'animesaturn', 'toonitalia', 'loonex', 'guardoserie', 'streamingcommunity', 'guardahd', 'guardaflix', 'cb01');
         } else {
             selectedProviders.push('streamingcommunity', 'guardahd', 'guardaflix', 'guardoserie', 'toonitalia', 'loonex', 'cb01');
             if (isImdbRequest) {
@@ -394,7 +394,7 @@ async function getStreams(id, type, season, episode, config = {}) {
               continue;
           }
           if (providerName === 'guardaserie') {
-              promises.push(withProviderTimeout('Guardaserie', withMfp('guardaserie', guardaserie.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, ctxFor('guardaserie'))), 15000));
+              promises.push(withProviderTimeout('Guardaserie', withMfp('guardaserie', guardaserie.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, ctxFor('guardaserie'))), 20000));
               continue;
           }
           if (providerName === 'animeunity') {
@@ -422,7 +422,7 @@ async function getStreams(id, type, season, episode, config = {}) {
                 continue;
             }
             if (providerName === 'guardaflix') {
-                promises.push(withProviderTimeout('Guardaflix', withMfp('guardaflix', guardaflix.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, ctxFor('guardaflix'))), 12000));
+                promises.push(withProviderTimeout('Guardaflix', withMfp('guardaflix', guardaflix.getStreams(id, normalizedType, effectiveSeason, normalizedEpisode, ctxFor('guardaflix'))), 20000));
                 continue;
             }
             if (providerName === 'loonex') {
