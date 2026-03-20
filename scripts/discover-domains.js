@@ -51,6 +51,8 @@ const PROVIDERS = {
   animesaturn:          { bases: ['www.animesaturn'],                   markers: ['animesaturn', 'episod'],                 minMarkers: 2 },
   loonex:               { bases: ['loonex'],                            markers: ['loonex', 'stream'],                      minMarkers: 2 },
   streamingcommunity:   { bases: ['streamingcommunity', 'vixsrc'],      markers: ['sliders-title', '/titles/'],             minMarkers: 2 },
+  kisskh:               { bases: ['kisskh'],                            markers: ['kisskh', 'dramalist', 'episode'],        minMarkers: 2 },
+  rama:                 { bases: ['ramaorientalfansub'],                markers: ['ramaorientalfansub', 'fansub', 'drama'], minMarkers: 2 },
 };
 
 // Hostnames that are domain marketplaces / parking services — always reject

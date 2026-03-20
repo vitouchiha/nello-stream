@@ -1726,6 +1726,8 @@ const _KNOWN_DOMAINS = {
   guardahd:          ['mostraguarda.stream', 'guardahd.stream'],
   guardaflix:        ['guardaplay.space', 'guardaplay.blog', 'guardaplay.beer', 'guardaplay.com'],
   loonex:            ['loonex.eu'],
+  kisskh:            ['kisskh.do', 'kisskh.co'],
+  rama:              ['ramaorientalfansub.live'],
 };
 
 // ── HTML markers to fingerprint each provider (avoids parking pages) ─────────
@@ -1742,6 +1744,8 @@ const _SITE_MARKERS = {
   guardahd:          ['guardahd', 'mostraguarda', 'film'],
   guardaflix:        ['guardaflix', 'guardaplay', 'film'],
   loonex:            ['loonex', 'stream'],
+  kisskh:            ['kisskh', 'dramalist', 'episode'],
+  rama:              ['ramaorientalfansub', 'fansub', 'drama'],
 };
 
 /** Validate a domain: HEAD→follow redirects, check HTML markers */
