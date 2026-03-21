@@ -1728,20 +1728,20 @@ const _COMMUNITY_SOURCES = [
 
 // ── Known alternate domains per provider (fallback probing) ──────────────────
 const _KNOWN_DOMAINS = {
-  streamingcommunity: ['streamingcommunity.computer', 'vixsrc.to', 'streamingcommunity.bond', 'streamingcommunity.university'],
+  streamingcommunity:['vixsrc.to'],
   cb01:              ['cb01.uno'],
-  guardaserie:       ['guardaserietv.bar', 'guardaserietv.skin', 'guardaserietv.autos', 'guardaserietv.asia', 'guardaserie.cfd', 'guardaserietv.beer', 'guardaserietv.run', 'guardaserietv.cam'],
+  guardaserie:       ['guardaserietv.bar'],
   guardoserie:       ['guardoserie.best', 'guardoserie.digital', 'guardoserie.surf', 'guardoserie.bar', 'guardoserie.blog', 'guardoserie.beer', 'guardoserie.it'],
   eurostreaming:     ['eurostream.ing'],
   toonitalia:        ['toonitalia.xyz'],
   animeunity:        ['www.animeunity.so'],
-  animeworld:        ['www.animeworld.ac''],
+  animeworld:        ['www.animeworld.ac'],
   animesaturn:       ['www.animesaturn.cx'],
   guardahd:          ['mostraguarda.stream'],
-  guardaflix:        ['guardaplay.space', 'guardaplay.blog', 'guardaplay.beer', 'guardaplay.com', 'guardaplay.pro'],
+  guardaflix:        ['guardaplay.beer'],
   loonex:            ['loonex.eu'],
-  kisskh:            ['kisskh.do', 'kisskh.co', 'kisskh.click', 'kisskh.life', 'kisskh.space', 'kisskh.autos', 'kisskh.asia', 'kisskh.date', 'kisskh.cx', 'kisskh.website', 'kisskh.top', 'kisskh.bond', 'kisskh.lol', 'kisskh.org', 'kisskh.it', 'kisskh.us', 'kisskh.today', 'kisskh.media', 'kisskh.watch', 'kisskh.zone', 'kisskh.cfd', 'kisskh.fr', 'kisskh.es', 'kisskh.win', 'kisskh.vip', 'kisskh.club', 'kisskh.buzz', 'kisskh.pro'],
-  rama:              ['ramaorientalfansub.live', 'ramaorientalfansub.tv'],
+  kisskh:            ['kisskh.do'],
+  rama:              ['ramaorientalfansub.live'],
 };
 
 // ── HTML markers to fingerprint each provider (avoids parking pages) ─────────
