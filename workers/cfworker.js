@@ -1729,12 +1729,12 @@ const _COMMUNITY_SOURCES = [
 // ── Known alternate domains per provider (fallback probing) ──────────────────
 const _KNOWN_DOMAINS = {
   streamingcommunity:['vixsrc.to'],
-  cb01:              ['cb01.uno'],
+  cb01:              ['cb01uno.click'],
   guardaserie:       ['guardaserietv.bar'],
   guardoserie:       ['guardoserie.best', 'guardoserie.digital', 'guardoserie.surf', 'guardoserie.bar', 'guardoserie.blog', 'guardoserie.beer', 'guardoserie.it'],
   eurostreaming:     ['eurostream.ing'],
   toonitalia:        ['toonitalia.xyz'],
-  animeunity:        ['www.animeunity.so'],
+  animeunity:        ['animeunity.so'],
   animeworld:        ['www.animeworld.ac'],
   animesaturn:       ['www.animesaturn.cx'],
   guardahd:          ['mostraguarda.stream'],
