@@ -1740,7 +1740,7 @@ const _KNOWN_DOMAINS = {
   guardahd:          ['mostraguarda.stream', 'guardahd.stream'],
   guardaflix:        ['guardaplay.space', 'guardaplay.blog', 'guardaplay.beer', 'guardaplay.com', 'guardaplay.pro'],
   loonex:            ['loonex.eu'],
-  kisskh:            ['kisskh.do', 'kisskh.co', 'kisskh.click', 'kisskh.life', 'kisskh.space', 'kisskh.autos', 'kisskh.asia', 'kisskh.date', 'kisskh.cx', 'kisskh.website', 'kisskh.top', 'kisskh.bond', 'kisskh.lol', 'kisskh.org', 'kisskh.it', 'kisskh.us', 'kisskh.today', 'kisskh.media', 'kisskh.watch', 'kisskh.zone', 'kisskh.cfd', 'kisskh.fr', 'kisskh.es', 'kisskh.win', 'kisskh.vip', 'kisskh.club', 'kisskh.buzz'],
+  kisskh:            ['kisskh.do', 'kisskh.co', 'kisskh.click', 'kisskh.life', 'kisskh.space', 'kisskh.autos', 'kisskh.asia', 'kisskh.date', 'kisskh.cx', 'kisskh.website', 'kisskh.top', 'kisskh.bond', 'kisskh.lol', 'kisskh.org', 'kisskh.it', 'kisskh.us', 'kisskh.today', 'kisskh.media', 'kisskh.watch', 'kisskh.zone', 'kisskh.cfd', 'kisskh.fr', 'kisskh.es', 'kisskh.win', 'kisskh.vip', 'kisskh.club', 'kisskh.buzz', 'kisskh.pro'],
   rama:              ['ramaorientalfansub.live', 'ramaorientalfansub.tv'],
 };
 
